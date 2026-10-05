@@ -113,5 +113,19 @@ class TestHTTPAPI(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(data["success"])
 
+    def test_api_gemini_config(self):
+        status, data = self._post("/api/providers/gemini/config", {"api_key": "AIzaSyFakeTestKey456"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["success"])
+        stored = self.vault.get_credential("gemini", "default")
+        self.assertEqual(stored, "AIzaSyFakeTestKey456")
+
+    def test_api_chatgpt_config(self):
+        status, data = self._post("/api/providers/chatgpt/config", {"api_key": "sk-proj-FakeOpenAIKey789"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["success"])
+        stored = self.vault.get_credential("chatgpt", "default")
+        self.assertEqual(stored, "sk-proj-FakeOpenAIKey789")
+
 if __name__ == "__main__":
     unittest.main()

@@ -151,14 +151,45 @@ window.App = {
     if (claudePlanBadge && providers["claude"]) {
       claudePlanBadge.innerText = providers["claude"].plan_type || "Team Pro";
     }
+    const hubClaudeStatus = document.getElementById("hub-claude-status");
+    if (hubClaudeStatus && providers["claude"]) {
+      hubClaudeStatus.innerText = providers["claude"].status || "Active";
+    }
 
-    // Ollama dot
+    // Gemini dot & Hub status
+    const geminiDot = document.getElementById("dot-gemini");
+    const geminiStatusText = document.getElementById("gemini-status-text");
+    const hubGeminiStatus = document.getElementById("hub-gemini-status");
+    if (providers["gemini"]) {
+      const gActive = providers["gemini"].status === "ACTIVE";
+      if (geminiDot) geminiDot.className = `dot ${gActive ? 'dot-green' : 'dot-gray'}`;
+      if (geminiStatusText) geminiStatusText.innerText = gActive ? "Active" : "Ready";
+      if (hubGeminiStatus) {
+        hubGeminiStatus.innerText = providers["gemini"].status || "Ready";
+        hubGeminiStatus.style.color = gActive ? "#34d399" : "#60a5fa";
+      }
+    }
+
+    // ChatGPT Hub status
+    const hubChatgptStatus = document.getElementById("hub-chatgpt-status");
+    if (hubChatgptStatus && providers["chatgpt"]) {
+      const cActive = providers["chatgpt"].status === "ACTIVE";
+      hubChatgptStatus.innerText = providers["chatgpt"].status || "Ready";
+      hubChatgptStatus.style.color = cActive ? "#34d399" : "#60a5fa";
+    }
+
+    // Ollama dot & Hub status
     const ollamaDot = document.getElementById("dot-ollama");
     const ollamaStatusText = document.getElementById("ollama-status-text");
-    if (ollamaDot && providers["ollama"]) {
+    const hubOllamaBadge = document.getElementById("hub-ollama-badge");
+    if (providers["ollama"]) {
       const isOnline = providers["ollama"].status === "ACTIVE";
-      ollamaDot.className = `dot ${isOnline ? 'dot-green' : 'dot-gray'}`;
+      if (ollamaDot) ollamaDot.className = `dot ${isOnline ? 'dot-green' : 'dot-gray'}`;
       if (ollamaStatusText) ollamaStatusText.innerText = isOnline ? "Active" : "Offline";
+      if (hubOllamaBadge) {
+        hubOllamaBadge.innerText = isOnline ? "Active" : "Offline";
+        hubOllamaBadge.style.color = isOnline ? "#34d399" : "var(--text-dim)";
+      }
     }
 
     // Data Mode pill
@@ -392,6 +423,39 @@ window.App = {
     }
   },
 
+  // Clipboard paste helper
+  async pasteFromClipboard(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          input.value = text.trim();
+          input.focus();
+        }
+      } else {
+        alert("Clipboard access not available. Please press Ctrl+V directly to paste your key.");
+      }
+    } catch (e) {
+      alert("Could not access clipboard directly. Please press Ctrl+V to paste your key.");
+    }
+  },
+
+  // Open external URL helper
+  openExternalUrl(url) {
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+    try {
+      fetch("/api/system/open-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url })
+      }).catch(() => {});
+    } catch (e) {}
+  },
+
+  // Gemini Configuration
   openConfigureGeminiModal() {
     const modal = document.getElementById("gemini-config-modal");
     if (modal) modal.classList.add("active");
@@ -404,19 +468,66 @@ window.App = {
   async saveGeminiConfig() {
     const keyInput = document.getElementById("gemini-api-key-input");
     const apiKey = keyInput ? keyInput.value.trim() : "";
-    if (!apiKey) return;
+    if (!apiKey) {
+      alert("Please enter a Google Gemini API key (or click 'Get Gemini API Key' to procure one in Google AI Studio).");
+      return;
+    }
 
     try {
-      const res = await fetch("/api/providers/claude/config", {
+      const res = await fetch("/api/providers/gemini/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: apiKey })
       });
-      alert("Gemini key encrypted with DPAPI!");
-      this.closeConfigureGeminiModal();
-      await this.loadUsageData();
+      if (res.ok) {
+        alert("✓ Google Gemini API key securely encrypted with Windows DPAPI!");
+        this.closeConfigureGeminiModal();
+        if (keyInput) keyInput.value = "";
+        await this.loadUsageData();
+      } else {
+        const err = await res.json();
+        alert(`Failed to save Gemini key: ${err.error || res.statusText}`);
+      }
     } catch (e) {
       alert(`Error saving Gemini configuration: ${e}`);
+    }
+  },
+
+  // ChatGPT / OpenAI Configuration
+  openConfigureChatGPTModal() {
+    const modal = document.getElementById("chatgpt-config-modal");
+    if (modal) modal.classList.add("active");
+  },
+  closeConfigureChatGPTModal() {
+    const modal = document.getElementById("chatgpt-config-modal");
+    if (modal) modal.classList.remove("active");
+  },
+
+  async saveChatGPTConfig() {
+    const keyInput = document.getElementById("chatgpt-api-key-input");
+    const apiKey = keyInput ? keyInput.value.trim() : "";
+    if (!apiKey) {
+      alert("Please enter an OpenAI API key (or click 'Get OpenAI Key' to procure one on OpenAI Platform).");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/providers/chatgpt/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey })
+      });
+      if (res.ok) {
+        alert("✓ OpenAI / ChatGPT API key securely encrypted with Windows DPAPI!");
+        this.closeConfigureChatGPTModal();
+        if (keyInput) keyInput.value = "";
+        await this.loadUsageData();
+      } else {
+        const err = await res.json();
+        alert(`Failed to save OpenAI key: ${err.error || res.statusText}`);
+      }
+    } catch (e) {
+      alert(`Error saving ChatGPT configuration: ${e}`);
     }
   },
 

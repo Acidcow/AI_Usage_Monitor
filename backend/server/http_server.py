@@ -180,6 +180,32 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
             return self._send_json(200, {"success": True, "message": "Claude configuration saved"})
 
+        if path == "/api/providers/gemini/config":
+            api_key = body.get("api_key")
+            gemini_prov = srv.providers.get("gemini")
+            if api_key and gemini_prov:
+                gemini_prov.configure_api_key(api_key)
+            elif api_key:
+                srv.vault.set_credential("gemini", "default", api_key)
+            return self._send_json(200, {"success": True, "message": "Google Gemini configuration saved"})
+
+        if path == "/api/providers/chatgpt/config":
+            api_key = body.get("api_key")
+            chatgpt_prov = srv.providers.get("chatgpt")
+            if api_key and chatgpt_prov:
+                chatgpt_prov.configure_api_key(api_key)
+            elif api_key:
+                srv.vault.set_credential("chatgpt", "default", api_key)
+            return self._send_json(200, {"success": True, "message": "ChatGPT / OpenAI configuration saved"})
+
+        if path == "/api/system/open-url":
+            import webbrowser
+            target_url = body.get("url", "")
+            if target_url.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+                webbrowser.open(target_url)
+                return self._send_json(200, {"success": True, "url": target_url})
+            return self._send_json(400, {"error": "Invalid or disallowed URL scheme"})
+
         if path == "/api/diagnostics/clear":
             srv.diagnostics.clear_errors()
             return self._send_json(200, {"success": True, "message": "Diagnostic errors cleared"})

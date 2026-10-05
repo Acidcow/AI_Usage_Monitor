@@ -62,30 +62,61 @@
   </main>
 
   <!-- Claude Configuration Modal -->
+  <!-- Claude Configuration Modal -->
   <div class="modal-overlay" id="claude-config-modal">
     <div class="modal-box">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <h3 style="font-size: 1.15rem; font-weight: 700;">Configure Claude (Anthropic)</h3>
         <button onclick="window.App.closeConfigureClaudeModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
 
-      <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
-        Keys are encrypted immediately using <strong>Windows DPAPI</strong> (<code>crypt32.dll</code>). They are tied to your Windows logon and protected from unauthorized user processes.
-      </p>
+      <!-- Quick Procurement Guide Banner -->
+      <div class="procure-guide-card" style="border-left: 3px solid var(--claude-color);">
+        <div class="procure-header">
+          <span class="procure-badge" style="background: rgba(217, 119, 6, 0.2); color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);">Procure Key</span>
+          <span style="font-weight: 600; font-size: 0.88rem;">Need an Anthropic API Key?</span>
+        </div>
+        <p class="procure-desc">
+          Keys are managed in the Anthropic Console. You can generate a new secret key for direct API calls or the CLI proxy in seconds.
+        </p>
+        <div class="procure-steps">
+          <div class="step-item"><span class="step-num">1</span> Click <strong>Open Anthropic Console</strong> below.</div>
+          <div class="step-item"><span class="step-num">2</span> Navigate to <strong>API Keys</strong> and click <strong>"Create Key"</strong>.</div>
+          <div class="step-item"><span class="step-num">3</span> Copy the key and paste it into the field below.</div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-claude">
+            <span>🚀</span> Open Anthropic Console ↗
+          </a>
+          <a href="https://console.anthropic.com/settings/cost" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+            <span>📊</span> Usage & Billing ↗
+          </a>
+          <a href="https://docs.anthropic.com/en/docs/initial-setup" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+            <span>📚</span> API Quickstart ↗
+          </a>
+        </div>
+      </div>
 
       <div class="form-group">
-        <label for="claude-api-key-input">Anthropic API Key (Optional if using Proxy)</label>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label for="claude-api-key-input" style="margin-bottom: 0;">Anthropic API Key (Optional if using local logs or Proxy)</label>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.pasteFromClipboard('claude-api-key-input')">📋 Paste</button>
+        </div>
         <input type="password" id="claude-api-key-input" placeholder="sk-ant-api03-..." autocomplete="off">
       </div>
 
-      <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px; margin-top: 16px;">
+      <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px; margin-top: 14px;">
         <input type="checkbox" id="claude-sim-checkbox" style="width: 18px; height: 18px; cursor: pointer;">
         <label for="claude-sim-checkbox" style="cursor: pointer; font-size: 0.85rem; color: var(--text-main);">
           Enable Simulation / Demo Mode (Generates live realistic token stream without billing)
         </label>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+      <p style="font-size: 0.76rem; color: var(--text-dim); margin-top: 10px;">
+        🔒 Encrypted immediately via <strong>Windows DPAPI</strong> (<code>crypt32.dll</code>). Tied directly to your Windows login; never stored in plaintext.
+      </p>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
         <button class="btn btn-secondary" onclick="window.App.closeConfigureClaudeModal()">Cancel</button>
         <button class="btn btn-primary" onclick="window.App.saveClaudeConfig()">Save (Encrypt with DPAPI)</button>
       </div>
@@ -95,20 +126,107 @@
   <!-- Google Gemini Modal -->
   <div class="modal-overlay" id="gemini-config-modal">
     <div class="modal-box">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <h3 style="font-size: 1.15rem; font-weight: 700;">Configure Google Gemini</h3>
         <button onclick="window.App.closeConfigureGeminiModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
-      <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
-        Enter your Google AI Studio or Vertex AI API Key. Stored securely with Windows DPAPI.
-      </p>
+
+      <!-- Quick Procurement Guide Banner -->
+      <div class="procure-guide-card" style="border-left: 3px solid var(--gemini-color);">
+        <div class="procure-header">
+          <span class="procure-badge" style="background: rgba(37, 99, 235, 0.2); color: #93c5fd; border-color: rgba(96, 165, 250, 0.4);">Procure Key</span>
+          <span style="font-weight: 600; font-size: 0.88rem;">Need a Google Gemini API Key?</span>
+        </div>
+        <p class="procure-desc">
+          Google AI Studio provides free and pay-as-you-go API keys with instant activation for Gemini 1.5 Pro, Flash, and 2.0.
+        </p>
+        <div class="procure-steps">
+          <div class="step-item"><span class="step-num">1</span> Click <strong>Open Google AI Studio</strong> below.</div>
+          <div class="step-item"><span class="step-num">2</span> Sign in with your Google account and click <strong>"Create API key"</strong>.</div>
+          <div class="step-item"><span class="step-num">3</span> Copy the key and paste it into the field below.</div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini">
+            <span>🚀</span> Open Google AI Studio ↗
+          </a>
+          <a href="https://ai.google.dev/gemini-api/docs" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+            <span>📚</span> AI Studio Docs ↗
+          </a>
+          <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+            <span>💰</span> Quotas & Pricing ↗
+          </a>
+        </div>
+      </div>
+
       <div class="form-group">
-        <label for="gemini-api-key-input">Gemini API Key</label>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label for="gemini-api-key-input" style="margin-bottom: 0;">Gemini API Key</label>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.pasteFromClipboard('gemini-api-key-input')">📋 Paste</button>
+        </div>
         <input type="password" id="gemini-api-key-input" placeholder="AIzaSy..." autocomplete="off">
       </div>
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+
+      <p style="font-size: 0.76rem; color: var(--text-dim); margin-top: 10px;">
+        🔒 Encrypted immediately via <strong>Windows DPAPI</strong> (<code>crypt32.dll</code>). Tied directly to your Windows login; never stored in plaintext.
+      </p>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
         <button class="btn btn-secondary" onclick="window.App.closeConfigureGeminiModal()">Cancel</button>
         <button class="btn btn-primary" onclick="window.App.saveGeminiConfig()">Save (Encrypt with DPAPI)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ChatGPT / OpenAI Configuration Modal -->
+  <div class="modal-overlay" id="chatgpt-config-modal">
+    <div class="modal-box">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h3 style="font-size: 1.15rem; font-weight: 700;">Configure ChatGPT / OpenAI</h3>
+        <button onclick="window.App.closeConfigureChatGPTModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
+      </div>
+
+      <!-- Quick Procurement Guide Banner -->
+      <div class="procure-guide-card" style="border-left: 3px solid #10a37f;">
+        <div class="procure-header">
+          <span class="procure-badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border-color: rgba(52, 211, 153, 0.4);">Procure Key</span>
+          <span style="font-weight: 600; font-size: 0.88rem;">Need an OpenAI API Key?</span>
+        </div>
+        <p class="procure-desc">
+          Generate API keys in your OpenAI Platform account to monitor usage across GPT-4o, o1, and standard OpenAI endpoints.
+        </p>
+        <div class="procure-steps">
+          <div class="step-item"><span class="step-num">1</span> Click <strong>Open OpenAI Platform</strong> below.</div>
+          <div class="step-item"><span class="step-num">2</span> Sign in and click <strong>"Create new secret key"</strong>.</div>
+          <div class="step-item"><span class="step-num">3</span> Copy the key and paste it into the field below.</div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-openai">
+            <span>🚀</span> Open OpenAI Platform ↗
+          </a>
+          <a href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+            <span>📊</span> Usage & Limits ↗
+          </a>
+          <a href="https://platform.openai.com/docs/quickstart" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+            <span>📚</span> Platform Docs ↗
+          </a>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label for="chatgpt-api-key-input" style="margin-bottom: 0;">OpenAI API Key</label>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.pasteFromClipboard('chatgpt-api-key-input')">📋 Paste</button>
+        </div>
+        <input type="password" id="chatgpt-api-key-input" placeholder="sk-proj-..." autocomplete="off">
+      </div>
+
+      <p style="font-size: 0.76rem; color: var(--text-dim); margin-top: 10px;">
+        🔒 Encrypted immediately via <strong>Windows DPAPI</strong> (<code>crypt32.dll</code>). Tied directly to your Windows login; never stored in plaintext.
+      </p>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+        <button class="btn btn-secondary" onclick="window.App.closeConfigureChatGPTModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="window.App.saveChatGPTConfig()">Save (Encrypt with DPAPI)</button>
       </div>
     </div>
   </div>
@@ -116,19 +234,40 @@
   <!-- Telemetry File Import Modal (for Copilot / Corporate logs) -->
   <div class="modal-overlay" id="telemetry-import-modal">
     <div class="modal-box">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <h3 style="font-size: 1.15rem; font-weight: 700;">Import Corporate Telemetry</h3>
         <button onclick="window.App.closeImportModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
-      <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
-        Paste raw JSON, JSONL, or CSV exported telemetry (ideal for locked-down M365 Copilot sessions).
-      </p>
+
+      <!-- Quick Guidance Banner for M365 Copilot -->
+      <div class="procure-guide-card" style="border-left: 3px solid var(--copilot-color);">
+        <div class="procure-header">
+          <span class="procure-badge" style="background: rgba(2, 132, 199, 0.2); color: #7dd3fc; border-color: rgba(56, 189, 248, 0.4);">M365 Reports</span>
+          <span style="font-weight: 600; font-size: 0.88rem;">Where to export Copilot & Enterprise Telemetry:</span>
+        </div>
+        <p class="procure-desc">
+          M365 Copilot metrics can be downloaded as CSV or JSON from the Microsoft 365 Admin Center reports portal or Copilot Studio.
+        </p>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <a href="https://admin.microsoft.com/#/reportsUsage/CopilotActivity" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-copilot">
+            <span>🏢</span> M365 Admin Reports Portal ↗
+          </a>
+          <a href="https://copilotstudio.microsoft.com" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+            <span>🤖</span> Copilot Studio ↗
+          </a>
+          <a href="https://learn.microsoft.com/en-us/copilot/microsoft-365/microsoft-365-copilot-usage-reports" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+            <span>📘</span> Export Documentation ↗
+          </a>
+        </div>
+      </div>
+
       <div class="form-group">
         <label for="import-provider-select">Target Provider</label>
         <select id="import-provider-select">
           <option value="copilot">M365 Copilot</option>
           <option value="claude">Claude</option>
           <option value="gemini">Google Gemini</option>
+          <option value="chatgpt">ChatGPT / OpenAI</option>
           <option value="ollama">Ollama</option>
         </select>
       </div>

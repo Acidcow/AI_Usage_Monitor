@@ -3,11 +3,11 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Architecture](https://img.shields.io/badge/Dependencies-Zero%20External%20Deps-emerald.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Security](https://img.shields.io/badge/Security-Windows%20DPAPI%20Native-purple.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
-[![Tests](https://img.shields.io/badge/Tests-35%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
+[![Tests](https://img.shields.io/badge/Tests-40%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 
 A lightweight, security-first, zero-dependency desktop service and web dashboard that monitors AI token usage, sessions, rate limits, and costs across providers (**Claude**, **M365 Copilot**, **Google Gemini**, **Ollama**, and **ChatGPT**).
 
-Includes an ambient **Windows System Tray** notification icon, a **Compact Status Bar Widget**, and automatic **Local Telemetry Scanners** for real agentic coding tool data.
+Includes an ambient **Windows System Tray** notification icon, a **Compact Status Bar Widget**, automatic **Local Telemetry Scanners**, and **1-Click Key Procurement Portals** for effortless provider onboarding.
 
 ---
 
@@ -15,23 +15,26 @@ Includes an ambient **Windows System Tray** notification icon, a **Compact Statu
 
 - **Zero External Dependencies**: Built entirely with Python 3 Standard Library (`http.server.ThreadingHTTPServer`, `sqlite3`, `ctypes`, `urllib.request`). Eliminates `npm` and `pip` supply-chain vulnerabilities.
 - **Native Windows DPAPI Encryption**: Secrets and API keys are encrypted at rest using Windows Data Protection API (`crypt32.dll` via `ctypes`) tied directly to your Windows logon. Plaintext secrets are never written to disk.
-- **Claude Multi-Mode Ingestion (POC Active)**:
+- **Automated Key Procurement & Direct Portals**:
+  - Direct 1-click external navigation buttons automagically guide users to vendor key generation portals (**Google AI Studio**, **Anthropic Console**, **OpenAI Platform**, **M365 Admin Usage Reports**, and **Ollama Hub**).
+  - In-modal step-by-step guides with 1-click clipboard paste (`📋 Paste`) and pricing/documentation quick-links.
+- **Claude Multi-Mode Ingestion**:
   1. **Direct Anthropic API Poller**: Queries rate limits and token balances via official endpoints.
   2. **Transparent Intercepting Proxy (`http://127.0.0.1:8766/v1`)**: Route CLI tools (e.g. `claude-code`, Continue, Aider) through this local endpoint to automatically capture token metrics with zero latency.
   3. **Local CLI Cache Scanner**: Ingests session cache and telemetry from local tool logs.
   4. **Offline / Demo Simulator**: Pre-seed realistic token flows and rate-limit drops for testing and demonstration without real billing.
 - **Multi-Provider Architecture**:
-  - **Claude (Anthropic)**: Full active POC with rate limits, resets, and tokens.
-  - **Microsoft 365 Copilot**: Enterprise-restricted passive adapter (proxy & telemetry monitoring).
-  - **Google Gemini**: AI Studio & Vertex API key adapter ready.
-  - **Ollama**: Local instance poller (`http://localhost:11434`) with model detection.
-  - **ChatGPT / OpenAI**: Staged placeholder ("Coming Soon").
+  - **Claude (Anthropic)**: Rate limits, resets, CLI scanner, transparent proxy, and tokens.
+  - **Google Gemini**: Google AI Studio API key adapter with Windows DPAPI encryption and live model quota interrogation.
+  - **ChatGPT / OpenAI**: OpenAI Developer Platform API key adapter with DPAPI vault persistence and model interrogation.
+  - **Microsoft 365 Copilot**: Enterprise-restricted passive adapter (proxy & corporate telemetry parser).
+  - **Ollama**: Local instance poller (`http://localhost:11434`) with model detection, parameter sizes, and quantization.
 - **Desktop UI**:
   - **Glassmorphic Web Dashboard**: Animated radial gauges, session breakdown, provider cards, and hourly trends.
   - **Compact Status Bar Widget (`/mini_widget.html`)**: Floating/dockable micro-bar widget with live tokens, quota meter, and reset countdown.
   - **Windows System Tray**: Native taskbar tray icon with dynamic tooltips and right-click context menu.
 - **Proactive Redacted Diagnostics**:
-  - Automatically redacts API keys (`sk-ant-***`), tokens, passwords, and Windows usernames (`<REDACTED_USER>`).
+  - Automatically redacts API keys (`sk-ant-***`, `AIzaSy***`, `sk-proj-***`), tokens, passwords, and Windows usernames (`<REDACTED_USER>`).
   - One-click "Copy Diagnostic Bundle" and "Download JSON" for bug reporting without leaking secrets.
 
 ---

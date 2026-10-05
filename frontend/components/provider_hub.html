@@ -27,9 +27,15 @@
       </div>
 
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-claude" title="Open Anthropic Console to manage or create your API keys">
+          <span>🚀</span> Get Anthropic Key ↗
+        </a>
         <button class="btn btn-primary" onclick="window.App.openConfigureClaudeModal()">Configure API Key</button>
         <button class="btn btn-secondary" onclick="window.App.triggerClaudeSimulation()">Simulate Usage (Demo)</button>
         <button class="btn btn-secondary" onclick="window.App.syncProvider('claude')">Sync Now</button>
+        <a href="https://console.anthropic.com/settings/cost" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Open Anthropic Console to inspect monthly billing and limits">
+          <span>📊</span> Usage & Costs ↗
+        </a>
       </div>
     </div>
 
@@ -49,8 +55,14 @@
         <div style="color: var(--accent-blue); font-weight: 600; margin-bottom: 4px;">Enterprise Adapter Mode:</div>
         <span style="color: #cbd5e1;">Passive Ingestion via Local Log Scraper & Proxy Header Monitor.</span>
       </div>
-      <div style="display: flex; gap: 8px;">
-        <button class="btn btn-secondary" onclick="window.App.openImportModal('copilot')">📥 Import Copilot Log</button>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="https://admin.microsoft.com/#/reportsUsage/CopilotActivity" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-copilot" title="Open Microsoft 365 Admin Center Copilot Usage Reports">
+          <span>🏢</span> M365 Admin Reports ↗
+        </a>
+        <a href="https://copilotstudio.microsoft.com" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Open Microsoft Copilot Studio portal">
+          <span>🤖</span> Copilot Studio ↗
+        </a>
+        <button class="btn btn-secondary" onclick="window.App.openImportModal('copilot')">📥 Import Log</button>
         <button class="btn btn-secondary" onclick="window.App.openManualModal('copilot')">✍️ Log Session</button>
       </div>
     </div>
@@ -67,7 +79,16 @@
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
         Connect Google AI Studio or Vertex AI projects for token and quota monitoring.
       </p>
-      <button class="btn btn-primary" onclick="window.App.openConfigureGeminiModal()">Configure Gemini Key</button>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini" title="Open Google AI Studio to generate or copy your Gemini API key">
+          <span>🚀</span> Get Gemini API Key ↗
+        </a>
+        <button class="btn btn-primary" onclick="window.App.openConfigureGeminiModal()">Configure Key</button>
+        <button class="btn btn-secondary" onclick="window.App.syncProvider('gemini')">Sync Now</button>
+        <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="View Gemini token limits and pricing tiers">
+          <span>💰</span> Pricing & Quotas ↗
+        </a>
+      </div>
     </div>
 
     <!-- Ollama Card -->
@@ -82,24 +103,40 @@
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
         Live connection to <code>http://localhost:11434</code>. Zero cloud API token cost.
       </p>
-      <div style="display: flex; gap: 8px;">
-        <button class="btn btn-secondary" onclick="window.App.toggleOllamaModelsList()">📦 Inspect Local Models</button>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-ollama" title="Download Ollama for Windows from the official site">
+          <span>⬇️</span> Download Ollama ↗
+        </a>
+        <a href="https://ollama.com/library" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Explore available models in Ollama Library">
+          <span>📚</span> Models Library ↗
+        </a>
+        <button class="btn btn-secondary" onclick="window.App.toggleOllamaModelsList()">📦 Inspect Models</button>
         <button class="btn btn-secondary" onclick="window.App.syncProvider('ollama')">Test Connection</button>
       </div>
     </div>
 
-    <!-- ChatGPT Card (Placeholder) -->
-    <div class="glass-card" style="opacity: 0.65; border-left: 4px solid var(--text-dim); background: rgba(18, 24, 38, 0.9);">
+    <!-- ChatGPT Card -->
+    <div class="glass-card" style="border-left: 4px solid #10a37f; background: rgba(18, 24, 38, 0.9);">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 1.2rem;">🟢</span>
           <strong>ChatGPT / OpenAI</strong>
         </div>
-        <span class="badge" style="background: rgba(255,255,255,0.06); color: var(--text-muted);">Coming Soon</span>
+        <span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399;" id="hub-chatgpt-status">Ready</span>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
-        Scheduled for next release cycle. Stubs and schema slots are prepared.
+        Connect OpenAI Platform developer keys for GPT-4o, o1, and embeddings tracking.
       </p>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-openai" title="Open OpenAI Platform API Keys dashboard">
+          <span>🚀</span> Get OpenAI Key ↗
+        </a>
+        <button class="btn btn-primary" onclick="window.App.openConfigureChatGPTModal()">Configure Key</button>
+        <button class="btn btn-secondary" onclick="window.App.syncProvider('chatgpt')">Sync Now</button>
+        <a href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Open OpenAI Usage and rate limits dashboard">
+          <span>📊</span> Usage & Limits ↗
+        </a>
+      </div>
     </div>
   </div>
 
