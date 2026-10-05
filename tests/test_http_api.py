@@ -127,5 +127,10 @@ class TestHTTPAPI(unittest.TestCase):
         stored = self.vault.get_credential("chatgpt", "default")
         self.assertEqual(stored, "sk-proj-FakeOpenAIKey789")
 
+    def test_api_widget_launch(self):
+        status, data = self._post("/api/widget/launch", {})
+        self.assertEqual(status, 200)
+        self.assertTrue(data.get("success"))
+
 if __name__ == "__main__":
     unittest.main()

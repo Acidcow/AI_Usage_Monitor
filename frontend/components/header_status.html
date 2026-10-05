@@ -24,11 +24,16 @@
     <span style="font-size: 0.75rem; color: var(--text-dim);" id="ollama-status-text">Local</span>
   </div>
 
-  <div class="provider-pill" id="pill-data-mode" style="margin-left: auto; border: 1px solid rgba(6, 182, 212, 0.4); background: rgba(6, 182, 212, 0.08);">
-    <span class="dot dot-green" id="dot-data-mode"></span>
-    <span style="font-weight: 700; color: var(--accent-cyan); font-size: 0.78rem;" id="text-data-mode">LIVE LOCAL DATA</span>
-    <button onclick="window.App.toggleDataMode()" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; cursor: pointer; margin-left: 6px;">
-      Toggle Mode
+  <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+    <button onclick="window.App.launchDesktopWidget()" class="btn btn-secondary btn-sm" title="Launch native floating desktop widget snapped above the taskbar" style="border-color: rgba(56, 189, 248, 0.4); color: var(--accent-cyan);">
+      🪟 Floating Widget
     </button>
+    <div class="provider-pill" id="pill-data-mode" style="border: 1px solid rgba(6, 182, 212, 0.4); background: rgba(6, 182, 212, 0.08);">
+      <span class="dot dot-green" id="dot-data-mode"></span>
+      <span style="font-weight: 700; color: var(--accent-cyan); font-size: 0.78rem;" id="text-data-mode">LIVE LOCAL DATA</span>
+      <button onclick="window.App.toggleDataMode()" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; cursor: pointer; margin-left: 6px;">
+        Toggle Mode
+      </button>
+    </div>
   </div>
 </div>

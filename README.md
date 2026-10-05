@@ -3,11 +3,11 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Architecture](https://img.shields.io/badge/Dependencies-Zero%20External%20Deps-emerald.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Security](https://img.shields.io/badge/Security-Windows%20DPAPI%20Native-purple.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
-[![Tests](https://img.shields.io/badge/Tests-40%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
+[![Tests](https://img.shields.io/badge/Tests-44%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 
 A lightweight, security-first, zero-dependency desktop service and web dashboard that monitors AI token usage, sessions, rate limits, and costs across providers (**Claude**, **M365 Copilot**, **Google Gemini**, **Ollama**, and **ChatGPT**).
 
-Includes an ambient **Windows System Tray** notification icon, a **Compact Status Bar Widget**, automatic **Local Telemetry Scanners**, and **1-Click Key Procurement Portals** for effortless provider onboarding.
+Includes an ambient **Windows System Tray** notification icon, a **Native Standalone Floating Desktop Widget**, automatic **Local Telemetry Scanners**, and **1-Click Key Procurement Portals** for effortless provider onboarding.
 
 ---
 
@@ -15,6 +15,12 @@ Includes an ambient **Windows System Tray** notification icon, a **Compact Statu
 
 - **Zero External Dependencies**: Built entirely with Python 3 Standard Library (`http.server.ThreadingHTTPServer`, `sqlite3`, `ctypes`, `urllib.request`). Eliminates `npm` and `pip` supply-chain vulnerabilities.
 - **Native Windows DPAPI Encryption**: Secrets and API keys are encrypted at rest using Windows Data Protection API (`crypt32.dll` via `ctypes`) tied directly to your Windows logon. Plaintext secrets are never written to disk.
+- **Standalone Desktop Floating Widget**:
+  - Chromeless, standalone mini-widget window powered by pre-installed Microsoft Edge app mode (`msedge.exe --app`).
+  - Snaps automatically to the bottom-right corner directly above the Windows taskbar and system tray using Win32 Work Area geometry (`ctypes.windll.user32`).
+  - Draggable anywhere on screen via fluid `-webkit-app-region: drag` header.
+  - Interactive multi-provider cycler (toggle between Claude, Gemini, ChatGPT, Ollama, and Copilot metrics with one click).
+  - Launchable via CLI (`python run_monitor.py --widget`), Windows System Tray menu, or Web Dashboard header button (`🪟 Floating Widget`).
 - **Automated Key Procurement & Direct Portals**:
   - Direct 1-click external navigation buttons automagically guide users to vendor key generation portals (**Google AI Studio**, **Anthropic Console**, **OpenAI Platform**, **M365 Admin Usage Reports**, and **Ollama Hub**).
   - In-modal step-by-step guides with 1-click clipboard paste (`📋 Paste`) and pricing/documentation quick-links.

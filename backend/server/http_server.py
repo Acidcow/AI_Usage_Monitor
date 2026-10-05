@@ -198,6 +198,13 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 srv.vault.set_credential("chatgpt", "default", api_key)
             return self._send_json(200, {"success": True, "message": "ChatGPT / OpenAI configuration saved"})
 
+        if path == "/api/widget/launch":
+            from backend.tray.desktop_widget import launch_desktop_widget
+            host = getattr(srv, "host", srv.server_address[0] if hasattr(srv, "server_address") else "127.0.0.1")
+            port = getattr(srv, "port", srv.server_address[1] if hasattr(srv, "server_address") else 8765)
+            res = launch_desktop_widget(host=host, port=port)
+            return self._send_json(200, res)
+
         if path == "/api/system/open-url":
             import webbrowser
             target_url = body.get("url", "")
@@ -285,6 +292,8 @@ class AppHTTPServer:
         self._server.diagnostics = self.diagnostics
         self._server.providers = self.providers
         self._server.proxy_port = self.proxy_port
+        self._server.host = self.host
+        self._server.port = self.server_port
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 

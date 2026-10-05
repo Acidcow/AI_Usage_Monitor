@@ -38,6 +38,7 @@ from backend.providers import (
 from backend.proxy.transparent_proxy import TransparentProxyServer
 from backend.server.http_server import AppHTTPServer
 from backend.tray.windows_tray import WindowsTrayManager
+from backend.tray.desktop_widget import launch_desktop_widget
 
 def parse_args():
     parser = argparse.ArgumentParser(description="AI Usage Monitor Service")
@@ -46,6 +47,7 @@ def parse_args():
     parser.add_argument("--proxy-port", type=int, default=PROXY_PORT, help="Port for transparent Claude proxy")
     parser.add_argument("--no-tray", action="store_true", help="Disable native Windows system tray icon")
     parser.add_argument("--open-browser", action="store_true", help="Open web dashboard in default browser on launch")
+    parser.add_argument("--widget", action="store_true", help="Launch standalone floating desktop widget on launch")
     parser.add_argument("--demo", action="store_true", help="Pre-seed realistic initial Claude usage data")
     return parser.parse_args()
 
@@ -113,13 +115,12 @@ def main():
     tray = None
     if not args.no_tray and sys.platform == "win32":
         dashboard_url = f"http://{args.host}:{server.server_port}"
-        widget_url = f"http://{args.host}:{server.server_port}/mini_widget.html"
 
         def open_dash():
             webbrowser.open(dashboard_url)
 
         def open_wid():
-            webbrowser.open(widget_url)
+            launch_desktop_widget(host=args.host, port=server.server_port)
 
         def sync_all():
             print("[SYNC] Triggering provider sync...")
@@ -138,6 +139,10 @@ def main():
 
     if args.open_browser:
         webbrowser.open(f"http://{args.host}:{server.server_port}")
+
+    if args.widget:
+        print("[INIT] Spawning standalone desktop floating widget...")
+        launch_desktop_widget(host=args.host, port=server.server_port)
 
     # 6. Periodic Background Refresh & Tooltip Update Loop
     running = True

@@ -455,6 +455,18 @@ window.App = {
     } catch (e) {}
   },
 
+  // Launch Desktop Floating Widget
+  async launchDesktopWidget() {
+    try {
+      const res = await fetch("/api/widget/launch", { method: "POST" });
+      if (!res.ok) {
+        window.open("/mini_widget.html", "_blank", "width=380,height=220,menubar=no,toolbar=no,location=no,status=no");
+      }
+    } catch (e) {
+      window.open("/mini_widget.html", "_blank", "width=380,height=220,menubar=no,toolbar=no,location=no,status=no");
+    }
+  },
+
   // Gemini Configuration
   openConfigureGeminiModal() {
     const modal = document.getElementById("gemini-config-modal");
