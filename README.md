@@ -1,13 +1,37 @@
 # AI Usage Monitor
 
+<div align="center">
+  <img src="frontend/assets/icons/app_icon_johnny5.jpg" width="100" height="100" alt="Johnny 5 App Icon" style="border-radius: 20px; box-shadow: 0 0 25px rgba(6,182,212,0.4);" />
+  <h3><em>"Number 5 is alive!"</em></h3>
+  <p><strong>Lightweight, Security-First Desktop AI Telemetry Monitor & Floating Widget</strong></p>
+</div>
+
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Architecture](https://img.shields.io/badge/Dependencies-Zero%20External%20Deps-emerald.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Security](https://img.shields.io/badge/Security-Windows%20DPAPI%20Native-purple.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
-[![Tests](https://img.shields.io/badge/Tests-44%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
+[![Tests](https://img.shields.io/badge/Tests-45%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 
 A lightweight, security-first, zero-dependency desktop service and web dashboard that monitors AI token usage, sessions, rate limits, and costs across providers (**Claude**, **M365 Copilot**, **Google Gemini**, **Ollama**, and **ChatGPT**).
 
-Includes an ambient **Windows System Tray** notification icon, a **Native Standalone Floating Desktop Widget**, automatic **Local Telemetry Scanners**, and **1-Click Key Procurement Portals** for effortless provider onboarding.
+Includes an ambient **Windows System Tray** notification icon, a **Native Standalone Floating Desktop Widget**, automatic **Local Telemetry Scanners**, **1-Click Key Procurement Portals**, and an interactive **Johnny 5 Mascot System** with switchable cybernetic icons!
+
+---
+
+## 🤖 Visual Identity & Johnny 5 Mascot System
+
+AI Usage Monitor features a bespoke, retro-futuristic visual identity inspired by **Johnny 5** (*Short Circuit*) along with a cryptographic Cyber Shield icon option:
+
+| Johnny 5 Alive (Primary Icon) | Cyber Shield (Option B) | Johnny 5 Pointing (Mascot) | Johnny 5 Inspecting (Sessions) | Johnny 5 Success (Health) |
+| :---: | :---: | :---: | :---: | :---: |
+| <img src="frontend/assets/icons/app_icon_johnny5.jpg" width="110" style="border-radius: 14px;" /> | <img src="frontend/assets/icons/app_icon_shield.jpg" width="110" style="border-radius: 14px;" /> | <img src="frontend/assets/mascot/johnny5_pointing.jpg" width="110" style="border-radius: 14px;" /> | <img src="frontend/assets/mascot/johnny5_inspecting.jpg" width="110" style="border-radius: 14px;" /> | <img src="frontend/assets/mascot/johnny5_success.jpg" width="110" style="border-radius: 14px;" /> |
+| *Glowing cyan optics & circuits* | *Glass shield with neon purple slash* | *Main dashboard assistant ("Input!")* | *Scanning telemetry holograms* | *Zero malfunctions detected!* |
+
+- **Dynamic Icon Switcher**: Toggle effortlessly between the glowing **Johnny 5** headshot and the **Cyber Shield** directly in the header or via the `🎨 Icons` customizer modal.
+- **Contextual UI Mascot**:
+  - **Main Dashboard**: Johnny 5 points to insights with rotating interactive quotes (*"No disassemble! Protecting keys with DPAPI"*).
+  - **Recent Sessions**: Johnny 5 inspects token streams with holographic sensors.
+  - **Diagnostic Troubleshooter**: Johnny 5 delivers a cheerful thumbs-up when zero malfunctions or rate limits are detected.
+  - **Floating Mini-Widget**: Miniature glowing Johnny 5 badge in the draggable taskbar header.
 
 ---
 

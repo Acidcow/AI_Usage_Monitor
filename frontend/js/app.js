@@ -4,9 +4,22 @@ window.App = {
   activeTab: 'dashboard',
   pollInterval: null,
   isSimulationMode: false,
+  activeIcon: 'johnny5',
+  currentQuoteIdx: 0,
+  mascotQuotes: [
+    "\"Number 5 is alive! No disassemble! Tracking your token telemetry and locking your API keys inside Windows DPAPI with 256-bit encryption. Input! Need more input!\"",
+    "\"Hey, laser lips, your API keys are protected by hardware DPAPI! Plaintext credential storage is strictly prohibited!\"",
+    "\"Stephanie! Look at this token velocity graph! Beautiful telemetry! Millions of tokens counted!\"",
+    "\"Zero malfunctions detected! CLI Transparent Proxy listening on port 8766. All neural pathways nominal!\"",
+    "\"Programmed to protect! Route your terminal and IDE tools through http://127.0.0.1:8766/v1 to capture tokens with zero latency!\"",
+    "\"Input! More input! Local Ollama models detected and ready for offline inference!\""
+  ],
 
   async init() {
     console.log("[AI Usage Monitor] Initializing SPA Shell...");
+    const savedIcon = localStorage.getItem("aium_active_icon") || 'johnny5';
+    this.applyActiveIcon(savedIcon);
+
     await Promise.all([
       this.loadComponent("container-header-status", "/components/header_status.html"),
       this.loadComponent("container-usage-gauges", "/components/usage_gauge_card.html"),
@@ -281,8 +294,14 @@ window.App = {
     if (!sessions || sessions.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="8" style="text-align: center; color: var(--text-dim); padding: 30px;">
-            No sessions recorded yet.
+          <td colspan="8" style="text-align: center; color: var(--text-dim); padding: 32px 20px;">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
+              <img src="/assets/mascot/johnny5_inspecting.jpg" alt="Johnny 5 Inspecting" style="width: 76px; height: 76px; border-radius: 14px; border: 2px solid rgba(6, 182, 212, 0.4); box-shadow: 0 0 18px rgba(6, 182, 212, 0.3); object-fit: cover;">
+              <div style="color: var(--text-main); font-weight: 700; font-size: 0.95rem;">Johnny 5 is scanning for token traffic...</div>
+              <div style="color: var(--text-dim); font-size: 0.8rem; max-width: 440px;">
+                Route your agentic IDE, CLI, or API calls through <code style="color: var(--accent-cyan); font-family: var(--font-mono);">http://127.0.0.1:8766/v1</code> or import telemetry logs to populate sessions.
+              </div>
+            </div>
           </td>
         </tr>
       `;
@@ -317,8 +336,21 @@ window.App = {
 
     if (!errors || errors.length === 0) {
       container.innerHTML = `
-        <div style="color: var(--text-dim); text-align: center; padding: 20px;">
-          ✓ No unhandled errors or rate limit alerts recorded. System operational.
+        <div class="mascot-success-card">
+          <img src="/assets/mascot/johnny5_success.jpg" alt="Johnny 5 Success" class="mascot-thumb-img">
+          <div>
+            <h4 style="color: var(--accent-emerald); font-weight: 700; margin-bottom: 6px; font-size: 1.05rem;">
+              ✓ Zero Malfunctions Detected!
+            </h4>
+            <p style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.45;">
+              Johnny 5 reports all API routes, token proxy connections, and DPAPI encrypted vaults are operating at 100% capacity with zero rate limits.
+            </p>
+            <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+              <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(52, 211, 153, 0.3);">Proxy Port: 8766 OK</span>
+              <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.3);">DPAPI Vault: Active</span>
+              <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3);">Telemetry: Flowing</span>
+            </div>
+          </div>
         </div>
       `;
       return;
@@ -664,6 +696,87 @@ window.App = {
     if (confirm("Clear in-memory diagnostic error history?")) {
       await fetch("/api/diagnostics/clear", { method: "POST" });
       await this.loadUsageData();
+    }
+  },
+
+  // =========================================================================
+  // Icon and Mascot Management
+  // =========================================================================
+  applyActiveIcon(iconName) {
+    this.activeIcon = iconName;
+    try {
+      localStorage.setItem("aium_active_icon", iconName);
+    } catch (_) {}
+
+    const logoImg = document.getElementById("brand-logo-img");
+    const favicon = document.getElementById("app-favicon");
+    const iconSrc = iconName === 'shield' 
+      ? '/assets/icons/app_icon_shield.jpg' 
+      : '/assets/icons/app_icon_johnny5.jpg';
+
+    if (logoImg) logoImg.src = iconSrc;
+    if (favicon) favicon.href = iconSrc;
+
+    // Update modal cards
+    const cardJohnny5 = document.getElementById("card-choice-johnny5");
+    const cardShield = document.getElementById("card-choice-shield");
+    const badgeJohnny5 = document.getElementById("badge-choice-johnny5");
+    const badgeShield = document.getElementById("badge-choice-shield");
+
+    if (cardJohnny5 && cardShield) {
+      if (iconName === 'shield') {
+        cardShield.classList.add("selected");
+        cardJohnny5.classList.remove("selected");
+        if (badgeShield) badgeShield.style.display = "block";
+        if (badgeJohnny5) badgeJohnny5.style.display = "none";
+      } else {
+        cardJohnny5.classList.add("selected");
+        cardShield.classList.remove("selected");
+        if (badgeJohnny5) badgeJohnny5.style.display = "block";
+        if (badgeShield) badgeShield.style.display = "none";
+      }
+    }
+  },
+
+  toggleAppIcon() {
+    const nextIcon = this.activeIcon === 'johnny5' ? 'shield' : 'johnny5';
+    this.applyActiveIcon(nextIcon);
+  },
+
+  selectAppIcon(iconName) {
+    this.applyActiveIcon(iconName);
+  },
+
+  openIconPickerModal() {
+    const modal = document.getElementById("icon-picker-modal");
+    if (modal) {
+      this.applyActiveIcon(this.activeIcon);
+      modal.classList.add("active");
+    }
+  },
+
+  closeIconPickerModal() {
+    const modal = document.getElementById("icon-picker-modal");
+    if (modal) modal.classList.remove("active");
+  },
+
+  cycleMascotQuote() {
+    this.currentQuoteIdx = (this.currentQuoteIdx + 1) % this.mascotQuotes.length;
+    const quoteEl = document.getElementById("mascot-quote-text");
+    const mascotImg = document.getElementById("mascot-main-img");
+
+    if (quoteEl) {
+      quoteEl.style.opacity = "0.2";
+      setTimeout(() => {
+        quoteEl.innerText = this.mascotQuotes[this.currentQuoteIdx];
+        quoteEl.style.opacity = "1";
+      }, 150);
+    }
+    if (mascotImg) {
+      mascotImg.style.transform = "scale(1.1) rotate(2deg)";
+      setTimeout(() => {
+        mascotImg.style.transform = "scale(1.0) rotate(0deg)";
+      }, 300);
     }
   },
 

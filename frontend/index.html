@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Usage Monitor | Token & Quota Tracker</title>
   <meta name="description" content="Zero-dependency, privacy-first desktop monitor and taskbar widget for AI tokens, sessions, quotas, and rates.">
+  <link rel="icon" id="app-favicon" type="image/jpeg" href="/assets/icons/app_icon_johnny5.jpg">
   <link rel="stylesheet" href="/css/styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,9 +15,15 @@
   <!-- Application Header -->
   <header class="app-header">
     <div class="brand">
-      <div class="brand-icon">⚡</div>
+      <div class="brand-icon-wrapper" id="brand-icon-toggle" onclick="window.App.toggleAppIcon()" title="Click to switch app icon (Johnny 5 vs Cyber Shield)">
+        <img id="brand-logo-img" src="/assets/icons/app_icon_johnny5.jpg" alt="AI Usage Monitor Icon" class="brand-avatar-img">
+        <span class="icon-toggle-hint">⇄</span>
+      </div>
       <div class="brand-text">
-        <h1>AI Usage Monitor</h1>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <h1>AI Usage Monitor</h1>
+          <span class="mascot-tag" title="Johnny 5 Guard Mascot Active">Number 5 is alive!</span>
+        </div>
         <span>Zero-Dependency • Windows Native • Multi-Provider</span>
       </div>
     </div>
@@ -30,7 +37,10 @@
 
     <!-- Header Actions -->
     <div class="header-actions">
-      <button class="btn btn-secondary" onclick="window.open('/mini_widget.html', 'AIUsageWidget', 'width=420,height=220,menubar=no,toolbar=no,location=no,status=no,resizable=yes')">
+      <button class="btn btn-secondary" onclick="window.App.openIconPickerModal()" title="Choose app icon & mascot theme">
+        🎨 Icons
+      </button>
+      <button class="btn btn-secondary" onclick="window.App.launchDesktopWidget()" title="Launch native floating desktop widget">
         🪟 Mini Widget
       </button>
       <button class="btn btn-primary" onclick="window.App.loadUsageData()">
@@ -43,6 +53,30 @@
   <main class="container">
     <!-- Top Status Pills (Canonical Component Container) -->
     <div id="container-header-status"></div>
+
+    <!-- Johnny 5 Mascot Live Banner -->
+    <div class="mascot-banner" id="johnny5-mascot-banner">
+      <div class="mascot-banner-avatar">
+        <img src="/assets/mascot/johnny5_pointing.jpg" alt="Johnny 5 Mascot" class="mascot-img-pointing" id="mascot-main-img" onclick="window.App.cycleMascotQuote()" style="cursor: pointer;" title="Click Johnny 5 for more wisdom!">
+      </div>
+      <div class="mascot-banner-content">
+        <div class="mascot-speech-bubble">
+          <div class="mascot-quote-header">
+            <span class="mascot-name">🤖 Johnny 5</span>
+            <span class="mascot-status-tag" id="mascot-status-tag">STATUS: MALFUNCTION FREE</span>
+            <span class="mascot-tip-pill" onclick="window.App.cycleMascotQuote()" title="Click for more Johnny 5 advice">⚡ Next Quote ↻</span>
+          </div>
+          <p class="mascot-quote-text" id="mascot-quote-text">
+            "Number 5 is alive! No disassemble! Tracking your token telemetry and locking your API keys inside Windows DPAPI with 256-bit encryption. Input! Need more input!"
+          </p>
+        </div>
+      </div>
+      <div class="mascot-banner-actions">
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openIconPickerModal()" title="Customize App Icon & Mascot">
+          🎨 Switch Icon
+        </button>
+      </div>
+    </div>
 
     <!-- Tab 1: Dashboard View -->
     <div class="tab-content active" id="tab-dashboard">
@@ -310,6 +344,62 @@
       <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
         <button class="btn btn-secondary" onclick="window.App.closeManualModal()">Cancel</button>
         <button class="btn btn-primary" onclick="window.App.submitManualSession()">Record Session</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Icon & Mascot Customizer Modal -->
+  <div class="modal-overlay" id="icon-picker-modal">
+    <div class="modal-box" style="max-width: 600px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h3 style="font-size: 1.15rem; font-weight: 700;">App Icon & Mascot Customizer</h3>
+        <button onclick="window.App.closeIconPickerModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
+      </div>
+
+      <p style="font-size: 0.82rem; color: var(--text-muted);">
+        Select your preferred primary application icon and inspect Johnny 5's visual telemetry mascots across UI views.
+      </p>
+
+      <div class="icon-picker-grid">
+        <!-- Option 1: Johnny 5 Glowing Headshot -->
+        <div class="icon-choice-card selected" id="card-choice-johnny5" onclick="window.App.selectAppIcon('johnny5')">
+          <span class="icon-selected-badge" id="badge-choice-johnny5">ACTIVE</span>
+          <img src="/assets/icons/app_icon_johnny5.jpg" alt="Johnny 5 Icon" class="icon-choice-preview">
+          <div class="icon-choice-title">Johnny 5 Alive</div>
+          <div class="icon-choice-desc">Cute, glowing cybernetic headshot with cyan optic sensors and electric circuit grid.</div>
+        </div>
+
+        <!-- Option 2: Cyber Shield with Purple Slash -->
+        <div class="icon-choice-card" id="card-choice-shield" onclick="window.App.selectAppIcon('shield')">
+          <span class="icon-selected-badge" id="badge-choice-shield" style="display: none;">ACTIVE</span>
+          <img src="/assets/icons/app_icon_shield.jpg" alt="Cyber Shield Icon" class="icon-choice-preview">
+          <div class="icon-choice-title">Cyber Shield</div>
+          <div class="icon-choice-desc">Transparent glass shield with bold black outline and vibrant neon purple slash.</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+        <div style="font-size: 0.84rem; font-weight: 700; color: #fff; margin-bottom: 8px;">
+          Mascot UI Variations Gallery
+        </div>
+        <div class="mascot-gallery-grid">
+          <div class="mascot-gallery-item">
+            <img src="/assets/mascot/johnny5_pointing.jpg" alt="Pointing Mascot" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Point to Insight (Main View)</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/mascot/johnny5_inspecting.jpg" alt="Inspecting Mascot" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Telemetry Hologram (Sessions)</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/mascot/johnny5_success.jpg" alt="Success Mascot" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Thumbs-Up (0 Errors Log)</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+        <button class="btn btn-primary" onclick="window.App.closeIconPickerModal()">Done</button>
       </div>
     </div>
   </div>

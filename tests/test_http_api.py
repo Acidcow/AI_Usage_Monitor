@@ -132,5 +132,24 @@ class TestHTTPAPI(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(data.get("success"))
 
+    def test_static_asset_serving_icons_and_mascots(self):
+        port = self.server.server_port
+        asset_paths = [
+            "/assets/icons/app_icon_johnny5.jpg",
+            "/assets/icons/app_icon_shield.jpg",
+            "/assets/mascot/johnny5_pointing.jpg",
+            "/assets/mascot/johnny5_inspecting.jpg",
+            "/assets/mascot/johnny5_success.jpg"
+        ]
+        for path in asset_paths:
+            url = f"http://127.0.0.1:{port}{path}"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                self.assertEqual(resp.status, 200, f"Failed to fetch {path}")
+                content_type = resp.headers.get("Content-Type")
+                self.assertEqual(content_type, "image/jpeg", f"Wrong mime type for {path}")
+                data = resp.read()
+                self.assertGreater(len(data), 1000, f"Asset file {path} was unexpectedly small or empty")
+
 if __name__ == "__main__":
     unittest.main()
