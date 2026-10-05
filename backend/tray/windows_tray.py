@@ -239,10 +239,10 @@ class WindowsTrayManager:
 
             hinstance = kernel32.GetModuleHandleW(None)
             class_name = "AIUsageMonitorTrayClass"
-            proc_delegate = WNDPROC(wnd_proc)
+            self._proc_delegate = WNDPROC(wnd_proc)  # Retain reference to prevent garbage collection crash
 
             wcls = WNDCLASSW()
-            wcls.lpfnWndProc = proc_delegate
+            wcls.lpfnWndProc = self._proc_delegate
             wcls.hInstance = hinstance
             wcls.lpszClassName = class_name
             user32.RegisterClassW(ctypes.byref(wcls))
