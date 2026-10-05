@@ -189,15 +189,26 @@
           <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
             <span>💰</span> Quotas & Pricing ↗
           </a>
+          <a href="https://console.cloud.google.com/iam-admin/quotas" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Open Google Cloud Console to inspect project-wide and account-wide API quotas">
+            <span>🌐</span> GCP Quotas Console ↗
+          </a>
         </div>
       </div>
 
       <div class="form-group">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <label for="gemini-api-key-input" style="margin-bottom: 0;">Gemini API Key</label>
+          <label for="gemini-api-key-input" style="margin-bottom: 0;">Gemini API Key(s)</label>
           <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.pasteFromClipboard('gemini-api-key-input')">📋 Paste</button>
         </div>
-        <input type="password" id="gemini-api-key-input" placeholder="AIzaSy..." autocomplete="off">
+        <textarea id="gemini-api-key-input" rows="2" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 8px 12px; color: var(--text-main); font-family: var(--font-mono); font-size: 0.85rem;" placeholder="AIzaSy... (Enter single key or multiple keys separated by commas for whole-account aggregation)" autocomplete="off"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="gemini-project-id-input">Google Cloud Project ID (Optional)</label>
+        <input type="text" id="gemini-project-id-input" placeholder="e.g. my-gemini-workspace-2026" autocomplete="off">
+        <span style="font-size: 0.72rem; color: var(--text-dim); margin-top: 3px;">
+          Tip: AI Studio keys are scoped per project. To monitor usage across multiple projects, add all keys above or route CLI traffic through the local proxy.
+        </span>
       </div>
 
       <p style="font-size: 0.76rem; color: var(--text-dim); margin-top: 10px;">

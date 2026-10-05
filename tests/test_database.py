@@ -72,5 +72,41 @@ class TestUsageDatabase(unittest.TestCase):
         self.assertEqual(sessions[0]["session_id"], "session-alpha")
         self.assertEqual(sessions[0]["total_tokens"], 150)
 
+    def test_comparative_metrics_and_local_savings(self):
+        # Record cloud usage (Claude)
+        self.db.record_usage_event(
+            provider="claude",
+            model="claude-3-5-sonnet",
+            input_tokens=1000,
+            output_tokens=500,
+            session_id="sess-claude"
+        )
+        # Record local usage (Ollama)
+        self.db.record_usage_event(
+            provider="ollama",
+            model="llama3:8b",
+            input_tokens=200000,
+            output_tokens=100000,
+            session_id="sess-ollama"
+        )
+
+        comp = self.db.get_comparative_metrics()
+        self.assertIn("providers", comp)
+        self.assertIn("local_savings", comp)
+
+        providers = comp["providers"]
+        self.assertIn("claude", providers)
+        self.assertIn("ollama", providers)
+        self.assertEqual(providers["claude"]["tokens_today"], 1500)
+        self.assertEqual(providers["ollama"]["tokens_today"], 300000)
+
+        # Check local savings calculations ($6.00/M tokens benchmark)
+        # 300,000 / 1,000,000 * 6.00 = $1.80
+        savings = comp["local_savings"]
+        self.assertEqual(savings["local_tokens_today"], 300000)
+        self.assertAlmostEqual(savings["savings_today_usd"], 1.80, places=2)
+        self.assertEqual(savings["privacy_rating"], "100% On-Premise")
+
 if __name__ == "__main__":
     unittest.main()
+

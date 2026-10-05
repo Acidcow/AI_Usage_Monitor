@@ -19,22 +19,24 @@
       -webkit-user-select: none;
       height: 100vh;
       box-sizing: border-box;
+      font-family: var(--font-sans);
     }
     .widget-container {
-      background: rgba(15, 22, 36, 0.92);
+      background: rgba(15, 22, 36, 0.94);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 12px;
-      padding: 12px 14px;
+      padding: 10px 12px;
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), 0 0 15px rgba(6, 182, 212, 0.12);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), 0 0 20px rgba(6, 182, 212, 0.15);
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
       height: 100%;
       box-sizing: border-box;
       -webkit-app-region: drag;
       cursor: grab;
+      position: relative;
     }
     .widget-container:active {
       cursor: grabbing;
@@ -48,8 +50,8 @@
     .widget-title {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 0.84rem;
+      gap: 6px;
+      font-size: 0.82rem;
       font-weight: 700;
       color: #fff;
       -webkit-app-region: no-drag;
@@ -63,6 +65,7 @@
     }
     .widget-actions {
       display: flex;
+      align-items: center;
       gap: 5px;
       -webkit-app-region: no-drag;
     }
@@ -71,8 +74,9 @@
       border: 1px solid rgba(255, 255, 255, 0.1);
       color: var(--text-muted);
       border-radius: 6px;
-      padding: 3px 7px;
-      font-size: 0.74rem;
+      padding: 2px 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
       -webkit-app-region: no-drag;
@@ -82,26 +86,135 @@
       background: rgba(255, 255, 255, 0.15);
       border-color: rgba(255, 255, 255, 0.25);
     }
+    .widget-btn-active {
+      background: rgba(6, 182, 212, 0.2);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
     .widget-btn-close:hover {
       color: var(--accent-rose);
       background: rgba(244, 63, 94, 0.2);
       border-color: rgba(244, 63, 94, 0.4);
     }
+
+    /* Multi-Account Dual-Bar List */
+    .accounts-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow-y: auto;
+      max-height: 215px;
+      -webkit-app-region: no-drag;
+      padding-right: 2px;
+    }
+    .accounts-list::-webkit-scrollbar {
+      width: 4px;
+    }
+    .accounts-list::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+    }
+    .account-row-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 6px 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .account-row-card:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(6, 182, 212, 0.4);
+      transform: translateY(-1px);
+    }
+    .account-row-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .account-brand-info {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .account-tok-stat {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--accent-cyan);
+      font-weight: 700;
+    }
+    .dual-bars-box {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .bar-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.63rem;
+    }
+    .bar-tag {
+      width: 48px;
+      color: var(--text-dim);
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .bar-track {
+      flex-grow: 1;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .bar-fill-session {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #06b6d4);
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .bar-fill-week {
+      height: 100%;
+      background: linear-gradient(90deg, #8b5cf6, #3b82f6);
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .bar-pct {
+      width: 28px;
+      text-align: right;
+      font-family: var(--font-mono);
+      font-size: 0.63rem;
+      color: #cbd5e1;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    /* Single Focus View */
+    .single-focus-view {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
     .widget-tokens {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
-      -webkit-app-region: no-drag;
     }
     .widget-tokens .num {
       font-family: var(--font-mono);
-      font-size: 1.5rem;
+      font-size: 1.45rem;
       font-weight: 800;
       color: var(--accent-cyan);
       letter-spacing: -0.02em;
     }
     .widget-tokens .lbl {
-      font-size: 0.68rem;
+      font-size: 0.65rem;
       color: var(--text-dim);
       font-weight: 600;
       letter-spacing: 0.04em;
@@ -110,11 +223,10 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 0.74rem;
+      font-size: 0.72rem;
       color: var(--text-muted);
       border-top: 1px solid rgba(255, 255, 255, 0.07);
-      padding-top: 8px;
-      -webkit-app-region: no-drag;
+      padding-top: 6px;
     }
     .stat-item {
       display: flex;
@@ -125,56 +237,148 @@
       font-weight: 600;
       color: var(--text-main);
     }
+
+    /* Floating Hover Flyout (Weather-style detailed telemetry pop-up) */
+    .weather-flyout {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 8px;
+      right: 8px;
+      background: rgba(12, 17, 29, 0.98);
+      border: 1px solid var(--accent-cyan);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.85), 0 0 24px rgba(6, 182, 212, 0.35);
+      border-radius: 10px;
+      padding: 10px 12px;
+      z-index: 9999;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      display: none;
+      animation: pop-fade 0.18s ease-out forwards;
+      pointer-events: none;
+    }
+    @keyframes pop-fade {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .flyout-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 4px;
+    }
+    .flyout-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      font-size: 0.72rem;
+    }
+    .flyout-field {
+      color: var(--text-dim);
+    }
+    .flyout-val {
+      color: #fff;
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
   <div class="widget-container">
+    <!-- Header -->
     <div class="widget-header">
-      <div style="display: flex; align-items: center; gap: 8px; -webkit-app-region: no-drag;">
+      <div style="display: flex; align-items: center; gap: 6px; -webkit-app-region: no-drag;">
         <img src="/assets/icons/app_icon_johnny5.jpg" alt="Johnny 5" style="width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.4); box-shadow: 0 0 8px rgba(6, 182, 212, 0.3); object-fit: cover; flex-shrink: 0;" title="AI Usage Monitor • Johnny 5">
-        <div class="widget-title" onclick="window.Widget.cycleProvider()" title="Click to cycle active provider (Claude, Gemini, ChatGPT, Ollama, Copilot)">
+        <div class="widget-title" id="w-header-title" onclick="window.Widget.cycleProvider()" title="Click to cycle active provider">
           <span class="dot dot-green" id="w-status-dot"></span>
-          <span id="w-provider-name">Claude</span>
-          <span class="badge badge-claude" id="w-plan-badge" style="font-size: 0.65rem; padding: 2px 6px;">Pro</span>
-          <span style="font-size: 0.65rem; opacity: 0.5;">▼</span>
+          <span id="w-provider-name">All Accounts</span>
+          <span class="badge badge-claude" id="w-plan-badge" style="font-size: 0.62rem; padding: 1px 5px;">Live</span>
         </div>
       </div>
       <div class="widget-actions">
-        <button class="widget-btn" onclick="window.Widget.sync()" title="Sync Token Quota">🔄</button>
+        <!-- View Mode Switcher -->
+        <button class="widget-btn widget-btn-active" id="btn-mode-multi" onclick="window.Widget.setViewMode('multi')" title="Show All Accounts with Dual Bars">⊞ Accounts</button>
+        <button class="widget-btn" id="btn-mode-single" onclick="window.Widget.setViewMode('single')" title="Focus Single Account">⚲ Focus</button>
+        <button class="widget-btn" onclick="window.Widget.sync()" title="Sync Token Quotas">🔄</button>
         <button class="widget-btn" onclick="window.open('/', '_blank')" title="Open Full Dashboard">↗</button>
         <button class="widget-btn widget-btn-close" onclick="window.close()" title="Close Widget Window">✕</button>
       </div>
     </div>
 
-    <div class="widget-tokens">
-      <div>
-        <div class="num" id="w-tokens-today">0</div>
-        <div class="lbl" id="w-tokens-lbl">CLAUDE TOKENS TODAY</div>
-      </div>
-      <div style="text-align: right;">
-        <div style="font-family: var(--font-mono); font-size: 0.95rem; color: #cbd5e1;" id="w-tokens-remaining">--</div>
-        <div class="lbl">QUOTA REMAINING</div>
+    <!-- Mode 1: Multi-Account Dual-Bar Overview (Default) -->
+    <div class="accounts-list" id="w-multi-accounts-container">
+      <!-- Injected dynamically by widget.js -->
+      <div style="text-align: center; color: var(--text-dim); padding: 20px; font-size: 0.75rem;">
+        Loading live accounts telemetry...
       </div>
     </div>
 
-    <!-- Mini Progress Bar -->
-    <div class="progress-bar-container" style="height: 5px; margin: 0; background: rgba(255,255,255,0.06);">
-      <div class="progress-bar-fill" id="w-progress-fill" style="width: 85%;"></div>
+    <!-- Mode 2: Single Account Focus View -->
+    <div class="single-focus-view" id="w-single-container" style="display: none;">
+      <div class="widget-tokens">
+        <div>
+          <div class="num" id="w-tokens-today">0</div>
+          <div class="lbl" id="w-tokens-lbl">CLAUDE TOKENS TODAY</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-family: var(--font-mono); font-size: 0.95rem; color: #cbd5e1;" id="w-tokens-remaining">--</div>
+          <div class="lbl">QUOTA REMAINING</div>
+        </div>
+      </div>
+
+      <div class="progress-bar-container" style="height: 5px; margin: 0; background: rgba(255,255,255,0.06);">
+        <div class="progress-bar-fill" id="w-progress-fill" style="width: 85%;"></div>
+      </div>
+
+      <div class="widget-stats-row">
+        <div class="stat-item">
+          <span style="font-size: 0.62rem; color: var(--text-dim); font-weight: 600;">RESET IN</span>
+          <span class="stat-val" id="w-reset-time">--</span>
+        </div>
+        <div class="stat-item" style="text-align: center;">
+          <span style="font-size: 0.62rem; color: var(--text-dim); font-weight: 600;">SESSIONS</span>
+          <span class="stat-val" id="w-session-count">0</span>
+        </div>
+        <div class="stat-item" style="text-align: right;">
+          <span style="font-size: 0.62rem; color: var(--text-dim); font-weight: 600;">EST. COST</span>
+          <span class="stat-val" id="w-cost-val">$0.000</span>
+        </div>
+      </div>
     </div>
 
-    <!-- Bottom Stats -->
-    <div class="widget-stats-row">
-      <div class="stat-item">
-        <span style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600;">RESET IN</span>
-        <span class="stat-val" id="w-reset-time">--</span>
+    <!-- Bottom Ambient Strip: Local Cost Savings -->
+    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.07); padding-top: 5px; font-size: 0.65rem; color: var(--text-muted); -webkit-app-region: no-drag;">
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <span style="color: var(--accent-emerald);">💰 Local AI Saved:</span>
+        <span style="font-family: var(--font-mono); font-weight: 700; color: #34d399;" id="w-savings-val">$0.00</span>
       </div>
-      <div class="stat-item" style="text-align: center;">
-        <span style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600;">SESSIONS</span>
-        <span class="stat-val" id="w-session-count">0</span>
+      <span style="color: var(--text-dim); font-size: 0.62rem;">Proxy Port 8766 Active</span>
+    </div>
+
+    <!-- Weather-Style Hover Pop-up Flyout -->
+    <div class="weather-flyout" id="w-hover-flyout">
+      <div class="flyout-header">
+        <strong id="flyout-provider-name" style="font-size: 0.8rem; color: #fff;">Claude</strong>
+        <span class="badge" id="flyout-badge" style="font-size: 0.65rem;">Active</span>
       </div>
-      <div class="stat-item" style="text-align: right;">
-        <span style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600;">EST. COST</span>
-        <span class="stat-val" id="w-cost-val">$0.000</span>
+      <div class="flyout-grid">
+        <div>
+          <span class="flyout-field">Tokens Used Today:</span><br>
+          <span class="flyout-val" id="flyout-tokens-today">0</span>
+        </div>
+        <div>
+          <span class="flyout-field">Weekly Tokens:</span><br>
+          <span class="flyout-val" id="flyout-tokens-week">0</span>
+        </div>
+        <div>
+          <span class="flyout-field">Session Allowance:</span><br>
+          <span class="flyout-val" id="flyout-session-rem">--</span>
+        </div>
+        <div>
+          <span class="flyout-field">Weekly Allowance:</span><br>
+          <span class="flyout-val" id="flyout-weekly-rem">--</span>
+        </div>
       </div>
     </div>
   </div>

@@ -285,3 +285,124 @@ class UsageDatabase:
             conn.close()
 
         return [dict(r) for r in rows]
+
+    def get_comparative_metrics(self) -> Dict[str, Any]:
+        """
+        Returns comparative analytics across all accounts plus local AI cost savings analysis.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc)
+        today_prefix = now.strftime("%Y-%m-%d")
+        week_cutoff = (now - datetime.timedelta(days=7)).isoformat()
+
+        all_known_providers = ["claude", "gemini", "chatgpt", "ollama", "copilot"]
+        allowance_defaults = {
+            "claude": 500000,
+            "gemini": 1000000,
+            "chatgpt": 2000000,
+            "ollama": 5000000,
+            "copilot": 250000
+        }
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Query all-time stats per provider
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(SUM(total_tokens), 0) as total_tokens,
+                    COALESCE(SUM(estimated_cost), 0.0) as total_cost,
+                    COUNT(DISTINCT session_id) as session_count
+                FROM usage_events
+                GROUP BY provider
+            """)
+            all_time_rows = {r["provider"].lower(): dict(r) for r in cursor.fetchall()}
+
+            # Query today stats per provider
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(SUM(total_tokens), 0) as tokens_today,
+                    COALESCE(SUM(estimated_cost), 0.0) as cost_today
+                FROM usage_events
+                WHERE recorded_at >= ?
+                GROUP BY provider
+            """, (f"{today_prefix}T00:00:00",))
+            today_rows = {r["provider"].lower(): dict(r) for r in cursor.fetchall()}
+
+            # Query week stats per provider
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(SUM(total_tokens), 0) as tokens_week,
+                    COALESCE(SUM(estimated_cost), 0.0) as cost_week
+                FROM usage_events
+                WHERE recorded_at >= ?
+                GROUP BY provider
+            """, (week_cutoff,))
+            week_rows = {r["provider"].lower(): dict(r) for r in cursor.fetchall()}
+
+            conn.close()
+
+        # Calculate totals
+        total_tokens_today_all = sum(r.get("tokens_today", 0) for r in today_rows.values())
+        total_tokens_week_all = sum(r.get("tokens_week", 0) for r in week_rows.values())
+
+        providers_comparison = {}
+        for prov in all_known_providers:
+            at = all_time_rows.get(prov, {})
+            td = today_rows.get(prov, {})
+            wk = week_rows.get(prov, {})
+
+            tokens_today = td.get("tokens_today", 0)
+            tokens_week = wk.get("tokens_week", 0)
+            tokens_total = at.get("total_tokens", 0)
+            daily_allowance = allowance_defaults.get(prov, 500000)
+            weekly_allowance = daily_allowance * 7
+
+            share_pct = round((tokens_today / total_tokens_today_all * 100), 1) if total_tokens_today_all > 0 else 0.0
+            session_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_today / daily_allowance)) * 100, 1)))
+            weekly_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_week / weekly_allowance)) * 100, 1)))
+
+            providers_comparison[prov] = {
+                "provider": prov,
+                "tokens_today": tokens_today,
+                "tokens_week": tokens_week,
+                "tokens_total": tokens_total,
+                "cost_today_usd": round(td.get("cost_today", 0.0), 4),
+                "cost_week_usd": round(wk.get("cost_week", 0.0), 4),
+                "cost_total_usd": round(at.get("total_cost", 0.0), 4),
+                "sessions_count": at.get("session_count", 0),
+                "share_percentage": share_pct,
+                "daily_allowance": daily_allowance,
+                "weekly_allowance": weekly_allowance,
+                "session_balance_remaining_pct": session_rem_pct,
+                "weekly_balance_remaining_pct": weekly_rem_pct
+            }
+
+        # Local Model (Ollama) Cost Savings Calculation
+        # Benchmark rate: $6.00 per million tokens (blended frontier cloud average)
+        FRONTIER_RATE_PER_M = 6.00
+        ollama_data = providers_comparison.get("ollama", {})
+        local_tok_today = ollama_data.get("tokens_today", 0)
+        local_tok_total = ollama_data.get("tokens_total", 0)
+
+        local_savings = {
+            "local_tokens_today": local_tok_today,
+            "local_tokens_total": local_tok_total,
+            "benchmark_rate_per_million": FRONTIER_RATE_PER_M,
+            "benchmark_model": "Claude 3.5 Sonnet / GPT-4o Frontier Blended",
+            "savings_today_usd": round((local_tok_today / 1000000.0) * FRONTIER_RATE_PER_M, 4),
+            "savings_total_usd": round((local_tok_total / 1000000.0) * FRONTIER_RATE_PER_M, 2),
+            "privacy_rating": "100% On-Premise",
+            "hardware_source": "Local Ollama Engine"
+        }
+
+        return {
+            "timestamp": now.isoformat(),
+            "total_tokens_today": total_tokens_today_all,
+            "total_tokens_week": total_tokens_week_all,
+            "providers": providers_comparison,
+            "local_savings": local_savings
+        }

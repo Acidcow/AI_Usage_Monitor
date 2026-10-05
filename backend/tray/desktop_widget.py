@@ -128,8 +128,7 @@ def launch_desktop_widget(
             proc = subprocess.Popen(
                 args,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True
+                stderr=subprocess.DEVNULL
             )
             return {
                 "success": True,
@@ -138,7 +137,14 @@ def launch_desktop_widget(
                 "position": pos
             }
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            import webbrowser
+            webbrowser.open(url)
+            return {
+                "success": True,
+                "mode": "browser_fallback_after_error",
+                "error": str(e),
+                "url": url
+            }
 
     # Fallback to standard browser launch
     import webbrowser

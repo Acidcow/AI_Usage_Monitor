@@ -120,7 +120,13 @@ def main():
             webbrowser.open(dashboard_url)
 
         def open_wid():
-            launch_desktop_widget(host=args.host, port=server.server_port)
+            try:
+                print(f"[WIDGET] Launching mini desktop widget for http://{args.host}:{server.server_port}...")
+                res = launch_desktop_widget(host=args.host, port=server.server_port)
+                print(f"[WIDGET] Launch result: {res}")
+            except Exception as e:
+                print(f"[WIDGET ERROR] Exception launching widget: {e}, opening browser...")
+                webbrowser.open(f"http://{args.host}:{server.server_port}/mini_widget.html")
 
         def sync_all():
             print("[SYNC] Triggering provider sync...")

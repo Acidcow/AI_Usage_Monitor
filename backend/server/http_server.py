@@ -111,6 +111,10 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             hourly = srv.database.get_hourly_breakdown(hours=hours, provider=provider)
             return self._send_json(200, hourly)
 
+        if path == "/api/usage/comparison":
+            comp = srv.database.get_comparative_metrics()
+            return self._send_json(200, comp)
+
         if path == "/api/providers":
             result = {}
             for name, prov in srv.providers.items():
@@ -185,11 +189,14 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/providers/gemini/config":
             api_key = body.get("api_key")
+            project_id = body.get("project_id")
             gemini_prov = srv.providers.get("gemini")
             if api_key and gemini_prov:
-                gemini_prov.configure_api_key(api_key)
+                gemini_prov.configure_api_key(api_key, project_id=project_id)
             elif api_key:
                 srv.vault.set_credential("gemini", "default", api_key)
+                if project_id:
+                    srv.vault.set_credential("gemini", "project_id", project_id)
             return self._send_json(200, {"success": True, "message": "Google Gemini configuration saved"})
 
         if path == "/api/providers/chatgpt/config":

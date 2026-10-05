@@ -151,5 +151,27 @@ class TestHTTPAPI(unittest.TestCase):
                 data = resp.read()
                 self.assertGreater(len(data), 1000, f"Asset file {path} was unexpectedly small or empty")
 
+    def test_api_usage_comparison(self):
+        status, data = self._get("/api/usage/comparison")
+        self.assertEqual(status, 200)
+        self.assertIn("providers", data)
+        self.assertIn("local_savings", data)
+        self.assertIn("claude", data["providers"])
+        self.assertIn("ollama", data["providers"])
+
+    def test_api_gemini_config_with_project_id(self):
+        payload = {
+            "api_key": "AIzaSyKeyOne, AIzaSyKeyTwo",
+            "project_id": "my-gcp-project-123"
+        }
+        status, data = self._post("/api/providers/gemini/config", payload)
+        self.assertEqual(status, 200)
+        self.assertTrue(data["success"])
+        stored_key = self.vault.get_credential("gemini", "default")
+        stored_proj = self.vault.get_credential("gemini", "project_id")
+        self.assertIn("AIzaSyKeyOne", stored_key)
+        self.assertEqual(stored_proj, "my-gcp-project-123")
+
 if __name__ == "__main__":
     unittest.main()
+

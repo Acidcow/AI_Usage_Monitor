@@ -74,19 +74,28 @@ window.App = {
       const provSelect = document.getElementById("filter-session-provider");
       const providerParam = provSelect && provSelect.value ? `?provider=${provSelect.value}` : '';
 
-      const [summaryRes, providersRes, sessionsRes, errorsRes, hourlyRes] = await Promise.all([
+      const [summaryRes, providersRes, sessionsRes, errorsRes, hourlyRes, compRes] = await Promise.all([
         fetch("/api/usage/summary"),
         fetch("/api/providers"),
         fetch(`/api/usage/sessions${providerParam}`),
         fetch("/api/diagnostics/errors?limit=30"),
-        fetch("/api/usage/hourly?hours=24")
+        fetch("/api/usage/hourly?hours=24"),
+        fetch("/api/usage/comparison")
       ]);
+
+      let compData = null;
+      if (compRes.ok) {
+        compData = await compRes.json();
+      }
 
       if (summaryRes.ok && providersRes.ok) {
         const summary = await summaryRes.json();
         const providers = await providersRes.json();
         this.renderGauges(summary, providers);
         this.renderPills(providers, summary);
+        if (compData) {
+          this.renderComparison(compData, providers);
+        }
       }
 
       if (sessionsRes.ok) {
@@ -152,6 +161,100 @@ window.App = {
       const secs = secondsLeft % 60;
       claudeResetEl.innerText = `Reset In: ${mins}m ${secs}s`;
     }
+  },
+
+  renderComparison(comp, providers) {
+    if (!comp) return;
+
+    // 1. Local AI ROI Savings
+    if (comp.local_savings) {
+      const ls = comp.local_savings;
+      const savTodayEl = document.getElementById("val-savings-today");
+      const savTotalEl = document.getElementById("val-savings-total");
+      const savTokEl = document.getElementById("val-savings-tokens");
+
+      if (savTodayEl) savTodayEl.innerText = `$${Number(ls.savings_today_usd || 0).toFixed(2)}`;
+      if (savTotalEl) savTotalEl.innerText = `$${Number(ls.savings_total_usd || 0).toFixed(2)}`;
+      if (savTokEl) savTokEl.innerText = `${Number(ls.local_tokens_today || 0).toLocaleString()} tok`;
+    }
+
+    // 2. Comparative Accounts Breakdown Table
+    const tbody = document.getElementById("comparison-table-body");
+    if (!tbody) return;
+
+    const allKeys = ["claude", "gemini", "chatgpt", "ollama", "copilot"];
+    const displayNames = {
+      claude: "Claude (Anthropic)",
+      gemini: "Google Gemini",
+      chatgpt: "ChatGPT / OpenAI",
+      ollama: "Ollama (Local Engine)",
+      copilot: "M365 Copilot"
+    };
+
+    const provMap = comp.providers || {};
+    let html = "";
+
+    allKeys.forEach(key => {
+      const item = provMap[key] || {
+        tokens_today: 0,
+        share_percentage: 0,
+        session_balance_remaining_pct: 100,
+        weekly_balance_remaining_pct: 100,
+        cost_today_usd: 0,
+        daily_allowance: 500000,
+        weekly_allowance: 3500000
+      };
+      const provInfo = providers[key] || {};
+      const isOnline = provInfo.status === "ACTIVE";
+      const dotClass = isOnline ? "dot-green" : (provInfo.status === "ERROR" ? "dot-red" : "dot-gray");
+      const statusText = isOnline ? "Active" : (provInfo.status || "Ready");
+
+      const sessionPct = item.session_balance_remaining_pct ?? 100;
+      const weeklyPct = item.weekly_balance_remaining_pct ?? 100;
+      const costDisplay = key === "ollama" ? `<span style="color: #34d399; font-weight: 700;">$0.000 (Free)</span>` : `$${Number(item.cost_today_usd || 0).toFixed(3)}`;
+
+      html += `
+        <tr>
+          <td>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="dot ${dotClass}"></span>
+              <strong style="color: #fff; font-size: 0.9rem;">${displayNames[key]}</strong>
+            </div>
+          </td>
+          <td>
+            <span class="badge badge-${key}" style="font-size: 0.7rem;">${provInfo.plan_type || 'Active'}</span>
+            <span style="font-size: 0.72rem; color: var(--text-dim); margin-left: 4px;">${statusText}</span>
+          </td>
+          <td style="font-family: var(--font-mono); font-weight: 700; color: var(--text-main);">
+            ${Number(item.tokens_today).toLocaleString()}
+          </td>
+          <td style="font-family: var(--font-mono); color: var(--accent-cyan); font-weight: 600;">
+            ${item.share_percentage}%
+          </td>
+          <td>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
+                <div class="progress-bar-fill" style="width: ${Math.max(4, sessionPct)}%; background: ${sessionPct < 20 ? 'var(--accent-rose)' : 'linear-gradient(90deg, #10b981, #06b6d4)'};"></div>
+              </div>
+              <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${sessionPct}%</span>
+            </div>
+          </td>
+          <td>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
+                <div class="progress-bar-fill" style="width: ${Math.max(4, weeklyPct)}%; background: ${weeklyPct < 20 ? 'var(--accent-amber)' : 'linear-gradient(90deg, #8b5cf6, #3b82f6)'};"></div>
+              </div>
+              <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${weeklyPct}%</span>
+            </div>
+          </td>
+          <td style="font-family: var(--font-mono); font-size: 0.82rem;">
+            ${costDisplay}
+          </td>
+        </tr>
+      `;
+    });
+
+    tbody.innerHTML = html;
   },
 
   renderPills(providers, summary) {
@@ -511,9 +614,11 @@ window.App = {
 
   async saveGeminiConfig() {
     const keyInput = document.getElementById("gemini-api-key-input");
+    const projInput = document.getElementById("gemini-project-id-input");
     const apiKey = keyInput ? keyInput.value.trim() : "";
+    const projectId = projInput ? projInput.value.trim() : "";
     if (!apiKey) {
-      alert("Please enter a Google Gemini API key (or click 'Get Gemini API Key' to procure one in Google AI Studio).");
+      alert("Please enter a Google Gemini API key (or multiple keys separated by commas for aggregated tracking).");
       return;
     }
 
@@ -521,10 +626,10 @@ window.App = {
       const res = await fetch("/api/providers/gemini/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: apiKey })
+        body: JSON.stringify({ api_key: apiKey, project_id: projectId })
       });
       if (res.ok) {
-        alert("✓ Google Gemini API key securely encrypted with Windows DPAPI!");
+        alert("✓ Google Gemini configuration securely encrypted with Windows DPAPI!");
         this.closeConfigureGeminiModal();
         if (keyInput) keyInput.value = "";
         await this.loadUsageData();
