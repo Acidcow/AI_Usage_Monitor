@@ -194,7 +194,7 @@ class WindowsTrayManager:
                     return 0
 
                 elif msg == WM_COMMAND:
-                    cmd_id = wintypes.LOWORD(wparam)
+                    cmd_id = int(wparam) & 0xFFFF
                     if cmd_id == CMD_DASHBOARD:
                         if self.on_open_dashboard:
                             self.on_open_dashboard()
@@ -238,7 +238,7 @@ class WindowsTrayManager:
                 ]
 
             hinstance = kernel32.GetModuleHandleW(None)
-            class_name = "AIUsageMonitorTrayClass"
+            class_name = f"AIUsageMonitorTrayClass_{id(self)}_{int(time.time() * 1000)}"
             self._proc_delegate = WNDPROC(wnd_proc)  # Retain reference to prevent garbage collection crash
 
             wcls = WNDCLASSW()
