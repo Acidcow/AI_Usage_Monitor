@@ -1,0 +1,53 @@
+<div class="metrics-grid">
+  <!-- Metric 1: Total Tokens Today -->
+  <div class="glass-card metric-card">
+    <div class="metric-header">
+      <span>TODAY'S TOKENS</span>
+      <span style="font-size: 1.1rem;">⚡</span>
+    </div>
+    <div class="metric-value" id="val-total-tokens">0</div>
+    <div class="metric-subtext" id="val-tokens-breakdown">In: 0 | Out: 0</div>
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="fill-tokens-today" style="width: 5%;"></div>
+    </div>
+  </div>
+
+  <!-- Metric 2: Claude Rate Limit / Quota -->
+  <div class="glass-card metric-card">
+    <div class="metric-header">
+      <span>CLAUDE TOKENS REMAINING</span>
+      <span class="badge badge-claude" id="claude-quota-badge">Active</span>
+    </div>
+    <div class="metric-value" id="val-claude-remaining">--</div>
+    <div class="metric-subtext" id="val-claude-reset">Reset In: Calculating...</div>
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="fill-claude-quota" style="width: 90%;"></div>
+    </div>
+  </div>
+
+  <!-- Metric 3: Active Sessions -->
+  <div class="glass-card metric-card">
+    <div class="metric-header">
+      <span>SESSIONS TRACKED</span>
+      <span style="font-size: 1.1rem;">📂</span>
+    </div>
+    <div class="metric-value" id="val-total-sessions">0</div>
+    <div class="metric-subtext" id="val-sessions-month">Month tokens: 0</div>
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="fill-sessions" style="width: 25%; background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan));"></div>
+    </div>
+  </div>
+
+  <!-- Metric 4: Estimated Cost & Proxy Status -->
+  <div class="glass-card metric-card">
+    <div class="metric-header">
+      <span>ESTIMATED TODAY'S COST</span>
+      <span style="font-size: 1.1rem;">💳</span>
+    </div>
+    <div class="metric-value" id="val-total-cost">$0.000</div>
+    <div class="metric-subtext" id="val-proxy-status">Local Proxy: Ready (Port 8766)</div>
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="fill-cost" style="width: 15%; background: linear-gradient(90deg, var(--accent-emerald), var(--accent-cyan));"></div>
+    </div>
+  </div>
+</div>

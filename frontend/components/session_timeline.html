@@ -1,0 +1,42 @@
+<div class="glass-card" style="margin-bottom: 28px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <div>
+      <h2 style="font-size: 1.1rem; font-weight: 700;">Recent Agentic Sessions & Tokens</h2>
+      <p style="font-size: 0.8rem; color: var(--text-muted);">Real-time capture via Direct API, Local Transparent Proxy, and CLI monitor.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <select id="filter-session-provider" style="background: rgba(255,255,255,0.06); color: var(--text-main); border: 1px solid var(--border-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 0.82rem;">
+        <option value="">All Providers</option>
+        <option value="claude">Claude</option>
+        <option value="copilot">M365 Copilot</option>
+        <option value="gemini">Gemini</option>
+        <option value="ollama">Ollama</option>
+      </select>
+      <button class="btn btn-secondary" onclick="window.App.loadUsageData()">Refresh</button>
+    </div>
+  </div>
+
+  <div class="data-table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Session ID</th>
+          <th>Provider</th>
+          <th>Model</th>
+          <th>Input Tokens</th>
+          <th>Output Tokens</th>
+          <th>Total Tokens</th>
+          <th>Est. Cost</th>
+          <th>Last Activity</th>
+        </tr>
+      </thead>
+      <tbody id="sessions-table-body">
+        <tr>
+          <td colspan="8" style="text-align: center; color: var(--text-dim); padding: 30px;">
+            Loading recent sessions...
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

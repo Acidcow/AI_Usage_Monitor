@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Usage Monitor | Token & Quota Tracker</title>
+  <meta name="description" content="Zero-dependency, privacy-first desktop monitor and taskbar widget for AI tokens, sessions, quotas, and rates.">
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Application Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-text">
+        <h1>AI Usage Monitor</h1>
+        <span>Zero-Dependency • Windows Native • Multi-Provider</span>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+      <button class="nav-tab" data-tab="providers">Accounts & Proxy</button>
+      <button class="nav-tab" data-tab="troubleshooting">Troubleshooting</button>
+    </nav>
+
+    <!-- Header Actions -->
+    <div class="header-actions">
+      <button class="btn btn-secondary" onclick="window.open('/mini_widget.html', 'AIUsageWidget', 'width=420,height=220,menubar=no,toolbar=no,location=no,status=no,resizable=yes')">
+        🪟 Mini Widget
+      </button>
+      <button class="btn btn-primary" onclick="window.App.loadUsageData()">
+        🔄 Sync Now
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="container">
+    <!-- Top Status Pills (Canonical Component Container) -->
+    <div id="container-header-status"></div>
+
+    <!-- Tab 1: Dashboard View -->
+    <div class="tab-content active" id="tab-dashboard">
+      <div id="container-usage-gauges"></div>
+      <div id="container-session-timeline"></div>
+    </div>
+
+    <!-- Tab 2: Providers & Proxy View -->
+    <div class="tab-content" id="tab-providers">
+      <div id="container-provider-hub"></div>
+    </div>
+
+    <!-- Tab 3: Troubleshooting View -->
+    <div class="tab-content" id="tab-troubleshooting">
+      <div id="container-troubleshooter"></div>
+    </div>
+  </main>
+
+  <!-- Claude Configuration Modal -->
+  <div class="modal-overlay" id="claude-config-modal">
+    <div class="modal-box">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 1.15rem; font-weight: 700;">Configure Claude (Anthropic)</h3>
+        <button onclick="window.App.closeConfigureClaudeModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
+      </div>
+
+      <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
+        Keys are encrypted immediately using <strong>Windows DPAPI</strong> (<code>crypt32.dll</code>). They are tied to your Windows logon and protected from unauthorized user processes.
+      </p>
+
+      <div class="form-group">
+        <label for="claude-api-key-input">Anthropic API Key (Optional if using Proxy)</label>
+        <input type="password" id="claude-api-key-input" placeholder="sk-ant-api03-..." autocomplete="off">
+      </div>
+
+      <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px; margin-top: 16px;">
+        <input type="checkbox" id="claude-sim-checkbox" style="width: 18px; height: 18px; cursor: pointer;">
+        <label for="claude-sim-checkbox" style="cursor: pointer; font-size: 0.85rem; color: var(--text-main);">
+          Enable Simulation / Demo Mode (Generates live realistic token stream without billing)
+        </label>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+        <button class="btn btn-secondary" onclick="window.App.closeConfigureClaudeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="window.App.saveClaudeConfig()">Save (Encrypt with DPAPI)</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

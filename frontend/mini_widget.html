@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Usage Widget</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background: rgba(10, 14, 22, 0.95);
+      margin: 0;
+      padding: 12px;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .widget-container {
+      background: rgba(18, 24, 38, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 14px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .widget-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .widget-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .widget-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .widget-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .widget-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.15);
+    }
+    .widget-tokens {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .widget-tokens .num {
+      font-family: var(--font-mono);
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--accent-cyan);
+      letter-spacing: -0.02em;
+    }
+    .widget-tokens .lbl {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }
+    .widget-stats-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding-top: 8px;
+    }
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+    }
+    .stat-val {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--text-main);
+    }
+  </style>
+</head>
+<body>
+  <div class="widget-container">
+    <div class="widget-header">
+      <div class="widget-title">
+        <span class="dot dot-green" id="w-status-dot"></span>
+        <span id="w-provider-name">Claude</span>
+        <span class="badge badge-claude" id="w-plan-badge" style="font-size: 0.65rem; padding: 2px 6px;">Pro</span>
+      </div>
+      <div class="widget-actions">
+        <button class="widget-btn" onclick="window.Widget.sync()" title="Sync Token Quota">🔄</button>
+        <button class="widget-btn" onclick="window.open('/', '_blank')" title="Open Full Dashboard">↗</button>
+      </div>
+    </div>
+
+    <div class="widget-tokens">
+      <div>
+        <div class="num" id="w-tokens-today">0</div>
+        <div class="lbl">TOKENS USED TODAY</div>
+      </div>
+      <div style="text-align: right;">
+        <div style="font-family: var(--font-mono); font-size: 1rem; color: #cbd5e1;" id="w-tokens-remaining">--</div>
+        <div class="lbl">QUOTA REMAINING</div>
+      </div>
+    </div>
+
+    <!-- Mini Progress Bar -->
+    <div class="progress-bar-container" style="height: 6px; margin: 0;">
+      <div class="progress-bar-fill" id="w-progress-fill" style="width: 85%;"></div>
+    </div>
+
+    <!-- Bottom Stats -->
+    <div class="widget-stats-row">
+      <div class="stat-item">
+        <span style="font-size: 0.68rem; color: var(--text-dim);">RESET IN</span>
+        <span class="stat-val" id="w-reset-time">--</span>
+      </div>
+      <div class="stat-item" style="text-align: center;">
+        <span style="font-size: 0.68rem; color: var(--text-dim);">SESSIONS</span>
+        <span class="stat-val" id="w-session-count">0</span>
+      </div>
+      <div class="stat-item" style="text-align: right;">
+        <span style="font-size: 0.68rem; color: var(--text-dim);">EST. COST</span>
+        <span class="stat-val" id="w-cost-val">$0.000</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/widget.js"></script>
+</body>
+</html>

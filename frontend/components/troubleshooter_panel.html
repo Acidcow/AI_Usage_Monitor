@@ -1,0 +1,21 @@
+<div class="glass-card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <div>
+      <h2 style="font-size: 1.15rem; font-weight: 700;">Proactive Diagnostics & Error Log</h2>
+      <p style="font-size: 0.8rem; color: var(--text-muted);">
+        All sensitive keys, session tokens, and personal Windows usernames are <strong>automatically redacted</strong> before logging.
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-primary" onclick="window.App.copyDiagnosticBundle()">📋 Copy Diagnostic Bundle</button>
+      <button class="btn btn-secondary" onclick="window.App.downloadDiagnosticBundle()">💾 Download Report</button>
+      <button class="btn btn-danger" onclick="window.App.clearDiagnostics()">Clear Log</button>
+    </div>
+  </div>
+
+  <div class="error-log-box" id="error-log-container">
+    <div style="color: var(--text-dim); text-align: center; padding: 20px;">
+      No unhandled errors or rate limit alerts recorded. System operational.
+    </div>
+  </div>
+</div>

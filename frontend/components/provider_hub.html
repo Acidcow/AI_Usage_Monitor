@@ -1,0 +1,99 @@
+<div class="glass-card" style="margin-bottom: 28px;">
+  <div style="margin-bottom: 20px;">
+    <h2 style="font-size: 1.15rem; font-weight: 700;">Provider Accounts & Adapters</h2>
+    <p style="font-size: 0.82rem; color: var(--text-muted);">
+      Credentials are encrypted natively using <strong>Windows DPAPI</strong> (tied directly to your Windows login). Plaintext keys are never stored on disk.
+    </p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+    <!-- Claude Card -->
+    <div class="glass-card" style="border-left: 4px solid var(--claude-color); background: rgba(18, 24, 38, 0.9);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">🟠</span>
+          <strong>Claude (Anthropic)</strong>
+        </div>
+        <span class="badge badge-claude" id="hub-claude-status">Active</span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+        Tracks token usage, rate limits, and quota across CLI tools, web sessions, and direct API.
+      </p>
+
+      <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 0.78rem;">
+        <div style="color: var(--accent-cyan); font-weight: 600; margin-bottom: 4px;">Transparent CLI Proxy Endpoint:</div>
+        <code style="font-family: var(--font-mono); color: #e2e8f0; display: block; word-break: break-all;" id="claude-proxy-url">http://127.0.0.1:8766/v1</code>
+        <span style="color: var(--text-dim); font-size: 0.72rem; margin-top: 4px; display: block;">Set as base URL in your CLI / IDE plugins to capture tokens automatically with zero latency!</span>
+      </div>
+
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button class="btn btn-primary" onclick="window.App.openConfigureClaudeModal()">Configure API Key</button>
+        <button class="btn btn-secondary" onclick="window.App.triggerClaudeSimulation()">Simulate Usage (Demo)</button>
+        <button class="btn btn-secondary" onclick="window.App.syncProvider('claude')">Sync Now</button>
+      </div>
+    </div>
+
+    <!-- M365 Copilot Card -->
+    <div class="glass-card" style="border-left: 4px solid var(--copilot-color); background: rgba(18, 24, 38, 0.9);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">🔵</span>
+          <strong>M365 Copilot</strong>
+        </div>
+        <span class="badge badge-copilot">Restricted</span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+        Protected by intense corporate access controls. Monitored through local proxy telemetry and log ingestion fallbacks.
+      </p>
+      <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 0.78rem;">
+        <div style="color: var(--accent-blue); font-weight: 600; margin-bottom: 4px;">Enterprise Adapter Mode:</div>
+        <span style="color: #cbd5e1;">Passive Ingestion via Local Log Scraper & Proxy Header Monitor.</span>
+      </div>
+      <button class="btn btn-secondary" onclick="window.App.syncProvider('copilot')">Check Adapter</button>
+    </div>
+
+    <!-- Gemini Card -->
+    <div class="glass-card" style="border-left: 4px solid var(--gemini-color); background: rgba(18, 24, 38, 0.9);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">💎</span>
+          <strong>Google Gemini</strong>
+        </div>
+        <span class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa;">Ready</span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+        Connect Google AI Studio or Vertex AI projects for token and quota monitoring.
+      </p>
+      <button class="btn btn-secondary" onclick="alert('Gemini API key management ready for Phase 2!')">Configure Gemini</button>
+    </div>
+
+    <!-- Ollama Card -->
+    <div class="glass-card" style="border-left: 4px solid var(--ollama-color); background: rgba(18, 24, 38, 0.9);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">🦙</span>
+          <strong>Ollama Local</strong>
+        </div>
+        <span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399;" id="hub-ollama-badge">Local Host</span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+        Monitors models, active inference sessions, and VRAM tokens on <code>http://localhost:11434</code>.
+      </p>
+      <button class="btn btn-secondary" onclick="window.App.syncProvider('ollama')">Test Connection</button>
+    </div>
+
+    <!-- ChatGPT Card (Placeholder) -->
+    <div class="glass-card" style="opacity: 0.65; border-left: 4px solid var(--text-dim); background: rgba(18, 24, 38, 0.9);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">🟢</span>
+          <strong>ChatGPT / OpenAI</strong>
+        </div>
+        <span class="badge" style="background: rgba(255,255,255,0.06); color: var(--text-muted);">Coming Soon</span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+        Scheduled for next release cycle. Stubs and schema slots are prepared.
+      </p>
+    </div>
+  </div>
+</div>
