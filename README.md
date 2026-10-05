@@ -3,11 +3,11 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Architecture](https://img.shields.io/badge/Dependencies-Zero%20External%20Deps-emerald.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Security](https://img.shields.io/badge/Security-Windows%20DPAPI%20Native-purple.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
-[![Tests](https://img.shields.io/badge/Tests-25%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
+[![Tests](https://img.shields.io/badge/Tests-35%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 
 A lightweight, security-first, zero-dependency desktop service and web dashboard that monitors AI token usage, sessions, rate limits, and costs across providers (**Claude**, **M365 Copilot**, **Google Gemini**, **Ollama**, and **ChatGPT**).
 
-Includes an ambient **Windows System Tray** notification icon and a **Compact Status Bar Widget** designed for seamless desktop monitoring.
+Includes an ambient **Windows System Tray** notification icon, a **Compact Status Bar Widget**, and automatic **Local Telemetry Scanners** for real agentic coding tool data.
 
 ---
 

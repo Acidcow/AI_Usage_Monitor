@@ -229,12 +229,50 @@ def generate_release_notes(version: str, out_file: str = None):
     print(f"[OK] Release notes generated at {target}")
     conn.close()
 
+def add_epic(epic_id: str, title: str, description: str = ""):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    cursor.execute('''
+        INSERT INTO epics (id, title, description, status, created_at, updated_at)
+        VALUES (?, ?, ?, 'In Progress', ?, ?)
+    ''', (epic_id, title, description, now, now))
+    conn.commit()
+    conn.close()
+    print(f"[OK] Epic '{epic_id}' added successfully.")
+
+def add_ticket(ticket_id: str, epic_id: str, title: str, description: str, ticket_type: str = "Feature", priority: str = "High", recipe_file: str = ""):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    cursor.execute('''
+        INSERT INTO tickets (id, epic_id, title, description, ticket_type, status, priority, recipe_file, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'Todo', ?, ?, ?, ?)
+    ''', (ticket_id, epic_id, title, description, ticket_type, priority, recipe_file, now, now))
+    conn.commit()
+    conn.close()
+    print(f"[OK] Ticket '{ticket_id}' added successfully.")
+
 def main():
     parser = argparse.ArgumentParser(description="AI Usage Monitor Developer Roadmap & WoW Tool")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("init", help="Initialize developer SQLite database and ingest initial tickets")
     subparsers.add_parser("status", help="Print roadmap status")
+
+    epic_parser = subparsers.add_parser("add-epic", help="Create a new epic")
+    epic_parser.add_argument("--id", required=True, help="Epic Unique ID")
+    epic_parser.add_argument("--title", required=True, help="Epic Title")
+    epic_parser.add_argument("--description", default="", help="Epic Description")
+
+    ticket_parser = subparsers.add_parser("add-ticket", help="Create a new ticket")
+    ticket_parser.add_argument("--id", required=True, help="Ticket ID")
+    ticket_parser.add_argument("--epic-id", required=True, help="Epic ID")
+    ticket_parser.add_argument("--title", required=True, help="Ticket Title")
+    ticket_parser.add_argument("--description", required=True, help="Ticket Description")
+    ticket_parser.add_argument("--type", default="Feature", choices=["Feature", "Task", "Bug"])
+    ticket_parser.add_argument("--priority", default="High", choices=["Critical", "High", "Medium", "Low"])
+    ticket_parser.add_argument("--recipe", default="", help="Feature recipe file")
 
     test_parser = subparsers.add_parser("run-tests", help="Run test suite and record results")
     test_parser.add_argument("--ticket", type=str, help="Linked Ticket ID")
@@ -254,6 +292,10 @@ def main():
         init_db()
     elif args.command == "status":
         list_status()
+    elif args.command == "add-epic":
+        add_epic(args.id, args.title, args.description)
+    elif args.command == "add-ticket":
+        add_ticket(args.id, args.epic_id, args.title, args.description, args.type, args.priority, args.recipe)
     elif args.command == "update-ticket":
         update_ticket(args.id, args.status)
     elif args.command == "run-tests":

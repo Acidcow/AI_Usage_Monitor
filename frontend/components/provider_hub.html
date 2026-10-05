@@ -49,7 +49,10 @@
         <div style="color: var(--accent-blue); font-weight: 600; margin-bottom: 4px;">Enterprise Adapter Mode:</div>
         <span style="color: #cbd5e1;">Passive Ingestion via Local Log Scraper & Proxy Header Monitor.</span>
       </div>
-      <button class="btn btn-secondary" onclick="window.App.syncProvider('copilot')">Check Adapter</button>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary" onclick="window.App.openImportModal('copilot')">📥 Import Copilot Log</button>
+        <button class="btn btn-secondary" onclick="window.App.openManualModal('copilot')">✍️ Log Session</button>
+      </div>
     </div>
 
     <!-- Gemini Card -->
@@ -59,12 +62,12 @@
           <span style="font-size: 1.2rem;">💎</span>
           <strong>Google Gemini</strong>
         </div>
-        <span class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa;">Ready</span>
+        <span class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa;" id="hub-gemini-status">Ready</span>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
         Connect Google AI Studio or Vertex AI projects for token and quota monitoring.
       </p>
-      <button class="btn btn-secondary" onclick="alert('Gemini API key management ready for Phase 2!')">Configure Gemini</button>
+      <button class="btn btn-primary" onclick="window.App.openConfigureGeminiModal()">Configure Gemini Key</button>
     </div>
 
     <!-- Ollama Card -->
@@ -74,12 +77,15 @@
           <span style="font-size: 1.2rem;">🦙</span>
           <strong>Ollama Local</strong>
         </div>
-        <span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399;" id="hub-ollama-badge">Local Host</span>
+        <span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399;" id="hub-ollama-badge">Active</span>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
-        Monitors models, active inference sessions, and VRAM tokens on <code>http://localhost:11434</code>.
+        Live connection to <code>http://localhost:11434</code>. Zero cloud API token cost.
       </p>
-      <button class="btn btn-secondary" onclick="window.App.syncProvider('ollama')">Test Connection</button>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary" onclick="window.App.toggleOllamaModelsList()">📦 Inspect Local Models</button>
+        <button class="btn btn-secondary" onclick="window.App.syncProvider('ollama')">Test Connection</button>
+      </div>
     </div>
 
     <!-- ChatGPT Card (Placeholder) -->
@@ -94,6 +100,14 @@
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
         Scheduled for next release cycle. Stubs and schema slots are prepared.
       </p>
+    </div>
+  </div>
+
+  <!-- Expandable Ollama Models Drawer -->
+  <div id="ollama-models-drawer" style="display: none; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border-subtle);">
+    <h3 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 12px; color: var(--accent-emerald);">Installed Ollama Models (Local Runtime)</h3>
+    <div id="ollama-models-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+      <!-- Populated via API -->
     </div>
   </div>
 </div>

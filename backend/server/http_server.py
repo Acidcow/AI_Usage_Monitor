@@ -114,6 +114,15 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 result[name] = prov.get_snapshot()
             return self._send_json(200, result)
 
+        if path == "/api/providers/ollama/models":
+            ollama = srv.providers.get("ollama")
+            if ollama:
+                return self._send_json(200, {
+                    "installed": ollama.get_installed_models(),
+                    "running": ollama.get_running_models()
+                })
+            return self._send_json(404, {"error": "Ollama provider not registered"})
+
         if path == "/api/diagnostics/errors":
             limit = int(query.get("limit", [50])[0])
             errors = srv.diagnostics.get_recent_errors(limit=limit)
@@ -121,7 +130,6 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/diagnostics/export":
             bundle = srv.diagnostics.export_diagnostic_bundle()
-            # Also attach aggregate usage totals to diagnostic bundle
             bundle["usage_summary"] = srv.database.get_usage_summary()
             return self._send_json(200, bundle)
 
@@ -129,6 +137,25 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_api_post(self, path: str, body: Dict[str, Any]):
         srv = self.server
+
+        if path == "/api/usage/import":
+            from backend.storage.importer import TelemetryImporter
+            importer = TelemetryImporter(srv.database)
+            raw = body.get("raw_content", "")
+            prov = body.get("provider", "copilot")
+            imported = importer.import_raw_telemetry(raw, default_provider=prov)
+            return self._send_json(200, {"success": True, "imported_count": imported})
+
+        if path == "/api/usage/manual":
+            from backend.storage.importer import TelemetryImporter
+            importer = TelemetryImporter(srv.database)
+            prov = body.get("provider", "copilot")
+            model = body.get("model", "m365-chat")
+            in_tok = int(body.get("input_tokens", 0))
+            out_tok = int(body.get("output_tokens", 0))
+            sess = body.get("session_id")
+            evt_id = importer.log_manual_interaction(prov, model, in_tok, out_tok, sess)
+            return self._send_json(200, {"success": True, "event_id": evt_id})
 
         if path == "/api/providers/sync":
             target = body.get("provider", "claude")

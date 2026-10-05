@@ -21,6 +21,7 @@ class UsageDatabase:
         self._init_schema()
 
     def _get_connection(self) -> sqlite3.Connection:
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
         return conn
