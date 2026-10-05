@@ -44,4 +44,10 @@ Write-Host "-> Claude CLI Proxy: http://127.0.0.1:8766/v1" -ForegroundColor Cyan
 Write-Host "-> Windows System Tray Icon: Active" -ForegroundColor Cyan
 Write-Host "Press Ctrl+C to stop.`n" -ForegroundColor Gray
 
+# Ensure no duplicate background instances are holding ports 8765/8766
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*run_monitor.py*" -and $_.ProcessId -ne $PID } | ForEach-Object {
+    Write-Host "[CLEANUP] Stopping previous monitor instance (PID $($_.ProcessId))..." -ForegroundColor DarkGray
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+}
+
 python run_monitor.py --open-browser --demo
