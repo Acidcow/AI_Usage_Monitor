@@ -82,17 +82,21 @@ def main():
         "chatgpt": chatgpt
     }
 
-    # Baseline Team Quota calibration (matches user's claude.ai workspace)
+    # Baseline Multi-Scope Quota calibration (Individual Member + Team Workspace Pool)
     existing_snaps = database.get_provider_snapshots()
-    if "claude" not in existing_snaps or existing_snaps["claude"].get("session_remaining_pct") is None:
+    if "claude" not in existing_snaps or existing_snaps["claude"].get("individual_session_rem_pct") is None:
         claude.calibrate_limits(
-            session_used_pct=56.0,
-            session_remaining_pct=44.0,
+            scope="individual",
+            individual_session_used_pct=60.0,
+            individual_weekly_used_pct=27.0,
+            team_session_used_pct=56.0,
+            team_weekly_used_pct=26.0,
             session_reset_seconds=7560,
-            weekly_used_pct=26.0,
-            weekly_remaining_pct=74.0,
             weekly_reset_str="Mon 3:00 AM",
-            plan_type="Team Enterprise"
+            plan_type="Team Enterprise",
+            user_name=os.environ.get("USERNAME", "James Eckhardt"),
+            team_name="Synthesis Engineering Core",
+            org_name="Synthesis Software Technologies"
         )
 
     # Demo pre-seed

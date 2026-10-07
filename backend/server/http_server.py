@@ -112,7 +112,8 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             return self._send_json(200, hourly)
 
         if path == "/api/usage/comparison":
-            comp = srv.database.get_comparative_metrics()
+            scope = query.get("scope", ["individual"])[0]
+            comp = srv.database.get_comparative_metrics(scope=scope)
             return self._send_json(200, comp)
 
         if path == "/api/providers":
@@ -210,6 +211,7 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/providers/claude/quota":
             claude_prov = srv.providers.get("claude")
+            scope = body.get("scope", "individual")
             session_used = body.get("session_used_pct")
             session_rem = body.get("session_remaining_pct")
             session_reset_secs = body.get("session_reset_seconds")
@@ -218,6 +220,12 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             weekly_rem = body.get("weekly_remaining_pct")
             weekly_reset_str = body.get("weekly_reset_str")
             plan_type = body.get("plan_type", "Team Enterprise")
+            ind_sess_used = body.get("individual_session_used_pct")
+            ind_week_used = body.get("individual_weekly_used_pct")
+            team_sess_used = body.get("team_session_used_pct")
+            team_week_used = body.get("team_weekly_used_pct")
+            user_name = body.get("user_name")
+            team_name = body.get("team_name")
 
             if session_reset_mins is not None and session_reset_secs is None:
                 try:
@@ -233,7 +241,14 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     weekly_used_pct=weekly_used,
                     weekly_remaining_pct=weekly_rem,
                     weekly_reset_str=weekly_reset_str,
-                    plan_type=plan_type
+                    plan_type=plan_type,
+                    scope=scope,
+                    individual_session_used_pct=ind_sess_used,
+                    individual_weekly_used_pct=ind_week_used,
+                    team_session_used_pct=team_sess_used,
+                    team_weekly_used_pct=team_week_used,
+                    user_name=user_name,
+                    team_name=team_name
                 )
                 return self._send_json(200, res)
             else:
@@ -245,11 +260,14 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 srv.database.update_provider_snapshot(
                     provider="claude",
                     plan_type=plan_type,
-                    session_remaining_pct=session_rem or 44.0,
-                    weekly_remaining_pct=weekly_rem or 74.0,
+                    session_remaining_pct=session_rem or 40.0,
+                    weekly_remaining_pct=weekly_rem or 73.0,
                     weekly_reset_str=weekly_reset_str or "Mon 3:00 AM",
                     reset_epoch=reset_epoch,
-                    status="ACTIVE"
+                    status="ACTIVE",
+                    user_name=user_name,
+                    team_name=team_name,
+                    active_scope=scope
                 )
                 return self._send_json(200, {"success": True, "message": "Claude quota calibrated in database"})
 

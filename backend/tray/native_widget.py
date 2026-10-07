@@ -449,22 +449,57 @@ class NativeTaskbarWidget:
         tokens_week = item.get("tokens_week", 0)
         cost_today = item.get("cost_today_usd", 0.0)
 
-        self.flyout_labels["sess_quota"].configure(
-            text=f"• Current Session:   {sess_rem}% rem  ({sess_used}% used)",
-            fg="#38bdf8"
-        )
-        self.flyout_labels["sess_reset"].configure(
-            text=f"  ↳ {sess_reset_str}",
-            fg="#94a3b8"
-        )
-        self.flyout_labels["week_quota"].configure(
-            text=f"• Weekly Pool:        {week_rem}% rem  ({week_used}% used)",
-            fg="#a855f7"
-        )
-        self.flyout_labels["week_reset"].configure(
-            text=f"  ↳ Resets {weekly_reset_str}",
-            fg="#94a3b8"
-        )
+        hier = item.get("hierarchy", {})
+        ind_data = hier.get("individual", {})
+        team_data = hier.get("team", {})
+        user_name = hier.get("user_name", "You")
+        team_name = hier.get("team_name", "Team")
+
+        ind_sess_rem = ind_data.get("session_remaining_pct", sess_rem)
+        ind_sess_used = ind_data.get("session_used_pct", sess_used)
+        team_sess_rem = team_data.get("session_remaining_pct", 44.0)
+        team_sess_used = team_data.get("session_used_pct", 56.0)
+
+        ind_week_rem = ind_data.get("weekly_remaining_pct", week_rem)
+        ind_week_used = ind_data.get("weekly_used_pct", week_used)
+        team_week_rem = team_data.get("weekly_remaining_pct", 74.0)
+        team_week_used = team_data.get("weekly_used_pct", 26.0)
+
+        if p_key == "claude" and (ind_sess_used != team_sess_used or ind_week_used != team_week_used):
+            self.flyout_labels["sess_quota"].configure(
+                text=f"• 👤 My Quota:   {ind_sess_rem}% rem ({ind_sess_used}% used)",
+                fg="#38bdf8"
+            )
+            self.flyout_labels["sess_reset"].configure(
+                text=f"• 👥 Team Pool:  {team_sess_rem}% rem ({team_sess_used}% used)  ↳ {sess_reset_str}",
+                fg="#06b6d4"
+            )
+            self.flyout_labels["week_quota"].configure(
+                text=f"• 👤 My Weekly:  {ind_week_rem}% rem ({ind_week_used}% used)",
+                fg="#c084fc"
+            )
+            self.flyout_labels["week_reset"].configure(
+                text=f"• 👥 Team Weekly:{team_week_rem}% rem ({team_week_used}% used)  ↳ {weekly_reset_str}",
+                fg="#a855f7"
+            )
+        else:
+            self.flyout_labels["sess_quota"].configure(
+                text=f"• Current Session:   {sess_rem}% rem  ({sess_used}% used)",
+                fg="#38bdf8"
+            )
+            self.flyout_labels["sess_reset"].configure(
+                text=f"  ↳ {sess_reset_str}",
+                fg="#94a3b8"
+            )
+            self.flyout_labels["week_quota"].configure(
+                text=f"• Weekly Pool:        {week_rem}% rem  ({week_used}% used)",
+                fg="#a855f7"
+            )
+            self.flyout_labels["week_reset"].configure(
+                text=f"  ↳ Resets {weekly_reset_str}",
+                fg="#94a3b8"
+            )
+
         self.flyout_labels["tokens_info"].configure(
             text=f"• Tokens: {tokens_today:,} today  |  {tokens_week:,} weekly",
             fg="#e2e8f0"

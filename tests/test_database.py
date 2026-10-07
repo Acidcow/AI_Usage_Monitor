@@ -107,6 +107,59 @@ class TestUsageDatabase(unittest.TestCase):
         self.assertAlmostEqual(savings["savings_today_usd"], 1.80, places=2)
         self.assertEqual(savings["privacy_rating"], "100% On-Premise")
 
+    def test_hierarchical_scopes_and_drilldown(self):
+        """Assert multi-scope separation between Individual, Team, Dept, Enterprise."""
+        self.db.update_provider_snapshot(
+            provider="claude",
+            plan_type="Team Enterprise",
+            user_name="James Eckhardt",
+            team_name="Synthesis Engineering Core",
+            dept_name="Technology & AI Architecture",
+            org_name="Synthesis Software Technologies",
+            individual_session_rem_pct=40.0,
+            individual_weekly_rem_pct=73.0,
+            team_session_rem_pct=44.0,
+            team_weekly_rem_pct=74.0,
+            active_scope="individual",
+            status="ACTIVE"
+        )
+
+        # 1. Query individual scope
+        comp_ind = self.db.get_comparative_metrics(scope="individual")
+        self.assertEqual(comp_ind["active_scope"], "individual")
+        claude_ind = comp_ind["providers"]["claude"]
+        self.assertEqual(claude_ind["session_balance_remaining_pct"], 40.0)
+        self.assertEqual(claude_ind["weekly_balance_remaining_pct"], 73.0)
+
+        # Hierarchy validation
+        h = claude_ind["hierarchy"]
+        self.assertEqual(h["user_name"], "James Eckhardt")
+        self.assertEqual(h["individual"]["session_remaining_pct"], 40.0)
+        self.assertEqual(h["individual"]["session_used_pct"], 60.0)
+        self.assertEqual(h["individual"]["weekly_remaining_pct"], 73.0)
+        self.assertEqual(h["individual"]["weekly_used_pct"], 27.0)
+
+        self.assertEqual(h["team"]["session_remaining_pct"], 44.0)
+        self.assertEqual(h["team"]["session_used_pct"], 56.0)
+        self.assertEqual(h["team"]["weekly_remaining_pct"], 74.0)
+        self.assertEqual(h["team"]["weekly_used_pct"], 26.0)
+
+        self.assertIn("department", h)
+        self.assertEqual(h["department"]["dept_name"], "Technology & AI Architecture")
+        self.assertEqual(h["department"]["active_seats"], 14)
+
+        self.assertIn("enterprise", h)
+        self.assertEqual(h["enterprise"]["org_name"], "Synthesis Software Technologies")
+        self.assertTrue(h["enterprise"]["shared_pool_active"])
+
+        # 2. Query team scope
+        comp_team = self.db.get_comparative_metrics(scope="team")
+        self.assertEqual(comp_team["active_scope"], "team")
+        claude_team = comp_team["providers"]["claude"]
+        self.assertEqual(claude_team["session_balance_remaining_pct"], 44.0)
+        self.assertEqual(claude_team["weekly_balance_remaining_pct"], 74.0)
+
 if __name__ == "__main__":
     unittest.main()
+
 

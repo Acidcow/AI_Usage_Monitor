@@ -101,5 +101,47 @@ class TestClaudeProvider(unittest.TestCase):
         self.assertEqual(claude_m["weekly_reset_str"], "Mon 3:00 AM")
         self.assertEqual(claude_m["plan_type"], "Team Enterprise")
 
+    def test_calibrate_multiscope_limits_and_hierarchy(self):
+        """Assert multi-scope calibration differentiates Individual (60% session / 27% weekly) from Team (56% session / 26% weekly)."""
+        res = self.provider.calibrate_limits(
+            scope="individual",
+            individual_session_used_pct=60.0,
+            individual_weekly_used_pct=27.0,
+            team_session_used_pct=56.0,
+            team_weekly_used_pct=26.0,
+            user_name="James Eckhardt",
+            team_name="Synthesis Core",
+            weekly_reset_str="Mon 3:00 AM"
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["scope"], "individual")
+        # In individual scope, primary percentage is individual
+        self.assertEqual(res["session_remaining_pct"], 40.0)
+        self.assertEqual(res["weekly_remaining_pct"], 73.0)
+
+        # Both structures are returned
+        self.assertEqual(res["individual"]["session_remaining_pct"], 40.0)
+        self.assertEqual(res["individual"]["session_used_pct"], 60.0)
+        self.assertEqual(res["individual"]["weekly_remaining_pct"], 73.0)
+        self.assertEqual(res["individual"]["weekly_used_pct"], 27.0)
+
+        self.assertEqual(res["team"]["session_remaining_pct"], 44.0)
+        self.assertEqual(res["team"]["session_used_pct"], 56.0)
+        self.assertEqual(res["team"]["weekly_remaining_pct"], 74.0)
+        self.assertEqual(res["team"]["weekly_used_pct"], 26.0)
+
+        # Now test calibrating with team scope active
+        res_team = self.provider.calibrate_limits(
+            scope="team",
+            individual_session_used_pct=60.0,
+            individual_weekly_used_pct=27.0,
+            team_session_used_pct=56.0,
+            team_weekly_used_pct=26.0
+        )
+        self.assertEqual(res_team["scope"], "team")
+        self.assertEqual(res_team["session_remaining_pct"], 44.0)
+        self.assertEqual(res_team["weekly_remaining_pct"], 74.0)
+
 if __name__ == "__main__":
     unittest.main()
+

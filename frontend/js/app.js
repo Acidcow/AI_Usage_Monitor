@@ -6,6 +6,9 @@ window.App = {
   isSimulationMode: false,
   activeIcon: 'johnny5',
   currentQuoteIdx: 0,
+  currentScope: 'individual',
+  expandedHierarchy: {},
+  lastCompData: null,
   mascotQuotes: [
     "\"Number 5 is alive! No disassemble! Tracking your token telemetry and locking your API keys inside Windows DPAPI with 256-bit encryption. Input! Need more input!\"",
     "\"Hey, laser lips, your API keys are protected by hardware DPAPI! Plaintext credential storage is strictly prohibited!\"",
@@ -69,6 +72,45 @@ window.App = {
     });
   },
 
+  switchScope(newScope) {
+    this.currentScope = newScope;
+    const btnInd = document.getElementById("scope-btn-individual");
+    const btnTeam = document.getElementById("scope-btn-team");
+    const btnEnt = document.getElementById("scope-btn-enterprise");
+    const indText = document.getElementById("active-scope-indicator");
+
+    if (btnInd) {
+      btnInd.className = newScope === "individual" ? "btn btn-sm btn-primary" : "btn btn-sm btn-secondary";
+    }
+    if (btnTeam) {
+      btnTeam.className = newScope === "team" ? "btn btn-sm btn-primary" : "btn btn-sm btn-secondary";
+    }
+    if (btnEnt) {
+      btnEnt.className = newScope === "enterprise" ? "btn btn-sm btn-primary" : "btn btn-sm btn-secondary";
+    }
+
+    if (indText) {
+      if (newScope === "individual") {
+        indText.innerText = "Focused on Personal / Individual Limits (claude.ai/settings/usage)";
+      } else if (newScope === "team") {
+        indText.innerText = "Focused on Shared Team Workspace Pool";
+      } else {
+        indText.innerText = "Focused on Organization / Enterprise Rollup";
+      }
+    }
+
+    this.loadUsageData();
+  },
+
+  toggleHierarchy(providerKey) {
+    this.expandedHierarchy[providerKey] = !this.expandedHierarchy[providerKey];
+    if (this.lastCompData) {
+      this.renderComparison(this.lastCompData, window._lastProviders || {});
+    } else {
+      this.loadUsageData();
+    }
+  },
+
   async loadUsageData() {
     try {
       const provSelect = document.getElementById("filter-session-provider");
@@ -80,17 +122,19 @@ window.App = {
         fetch(`/api/usage/sessions${providerParam}`),
         fetch("/api/diagnostics/errors?limit=30"),
         fetch("/api/usage/hourly?hours=24"),
-        fetch("/api/usage/comparison")
+        fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}`)
       ]);
 
       let compData = null;
       if (compRes.ok) {
         compData = await compRes.json();
+        this.lastCompData = compData;
       }
 
       if (summaryRes.ok && providersRes.ok) {
         const summary = await summaryRes.json();
         const providers = await providersRes.json();
+        window._lastProviders = providers;
         this.renderGauges(summary, providers);
         this.renderPills(providers, summary);
         if (compData) {
@@ -146,6 +190,11 @@ window.App = {
     const claudeRemainingEl = document.getElementById("val-claude-remaining");
     const claudeResetEl = document.getElementById("val-claude-reset");
     const claudeFill = document.getElementById("fill-claude-quota");
+    const claudeBadge = document.getElementById("claude-quota-badge");
+
+    if (claudeBadge) {
+      claudeBadge.innerText = this.currentScope === 'team' ? 'Team Pool' : 'Personal Quota';
+    }
 
     if (claudeRemainingEl && claudeInfo.tokens_remaining !== null) {
       claudeRemainingEl.innerText = Number(claudeInfo.tokens_remaining).toLocaleString();
@@ -159,7 +208,8 @@ window.App = {
       const secondsLeft = Math.max(0, Math.floor(claudeInfo.reset_epoch - (Date.now() / 1000)));
       const mins = Math.floor(secondsLeft / 60);
       const secs = secondsLeft % 60;
-      claudeResetEl.innerText = `Reset In: ${mins}m ${secs}s`;
+      const scopeLabel = this.currentScope === 'team' ? 'Team Pool' : 'Session';
+      claudeResetEl.innerText = `${scopeLabel} Reset In: ${mins}m ${secs}s`;
     }
   },
 
@@ -213,12 +263,22 @@ window.App = {
       const weeklyPct = item.weekly_balance_remaining_pct ?? 100;
       const costDisplay = key === "ollama" ? `<span style="color: #34d399; font-weight: 700;">$0.000 (Free)</span>` : `$${Number(item.cost_today_usd || 0).toFixed(3)}`;
 
+      const isExpanded = !!this.expandedHierarchy[key];
+      const hasHierarchy = !!item.hierarchy;
+
       html += `
         <tr>
           <td>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span class="dot ${dotClass}"></span>
-              <strong style="color: #fff; font-size: 0.9rem;">${displayNames[key]}</strong>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="dot ${dotClass}"></span>
+                <strong style="color: #fff; font-size: 0.9rem;">${displayNames[key]}</strong>
+              </div>
+              ${hasHierarchy ? `
+                <button class="btn btn-sm" onclick="window.App.toggleHierarchy('${key}')" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-size: 0.68rem; padding: 2px 7px; border-radius: 4px; cursor: pointer;" title="Toggle multi-level hierarchy drill-down">
+                  ${isExpanded ? '▲ Hide' : '▼ Drill-Down'}
+                </button>
+              ` : ''}
             </div>
           </td>
           <td>
@@ -252,6 +312,96 @@ window.App = {
           </td>
         </tr>
       `;
+
+      if (hasHierarchy && isExpanded) {
+        const h = item.hierarchy;
+        const ind = h.individual || {};
+        const team = h.team || {};
+        const dept = h.department || {};
+        const ent = h.enterprise || {};
+
+        html += `
+          <tr class="hierarchy-detail-row" style="background: rgba(15, 23, 42, 0.75); border-left: 3px solid #38bdf8;">
+            <td colspan="7" style="padding: 14px 18px;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: #94a3b8;">
+                  Hierarchical Quota Drill-Down (${displayNames[key]}):
+                </span>
+                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">Active View: ${(comp.active_scope || 'individual').toUpperCase()}</span>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px;">
+                <!-- 1. Individual Member (You) -->
+                <div style="background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 10px 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <strong style="color: #38bdf8; font-size: 0.82rem;">👤 Individual Member (You)</strong>
+                    <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'Personal Seat'}</span>
+                  </div>
+                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                    <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.session_remaining_pct}% remaining</span> (${ind.session_used_pct}% used)
+                  </div>
+                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                    <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span> (${ind.weekly_used_pct}% used)
+                  </div>
+                  <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                    Resets: ${ind.weekly_reset_str || 'Mon 3:00 AM'}
+                  </div>
+                </div>
+
+                <!-- 2. Team Workspace Pool -->
+                <div style="background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px; padding: 10px 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <strong style="color: #c084fc; font-size: 0.82rem;">👥 Team Workspace Pool</strong>
+                    <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Core Engineering'}</span>
+                  </div>
+                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                    <strong>Team Session:</strong> <span style="color: #c084fc; font-weight: 700;">${team.session_remaining_pct}% remaining</span> (${team.session_used_pct}% used)
+                  </div>
+                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                    <strong>Team Weekly:</strong> <span style="color: #c084fc; font-weight: 700;">${team.weekly_remaining_pct}% remaining</span> (${team.weekly_used_pct}% used)
+                  </div>
+                  <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                    Resets: ${team.weekly_reset_str || 'Mon 3:00 AM'}
+                  </div>
+                </div>
+
+                <!-- 3. Department Division -->
+                <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <strong style="color: #34d399; font-size: 0.82rem;">🏢 Department / Division</strong>
+                    <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
+                  </div>
+                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                    <strong>Division:</strong> ${dept.dept_name || 'Technology & AI'}
+                  </div>
+                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                    <strong>Monthly Volume:</strong> ${Number(dept.monthly_tokens || 0).toLocaleString()} tok
+                  </div>
+                  <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                    Dept Budget: $${Number(dept.budget_limit_usd || 1500).toFixed(2)}
+                  </div>
+                </div>
+
+                <!-- 4. Enterprise Organization -->
+                <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 10px 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <strong style="color: #fbbf24; font-size: 0.82rem;">🌐 Organization / Enterprise</strong>
+                    <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
+                  </div>
+                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                    <strong>Org Name:</strong> ${ent.org_name || 'Enterprise Workspace'}
+                  </div>
+                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                    <strong>Pool Sync:</strong> <span style="color: #34d399; font-weight: 600;">Active & Synced</span>
+                  </div>
+                  <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                    Centralized Token Telemetry
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }
     });
 
     tbody.innerHTML = html;
@@ -661,23 +811,55 @@ window.App = {
   // Claude Quota & Limit Calibration
   openClaudeQuotaModal() {
     const modal = document.getElementById("claude-quota-modal");
-    if (modal) modal.classList.add("active");
+    if (modal) {
+      if (this.lastCompData && this.lastCompData.providers && this.lastCompData.providers.claude) {
+        const c = this.lastCompData.providers.claude;
+        const h = c.hierarchy || {};
+        const ind = h.individual || {};
+        const team = h.team || {};
+
+        const scopeSelect = document.getElementById("claude-quota-scope-select");
+        if (scopeSelect && h.scope) scopeSelect.value = h.scope;
+
+        const indSess = document.getElementById("claude-quota-ind-session-used");
+        if (indSess && ind.session_used_pct !== undefined) indSess.value = ind.session_used_pct;
+
+        const indWeek = document.getElementById("claude-quota-ind-weekly-used");
+        if (indWeek && ind.weekly_used_pct !== undefined) indWeek.value = ind.weekly_used_pct;
+
+        const teamSess = document.getElementById("claude-quota-team-session-used");
+        if (teamSess && team.session_used_pct !== undefined) teamSess.value = team.session_used_pct;
+
+        const teamWeek = document.getElementById("claude-quota-team-weekly-used");
+        if (teamWeek && team.weekly_used_pct !== undefined) teamWeek.value = team.weekly_used_pct;
+
+        const weekReset = document.getElementById("claude-quota-weekly-reset-str");
+        if (weekReset && ind.weekly_reset_str) weekReset.value = ind.weekly_reset_str;
+      }
+      modal.classList.add("active");
+    }
   },
   closeClaudeQuotaModal() {
     const modal = document.getElementById("claude-quota-modal");
     if (modal) modal.classList.remove("active");
   },
   async saveClaudeQuotaCalibration() {
+    const scopeSelect = document.getElementById("claude-quota-scope-select");
     const planSelect = document.getElementById("claude-quota-plan");
-    const sessUsedInput = document.getElementById("claude-quota-session-used");
+    const indSessUsedInput = document.getElementById("claude-quota-ind-session-used");
+    const indWeekUsedInput = document.getElementById("claude-quota-ind-weekly-used");
+    const teamSessUsedInput = document.getElementById("claude-quota-team-session-used");
+    const teamWeekUsedInput = document.getElementById("claude-quota-team-weekly-used");
     const sessMinsInput = document.getElementById("claude-quota-session-reset-mins");
-    const weekUsedInput = document.getElementById("claude-quota-weekly-used");
     const weekResetInput = document.getElementById("claude-quota-weekly-reset-str");
 
+    const scope = scopeSelect ? scopeSelect.value : "individual";
     const planType = planSelect ? planSelect.value : "Team Enterprise";
-    const sessUsed = sessUsedInput ? parseFloat(sessUsedInput.value) : 56.0;
+    const indSessUsed = indSessUsedInput ? parseFloat(indSessUsedInput.value) : 60.0;
+    const indWeekUsed = indWeekUsedInput ? parseFloat(indWeekUsedInput.value) : 27.0;
+    const teamSessUsed = teamSessUsedInput ? parseFloat(teamSessUsedInput.value) : 56.0;
+    const teamWeekUsed = teamWeekUsedInput ? parseFloat(teamWeekUsedInput.value) : 26.0;
     const sessMins = sessMinsInput ? parseFloat(sessMinsInput.value) : 126.0;
-    const weekUsed = weekUsedInput ? parseFloat(weekUsedInput.value) : 26.0;
     const weekReset = weekResetInput ? weekResetInput.value.trim() : "Mon 3:00 AM";
 
     try {
@@ -685,15 +867,20 @@ window.App = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          scope: scope,
           plan_type: planType,
-          session_used_pct: sessUsed,
+          individual_session_used_pct: indSessUsed,
+          individual_weekly_used_pct: indWeekUsed,
+          team_session_used_pct: teamSessUsed,
+          team_weekly_used_pct: teamWeekUsed,
           session_reset_minutes: sessMins,
-          weekly_used_pct: weekUsed,
           weekly_reset_str: weekReset
         })
       });
       if (res.ok) {
-        alert(`✓ Claude limits successfully calibrated!\n• Session: ${100 - sessUsed}% remaining (${sessUsed}% used)\n• Weekly: ${100 - weekUsed}% remaining (${weekUsed}% used)\n• Reset: ${weekReset}`);
+        this.currentScope = scope;
+        this.switchScope(scope);
+        alert(`✓ Claude limits successfully calibrated!\n• Active View: ${scope.toUpperCase()}\n• 👤 Individual Member: ${100 - indSessUsed}% remaining (${indSessUsed}% used) / Weekly: ${100 - indWeekUsed}% rem (${indWeekUsed}% used)\n• 👥 Team Pool: ${100 - teamSessUsed}% remaining (${teamSessUsed}% used) / Weekly: ${100 - teamWeekUsed}% rem (${teamWeekUsed}% used)\n• Resets: ${weekReset}`);
         this.closeClaudeQuotaModal();
         await this.loadUsageData();
       } else {

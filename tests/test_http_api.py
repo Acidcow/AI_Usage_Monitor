@@ -154,6 +154,40 @@ class TestHTTPAPI(unittest.TestCase):
         self.assertEqual(claude_comp["weekly_balance_remaining_pct"], 74.0)
         self.assertEqual(claude_comp["weekly_reset_str"], "Mon 3:00 AM")
 
+    def test_api_claude_quota_multiscope_and_comparison_scope_param(self):
+        """Assert multi-scope quota calibration via API and query param scope filtering."""
+        status, data = self._post("/api/providers/claude/quota", {
+            "scope": "individual",
+            "individual_session_used_pct": 60.0,
+            "individual_weekly_used_pct": 27.0,
+            "team_session_used_pct": 56.0,
+            "team_weekly_used_pct": 26.0,
+            "session_reset_minutes": 126,
+            "weekly_reset_str": "Mon 3:00 AM",
+            "user_name": "James Eckhardt",
+            "team_name": "Synthesis Engineering"
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["scope"], "individual")
+        self.assertEqual(data["session_remaining_pct"], 40.0)
+        self.assertEqual(data["weekly_remaining_pct"], 73.0)
+        self.assertEqual(data["individual"]["session_remaining_pct"], 40.0)
+        self.assertEqual(data["team"]["session_remaining_pct"], 44.0)
+
+        # GET with ?scope=individual
+        st, comp_ind = self._get("/api/usage/comparison?scope=individual")
+        self.assertEqual(st, 200)
+        self.assertEqual(comp_ind["active_scope"], "individual")
+        self.assertEqual(comp_ind["providers"]["claude"]["session_balance_remaining_pct"], 40.0)
+        self.assertEqual(comp_ind["providers"]["claude"]["weekly_balance_remaining_pct"], 73.0)
+
+        # GET with ?scope=team
+        st, comp_team = self._get("/api/usage/comparison?scope=team")
+        self.assertEqual(st, 200)
+        self.assertEqual(comp_team["active_scope"], "team")
+        self.assertEqual(comp_team["providers"]["claude"]["session_balance_remaining_pct"], 44.0)
+        self.assertEqual(comp_team["providers"]["claude"]["weekly_balance_remaining_pct"], 74.0)
+
     def test_static_asset_serving_icons_and_mascots(self):
         port = self.server.server_port
         asset_paths = [

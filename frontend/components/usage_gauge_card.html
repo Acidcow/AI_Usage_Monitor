@@ -99,9 +99,28 @@
     </div>
     <div style="display: flex; gap: 8px; align-items: center;">
       <span class="badge" style="background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); border: 1px solid rgba(6, 182, 212, 0.3);">Dual Bar Telemetry Active</span>
-      <button class="btn btn-secondary btn-sm" onclick="window.App.openClaudeQuotaModal()" style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;" title="Calibrate Claude Team/Pro rolling session and weekly limits">⚖️ Calibrate Claude</button>
+      <button class="btn btn-secondary btn-sm" onclick="window.App.openClaudeQuotaModal()" style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;" title="Calibrate Claude Individual and Team quotas">⚖️ Calibrate Claude</button>
       <button class="btn btn-secondary btn-sm" onclick="window.App.loadUsageData()">↻ Refresh Accounts</button>
     </div>
+  </div>
+
+  <!-- Multi-Scope Filter & Drill-Down Switcher -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06);">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 0.76rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Usage Scope:</span>
+      <div class="scope-switcher" style="display: flex; gap: 6px;">
+        <button id="scope-btn-individual" class="btn btn-sm btn-primary" onclick="window.App.switchScope('individual')" style="font-size: 0.74rem;">
+          👤 Individual (My Quota)
+        </button>
+        <button id="scope-btn-team" class="btn btn-sm btn-secondary" onclick="window.App.switchScope('team')" style="font-size: 0.74rem;">
+          👥 Team Workspace Pool
+        </button>
+        <button id="scope-btn-enterprise" class="btn btn-sm btn-secondary" onclick="window.App.switchScope('enterprise')" style="font-size: 0.74rem;">
+          🏢 Enterprise / Division
+        </button>
+      </div>
+    </div>
+    <span id="active-scope-indicator" style="font-size: 0.72rem; color: var(--accent-cyan); font-family: var(--font-mono);">Focused on Personal / Individual Limits</span>
   </div>
 
   <!-- Comparative Accounts Breakdown Table -->

@@ -34,24 +34,62 @@ class ClaudeProvider(BaseProvider):
         weekly_used_pct: Optional[float] = None,
         weekly_remaining_pct: Optional[float] = None,
         weekly_reset_str: Optional[str] = None,
-        plan_type: Optional[str] = "Team Enterprise"
+        plan_type: Optional[str] = "Team Enterprise",
+        scope: str = "individual",
+        individual_session_used_pct: Optional[float] = None,
+        individual_weekly_used_pct: Optional[float] = None,
+        team_session_used_pct: Optional[float] = None,
+        team_weekly_used_pct: Optional[float] = None,
+        user_name: Optional[str] = None,
+        team_name: Optional[str] = None,
+        dept_name: Optional[str] = None,
+        org_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Calibrates official Anthropic rolling session and weekly quota limits.
-        Supports inputs directly matching the Claude Web UI (e.g. 56% session used, 26% weekly used).
+        Calibrates official Anthropic rolling session and weekly quota limits with
+        multi-scope separation between Individual User limits and Team/Org pools.
         """
-        if session_remaining_pct is None and session_used_pct is not None:
-            session_remaining_pct = max(0.0, 100.0 - float(session_used_pct))
-        elif session_remaining_pct is not None and session_used_pct is None:
-            session_used_pct = max(0.0, 100.0 - float(session_remaining_pct))
+        # Resolve Individual limits
+        if individual_session_used_pct is None:
+            if scope == "individual" and session_used_pct is not None:
+                individual_session_used_pct = session_used_pct
+            elif scope == "individual" and session_remaining_pct is not None:
+                individual_session_used_pct = max(0.0, 100.0 - float(session_remaining_pct))
+            else:
+                individual_session_used_pct = 60.0
 
-        if weekly_remaining_pct is None and weekly_used_pct is not None:
-            weekly_remaining_pct = max(0.0, 100.0 - float(weekly_used_pct))
-        elif weekly_remaining_pct is not None and weekly_used_pct is None:
-            weekly_used_pct = max(0.0, 100.0 - float(weekly_remaining_pct))
+        if individual_weekly_used_pct is None:
+            if scope == "individual" and weekly_used_pct is not None:
+                individual_weekly_used_pct = weekly_used_pct
+            elif scope == "individual" and weekly_remaining_pct is not None:
+                individual_weekly_used_pct = max(0.0, 100.0 - float(weekly_remaining_pct))
+            else:
+                individual_weekly_used_pct = 27.0
 
-        final_sess_rem = float(session_remaining_pct) if session_remaining_pct is not None else 44.0
-        final_week_rem = float(weekly_remaining_pct) if weekly_remaining_pct is not None else 74.0
+        # Resolve Team pool limits
+        if team_session_used_pct is None:
+            if scope == "team" and session_used_pct is not None:
+                team_session_used_pct = session_used_pct
+            elif scope == "team" and session_remaining_pct is not None:
+                team_session_used_pct = max(0.0, 100.0 - float(session_remaining_pct))
+            else:
+                team_session_used_pct = 56.0
+
+        if team_weekly_used_pct is None:
+            if scope == "team" and weekly_used_pct is not None:
+                team_weekly_used_pct = weekly_used_pct
+            elif scope == "team" and weekly_remaining_pct is not None:
+                team_weekly_used_pct = max(0.0, 100.0 - float(weekly_remaining_pct))
+            else:
+                team_weekly_used_pct = 26.0
+
+        ind_sess_rem = max(0.0, 100.0 - float(individual_session_used_pct))
+        ind_week_rem = max(0.0, 100.0 - float(individual_weekly_used_pct))
+        team_sess_rem = max(0.0, 100.0 - float(team_session_used_pct))
+        team_week_rem = max(0.0, 100.0 - float(team_weekly_used_pct))
+
+        final_sess_rem = ind_sess_rem if scope == "individual" else team_sess_rem
+        final_week_rem = ind_week_rem if scope == "individual" else team_week_rem
         final_week_reset = str(weekly_reset_str) if weekly_reset_str else "Mon 3:00 AM"
 
         if session_reset_seconds is not None:
@@ -62,6 +100,7 @@ class ClaudeProvider(BaseProvider):
         if plan_type:
             self._cached_plan = plan_type
 
+        default_user = os.environ.get("USERNAME") or os.environ.get("USER") or "James Eckhardt"
         self.db.update_provider_snapshot(
             provider="claude",
             plan_type=self._cached_plan,
@@ -69,15 +108,37 @@ class ClaudeProvider(BaseProvider):
             weekly_remaining_pct=final_week_rem,
             weekly_reset_str=final_week_reset,
             reset_epoch=reset_epoch,
-            status="ACTIVE"
+            status="ACTIVE",
+            user_name=user_name or default_user,
+            team_name=team_name or "Synthesis Engineering Core",
+            dept_name=dept_name or "Technology & AI Architecture",
+            org_name=org_name or "Synthesis Software Technologies",
+            individual_session_rem_pct=ind_sess_rem,
+            individual_weekly_rem_pct=ind_week_rem,
+            team_session_rem_pct=team_sess_rem,
+            team_weekly_rem_pct=team_week_rem,
+            active_scope=scope
         )
         self.diagnostics.mark_provider_healthy("claude")
         return {
             "success": True,
+            "scope": scope,
             "session_remaining_pct": final_sess_rem,
             "session_used_pct": round(100.0 - final_sess_rem, 1),
             "weekly_remaining_pct": final_week_rem,
             "weekly_used_pct": round(100.0 - final_week_rem, 1),
+            "individual": {
+                "session_remaining_pct": ind_sess_rem,
+                "session_used_pct": round(float(individual_session_used_pct), 1),
+                "weekly_remaining_pct": ind_week_rem,
+                "weekly_used_pct": round(float(individual_weekly_used_pct), 1)
+            },
+            "team": {
+                "session_remaining_pct": team_sess_rem,
+                "session_used_pct": round(float(team_session_used_pct), 1),
+                "weekly_remaining_pct": team_week_rem,
+                "weekly_used_pct": round(float(team_weekly_used_pct), 1)
+            },
             "reset_epoch": reset_epoch,
             "weekly_reset_str": final_week_reset,
             "plan_type": self._cached_plan

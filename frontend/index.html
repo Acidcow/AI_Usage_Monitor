@@ -159,7 +159,7 @@
 
   <!-- Claude Quota & Team Limits Calibration Modal -->
   <div class="modal-overlay" id="claude-quota-modal">
-    <div class="modal-box" style="max-width: 540px;">
+    <div class="modal-box" style="max-width: 620px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 1.25rem;">⚖️</span>
@@ -167,38 +167,75 @@
         </div>
         <button onclick="window.App.closeClaudeQuotaModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px;">
-        Anthropic measures official Claude Team & Pro accounts using rolling 5-hour session and 7-day weekly pool percentages. Align your monitor instantly with <strong style="color: #cbd5e1;">claude.ai</strong>.
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+        Anthropic separates <strong style="color: #38bdf8;">Individual Member limits</strong> (found in your <em>claude.ai &rarr; Settings &rarr; Usage</em>) from the shared <strong style="color: #a855f7;">Team / Organization Pool</strong>. Calibrate both below to enable seamless drill-down!
       </p>
 
-      <div class="form-group" style="margin-bottom: 12px;">
-        <label for="claude-quota-plan" style="font-size: 0.8rem; color: var(--text-muted);">Plan Type</label>
-        <select id="claude-quota-plan" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 8px 10px; border-radius: 6px;">
-          <option value="Team Enterprise" selected>Team Enterprise (or Team Plan)</option>
-          <option value="Pro">Pro Plan</option>
-          <option value="Enterprise">Enterprise</option>
-          <option value="Free">Free Tier</option>
-        </select>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+        <div class="form-group">
+          <label for="claude-quota-scope-select" style="font-size: 0.8rem; color: var(--text-muted);">Default Active Scope</label>
+          <select id="claude-quota-scope-select" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 8px 10px; border-radius: 6px;">
+            <option value="individual" selected>👤 Individual (My Personal Quota)</option>
+            <option value="team">👥 Team Workspace Pool</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="claude-quota-plan" style="font-size: 0.8rem; color: var(--text-muted);">Plan Type</label>
+          <select id="claude-quota-plan" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 8px 10px; border-radius: 6px;">
+            <option value="Team Enterprise" selected>Team Enterprise (or Team Plan)</option>
+            <option value="Pro">Pro Plan</option>
+            <option value="Enterprise">Enterprise</option>
+            <option value="Free">Free Tier</option>
+          </select>
+        </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-        <div class="form-group">
-          <label for="claude-quota-session-used" style="font-size: 0.8rem; color: var(--text-muted);">Current Session % Used</label>
-          <input type="number" id="claude-quota-session-used" placeholder="56" value="56" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #38bdf8; padding: 8px 10px; border-radius: 6px; font-weight: bold;">
-          <span style="font-size: 0.7rem; color: var(--text-dim); margin-top: 3px; display: block;">e.g. 56% used = 44% remaining</span>
+      <!-- Section: 👤 Individual Member Quota -->
+      <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <span style="font-size: 0.82rem; font-weight: 700; color: #38bdf8;">👤 Individual Member Quota (claude.ai &rarr; Settings &rarr; Usage)</span>
+          <span style="font-size: 0.7rem; color: var(--text-dim);">Personal Seat</span>
         </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="claude-quota-ind-session-used" style="font-size: 0.75rem; color: var(--text-muted);">Session % Used</label>
+            <input type="number" id="claude-quota-ind-session-used" placeholder="60" value="60" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #38bdf8; padding: 6px 10px; border-radius: 6px; font-weight: bold;">
+            <span style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; display: block;">e.g. 60% used = 40% remaining</span>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="claude-quota-ind-weekly-used" style="font-size: 0.75rem; color: var(--text-muted);">Weekly % Used</label>
+            <input type="number" id="claude-quota-ind-weekly-used" placeholder="27" value="27" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #38bdf8; padding: 6px 10px; border-radius: 6px; font-weight: bold;">
+            <span style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; display: block;">e.g. 27% used = 73% remaining</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: 👥 Team Workspace Pool Quota -->
+      <div style="background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <span style="font-size: 0.82rem; font-weight: 700; color: #c084fc;">👥 Team Workspace Pool Quota (Aggregated Division Pool)</span>
+          <span style="font-size: 0.7rem; color: var(--text-dim);">Shared Workspace</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="claude-quota-team-session-used" style="font-size: 0.75rem; color: var(--text-muted);">Team Session % Used</label>
+            <input type="number" id="claude-quota-team-session-used" placeholder="56" value="56" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #c084fc; padding: 6px 10px; border-radius: 6px; font-weight: bold;">
+            <span style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; display: block;">e.g. 56% used = 44% remaining</span>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="claude-quota-team-weekly-used" style="font-size: 0.75rem; color: var(--text-muted);">Team Weekly % Used</label>
+            <input type="number" id="claude-quota-team-weekly-used" placeholder="26" value="26" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #c084fc; padding: 6px 10px; border-radius: 6px; font-weight: bold;">
+            <span style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; display: block;">e.g. 26% used = 74% remaining</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resets & Schedules -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
         <div class="form-group">
           <label for="claude-quota-session-reset-mins" style="font-size: 0.8rem; color: var(--text-muted);">Session Reset In (Minutes)</label>
           <input type="number" id="claude-quota-session-reset-mins" placeholder="126" value="126" min="1" max="300" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #cbd5e1; padding: 8px 10px; border-radius: 6px;">
           <span style="font-size: 0.7rem; color: var(--text-dim); margin-top: 3px; display: block;">e.g. 2 hr 6 min = 126 mins</span>
-        </div>
-      </div>
-
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-        <div class="form-group">
-          <label for="claude-quota-weekly-used" style="font-size: 0.8rem; color: var(--text-muted);">Weekly Limits % Used</label>
-          <input type="number" id="claude-quota-weekly-used" placeholder="26" value="26" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #a855f7; padding: 8px 10px; border-radius: 6px; font-weight: bold;">
-          <span style="font-size: 0.7rem; color: var(--text-dim); margin-top: 3px; display: block;">e.g. 26% used = 74% remaining</span>
         </div>
         <div class="form-group">
           <label for="claude-quota-weekly-reset-str" style="font-size: 0.8rem; color: var(--text-muted);">Weekly Resets Schedule</label>
@@ -207,7 +244,7 @@
         </div>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
         <button class="btn btn-secondary" onclick="window.App.closeClaudeQuotaModal()">Cancel</button>
         <button class="btn btn-primary" onclick="window.App.saveClaudeQuotaCalibration()" style="background: linear-gradient(135deg, #d97706, #b45309); border: none;">Save & Sync Limits</button>
       </div>
