@@ -32,6 +32,7 @@
     <nav class="nav-tabs">
       <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
       <button class="nav-tab" data-tab="providers">Accounts & Proxy</button>
+      <button class="nav-tab" data-tab="reports">Reports & Analytics</button>
       <button class="nav-tab" data-tab="troubleshooting">Troubleshooting</button>
     </nav>
 
@@ -89,7 +90,12 @@
       <div id="container-provider-hub"></div>
     </div>
 
-    <!-- Tab 3: Troubleshooting View -->
+    <!-- Tab 3: Reports & Multi-Dimensional Analytics View -->
+    <div class="tab-content" id="tab-reports">
+      <div id="container-reports-panel"></div>
+    </div>
+
+    <!-- Tab 4: Troubleshooting View -->
     <div class="tab-content" id="tab-troubleshooting">
       <div id="container-troubleshooter"></div>
     </div>
@@ -289,9 +295,70 @@
         </div>
       </div>
 
+      <!-- Google Account Sign-In (OAuth 2.0 PKCE & Account-Level Hierarchy) -->
+      <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.2rem;">🌐</span>
+            <strong style="color: #60a5fa; font-size: 0.92rem;">Google Account Single Sign-On (Account-Level View)</strong>
+          </div>
+          <span id="gemini-oauth-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+            Connected: acidcow@gmail.com
+          </span>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+          Authenticate with your Google account via local OAuth 2.0 loopback. This unlocks an account-level umbrella view with collapsible child tokens for each project and key.
+        </p>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.startGoogleOAuth()" style="border-color: rgba(96, 165, 250, 0.4); color: #93c5fd;">
+            🔐 Sign In with Google (Browser)
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.simulateGoogleAccount('acidcow@gmail.com')" style="border-color: rgba(16, 185, 129, 0.4); color: #34d399;">
+            ⚡ Fast Connect (acidcow@gmail.com)
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.disconnectGoogleAccount()" style="color: var(--accent-rose);">
+            Disconnect
+          </button>
+        </div>
+      </div>
+
+      <!-- Child Named API Tokens Registry -->
+      <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.1rem;">🔑</span>
+            <strong style="font-size: 0.88rem; color: #fff;">Child Named API Tokens (Granular Monitoring)</strong>
+          </div>
+          <span style="font-size: 0.72rem; color: var(--text-dim);">Aggregated under acidcow@gmail.com</span>
+        </div>
+        <p style="font-size: 0.76rem; color: var(--text-dim); margin-bottom: 10px;">
+          Register API tokens with friendly names (e.g. Flash CLI, Pro IDE) to monitor their individual consumption bars underneath your main account umbrella.
+        </p>
+
+        <!-- Dynamic List of Registered Child Tokens -->
+        <div id="gemini-named-tokens-list" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; max-height: 150px; overflow-y: auto;">
+          <!-- Loaded dynamically via checkGoogleAuthStatus() -->
+        </div>
+
+        <!-- Add Token Form -->
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 10px; display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: flex-end;">
+          <div>
+            <label style="font-size: 0.7rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Token Name / Label</label>
+            <input type="text" id="gemini-new-tok-name" placeholder="e.g. Gemini 2.0 Flash - CLI" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #fff; padding: 5px 8px; border-radius: 4px; font-size: 0.78rem;">
+          </div>
+          <div>
+            <label style="font-size: 0.7rem; color: var(--text-muted); display: block; margin-bottom: 2px;">API Key (AIzaSy...)</label>
+            <input type="password" id="gemini-new-tok-key" placeholder="AIzaSy..." style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #fff; padding: 5px 8px; border-radius: 4px; font-size: 0.78rem;">
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.addNamedGeminiToken()" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); height: 30px;">
+            + Add Token
+          </button>
+        </div>
+      </div>
+
       <div class="form-group">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <label for="gemini-api-key-input" style="margin-bottom: 0;">Gemini API Key(s)</label>
+          <label for="gemini-api-key-input" style="margin-bottom: 0;">Fallback Direct Gemini API Key(s)</label>
           <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.pasteFromClipboard('gemini-api-key-input')">📋 Paste</button>
         </div>
         <textarea id="gemini-api-key-input" rows="2" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 8px 12px; color: var(--text-main); font-family: var(--font-mono); font-size: 0.85rem;" placeholder="AIzaSy... (Enter single key or multiple keys separated by commas for whole-account aggregation)" autocomplete="off"></textarea>

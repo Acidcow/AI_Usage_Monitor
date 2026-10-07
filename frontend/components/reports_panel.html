@@ -1,0 +1,130 @@
+<!-- Canonical Component: Historical Reports & Multi-Dimensional Analytics Panel -->
+<div class="glass-card" style="margin-bottom: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 1.3rem;">📊</span>
+        <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff;">Historical Usage Reports & Cost Attribution</h3>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+        Slice, group, and audit AI consumption and financial charges across hours, days, weeks, months, accounts, teams, users, and models.
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <button class="btn btn-secondary btn-sm" onclick="window.App.exportReportsCsv()" style="border-color: rgba(16, 185, 129, 0.4); color: #34d399;" title="Download filtered report as RFC-4180 CSV">
+        📥 Export CSV Report
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="window.App.loadHistoricalReport()">
+        ↻ Run Report
+      </button>
+    </div>
+  </div>
+
+  <!-- Slicing & Filter Strip -->
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(0,0,0,0.3); padding: 14px 16px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); margin-bottom: 20px;">
+    <!-- Row 1: Time Slicing & Date Range -->
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 0.74rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Time Slice:</span>
+        <div class="scope-switcher" style="display: flex; gap: 6px;">
+          <button id="slice-btn-hour" class="btn btn-sm btn-secondary" onclick="window.App.setReportGrouping('hour')" style="font-size: 0.72rem;">⏱️ Hourly</button>
+          <button id="slice-btn-day" class="btn btn-sm btn-primary" onclick="window.App.setReportGrouping('day')" style="font-size: 0.72rem;">📅 Daily</button>
+          <button id="slice-btn-week" class="btn btn-sm btn-secondary" onclick="window.App.setReportGrouping('week')" style="font-size: 0.72rem;">📆 Weekly</button>
+          <button id="slice-btn-month" class="btn btn-sm btn-secondary" onclick="window.App.setReportGrouping('month')" style="font-size: 0.72rem;">📊 Monthly</button>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 0.74rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Range:</span>
+        <select id="report-date-range-select" onchange="window.App.handleDateRangeChange()" style="background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 10px; border-radius: 6px; font-size: 0.78rem;">
+          <option value="today">Today</option>
+          <option value="7d" selected>Last 7 Days</option>
+          <option value="30d">Last 30 Days</option>
+          <option value="all">All-Time History</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Row 2: Operational Dimensions -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+      <div>
+        <label for="report-filter-provider" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Provider / Platform</label>
+        <select id="report-filter-provider" onchange="window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 8px; border-radius: 6px; font-size: 0.78rem;">
+          <option value="">All Providers</option>
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="chatgpt">ChatGPT / OpenAI</option>
+          <option value="ollama">Ollama (Local Engine)</option>
+          <option value="copilot">M365 Copilot</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="report-filter-dimension" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Group Dimension</label>
+        <select id="report-filter-dimension" onchange="window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 8px; border-radius: 6px; font-size: 0.78rem;">
+          <option value="">Default (Provider & Account)</option>
+          <option value="team_name">By Team (Synthesis2, Core)</option>
+          <option value="user_name">By User / Seat (James Eckhardt)</option>
+          <option value="model">By Model (Sonnet, Flash, etc.)</option>
+          <option value="account_id">By Account ID (acidcow@gmail.com)</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="report-filter-team" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Filter by Team</label>
+        <input type="text" id="report-filter-team" placeholder="e.g. Synthesis2" onkeyup="if(event.key==='Enter') window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 8px; border-radius: 6px; font-size: 0.78rem;">
+      </div>
+
+      <div>
+        <label for="report-filter-user" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Filter by User</label>
+        <input type="text" id="report-filter-user" placeholder="e.g. James Eckhardt" onkeyup="if(event.key==='Enter') window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 8px; border-radius: 6px; font-size: 0.78rem;">
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary Metric Strip -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px;">
+    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
+      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Total Tokens (Period)</span>
+      <div style="font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: #38bdf8; margin-top: 2px;" id="rep-tot-tokens">0</div>
+    </div>
+    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
+      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Total Estimated Cost</span>
+      <div style="font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: #34d399; margin-top: 2px;" id="rep-tot-cost">$0.0000</div>
+    </div>
+    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
+      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Events & Interactions</span>
+      <div style="font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: #c084fc; margin-top: 2px;" id="rep-tot-events">0</div>
+    </div>
+    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
+      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Active Dimensions</span>
+      <div style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 700; color: #cbd5e1; margin-top: 2px;" id="rep-tot-records">0 slices</div>
+    </div>
+  </div>
+
+  <!-- Historical Data Table -->
+  <div class="data-table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Period / Date</th>
+          <th>Provider / Platform</th>
+          <th>Account ID</th>
+          <th>Team / Workspace</th>
+          <th>User / Seat</th>
+          <th>Model</th>
+          <th style="text-align: right;">Total Tokens</th>
+          <th style="text-align: right;">Est. Cost</th>
+          <th style="text-align: right;">Sessions</th>
+        </tr>
+      </thead>
+      <tbody id="reports-table-body">
+        <tr>
+          <td colspan="9" style="text-align: center; color: var(--text-dim); padding: 24px;">
+            Select criteria and click <strong>Run Report</strong> to load historical analytics.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

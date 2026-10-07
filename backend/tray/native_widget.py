@@ -188,6 +188,8 @@ class NativeTaskbarWidget:
 
         self.canvas.bind("<Motion>", self._on_canvas_motion)
         self.canvas.bind("<Leave>", self._on_canvas_leave)
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
 
     def _start_drag(self, event):
         self._drag_data["x"] = event.x
@@ -205,11 +207,45 @@ class NativeTaskbarWidget:
         target_port = getattr(self, "active_port", 8765) or 8765
         webbrowser.open(f"http://{self.host}:{target_port}/")
 
+    def _on_canvas_click(self, event):
+        """Toggles expanding or collapsing children for the clicked account."""
+        canvas_y = self.canvas.canvasy(event.y)
+        for box in getattr(self, "_hit_boxes", []):
+            x1, y1, x2, y2, p_key, is_header = box[0], box[1], box[2], box[3], box[4], box[5]
+            if x1 <= event.x <= x2 and y1 <= canvas_y <= y2:
+                if not hasattr(self, "expanded_accounts"):
+                    self.expanded_accounts = {}
+                self.expanded_accounts[p_key] = not self.expanded_accounts.get(p_key, False)
+                self.render_canvas()
+                break
+
+    def _on_mousewheel(self, event):
+        """Scrolls canvas up and down smoothly."""
+        if hasattr(self, "canvas") and self.canvas:
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _draw_sub_bar(self, x, y, w, pct, label, color):
+        """Helper to draw a labeled percentage progress bar on canvas."""
+        pct_val = max(0, min(100, float(pct)))
+        bar_x = x + 62
+        bar_w = w - bar_x - 38
+        bar_h = 6
+
+        self.canvas.create_text(x + 4, y + 3, text=label, anchor="w", fill="#94a3b8", font=("Segoe UI", 7))
+        self.canvas.create_rectangle(bar_x, y, bar_x + bar_w, y + bar_h, fill="#1e293b", outline="")
+        fill_w = int(bar_w * (pct_val / 100.0))
+        if fill_w > 0:
+            self.canvas.create_rectangle(bar_x, y, bar_x + fill_w, y + bar_h, fill=color, outline="")
+        self.canvas.create_text(x + w - 4, y + 3, text=f"{pct_val:.0f}%", anchor="e", fill="#cbd5e1", font=("Segoe UI", 7))
+
     def render_canvas(self):
-        """Draws the 5 accounts cards with dual bars and status badges."""
+        """Draws the accounts cards with click-to-expand multi-level bars and icons."""
         if not self.canvas:
             return
         self.canvas.delete("all")
+
+        if not hasattr(self, "expanded_accounts"):
+            self.expanded_accounts = {"claude": False, "gemini": False}
 
         providers_order = ["claude", "gemini", "chatgpt", "ollama", "copilot"]
         display_names = {
@@ -225,7 +261,6 @@ class NativeTaskbarWidget:
         prov_info = self.cached_providers or {}
 
         card_y = 4
-        card_h = 58
         card_w = self.width - 24
 
         self._hit_boxes = []
@@ -234,71 +269,148 @@ class NativeTaskbarWidget:
             item = prov_map.get(p_key, {
                 "tokens_today": 0,
                 "session_balance_remaining_pct": 100,
-                "weekly_balance_remaining_pct": 100,
-                "daily_allowance": 500000,
-                "weekly_allowance": 3500000
+                "weekly_balance_remaining_pct": 100
             })
             p_stat = prov_info.get(p_key, {})
             is_active = p_stat.get("status") == "ACTIVE"
             dot_color = "#10b981" if is_active else ("#f43f5e" if p_stat.get("status") == "ERROR" else "#64748b")
 
-            # Background pill
+            h = item.get("hierarchy", {})
+            is_expanded = bool(self.expanded_accounts.get(p_key, False))
+
+            account_label = ""
+            if p_key == "claude":
+                account_label = h.get("account_name") or "Synthesis2"
+            elif p_key == "gemini":
+                account_label = h.get("account_name") or "acidcow@gmail.com"
+
+            # Determine card height based on expanded state
+            if not is_expanded:
+                card_h = 58
+            else:
+                if p_key == "claude":
+                    card_h = 106 # 2 tiers: Team + Individual
+                elif p_key == "gemini":
+                    num_toks = len(h.get("tokens", [])) or 2
+                    card_h = 62 + (num_toks * 36) # Account + child tokens
+                else:
+                    card_h = 62
+
+            # Main Card Box
             self.canvas.create_rectangle(
                 4, card_y, card_w, card_y + card_h,
                 fill="#151e2e", outline="#1e293b", width=1
             )
-            self._hit_boxes.append((4, card_y, card_w, card_y + card_h, p_key, item, p_stat))
+            # Register hit box for click-toggle
+            self._hit_boxes.append((4, card_y, card_w, card_y + card_h, p_key, True, item, p_stat))
 
-            # Status dot
-            self.canvas.create_oval(12, card_y + 10, 18, card_y + 16, fill=dot_color, outline="")
+            # Header Line: Expand Toggle Icon + Status Dot + Name + Account Badge + Tokens
+            toggle_icon = "▼" if is_expanded else "▶"
+            self.canvas.create_text(
+                12, card_y + 13,
+                text=toggle_icon,
+                anchor="w",
+                fill="#38bdf8",
+                font=("Segoe UI", 7, "bold")
+            )
+
+            # Dot
+            self.canvas.create_oval(24, card_y + 10, 30, card_y + 16, fill=dot_color, outline="")
 
             # Provider Name
             self.canvas.create_text(
-                26, card_y + 13,
+                36, card_y + 13,
                 text=display_names[p_key],
                 anchor="w",
                 fill="#f1f5f9",
                 font=("Segoe UI", 9, "bold")
             )
 
+            # Account Badge
+            if account_label:
+                badge_bg = "#1e293b" if p_key == "claude" else "#172554"
+                badge_fg = "#fbbf24" if p_key == "claude" else "#93c5fd"
+                self.canvas.create_rectangle(
+                    116, card_y + 5, 116 + min(130, len(account_label) * 6 + 12), card_y + 20,
+                    fill=badge_bg, outline=""
+                )
+                self.canvas.create_text(
+                    122, card_y + 12,
+                    text=account_label[:20],
+                    anchor="w",
+                    fill=badge_fg,
+                    font=("Segoe UI", 7, "bold")
+                )
+
             # Tokens today
             tok_str = f"{item.get('tokens_today', 0):,} tok"
             self.canvas.create_text(
-                card_w - 12, card_y + 13,
+                card_w - 10, card_y + 13,
                 text=tok_str,
                 anchor="e",
                 fill="#06b6d4",
                 font=("Segoe UI", 8, "bold")
             )
 
-            # Bar 1: Session Balance
-            sess_pct = max(0, min(100, item.get("session_balance_remaining_pct", 100)))
-            bar_x = 72
-            bar_w = card_w - bar_x - 48
-            bar1_y = card_y + 26
-            bar_h = 7
+            # --- CARD BODY ---
+            if not is_expanded:
+                # Standard Collapsed Dual Bars
+                sess_pct = max(0, min(100, item.get("session_balance_remaining_pct", 100)))
+                week_pct = max(0, min(100, item.get("weekly_balance_remaining_pct", 100)))
+                c1 = "#f43f5e" if sess_pct < 20 else "#06b6d4"
+                c2 = "#f59e0b" if week_pct < 20 else "#8b5cf6"
+                self._draw_sub_bar(10, card_y + 26, card_w - 16, sess_pct, "Session:", c1)
+                self._draw_sub_bar(10, card_y + 39, card_w - 16, week_pct, "Weekly:", c2)
+            else:
+                # Expanded Multi-Level Hierarchical Bars
+                if p_key == "claude":
+                    # Level 1: 👥 Synthesis2 (Team Workspace Pool)
+                    team_info = h.get("team", {})
+                    t_sess = team_info.get("session_remaining_pct", 44.0)
+                    t_week = team_info.get("weekly_remaining_pct", 74.0)
+                    self.canvas.create_rectangle(8, card_y + 26, card_w - 6, card_y + 62, fill="#131b2c", outline="#1e293b")
+                    self.canvas.create_text(14, card_y + 34, text="👥 Synthesis2 (Team Pool)", anchor="w", fill="#c084fc", font=("Segoe UI", 7, "bold"))
+                    self._draw_sub_bar(14, card_y + 42, card_w - 22, t_sess, "Team Sess:", "#06b6d4")
+                    self._draw_sub_bar(14, card_y + 51, card_w - 22, t_week, "Team Wk:", "#8b5cf6")
 
-            self.canvas.create_text(12, bar1_y + 3, text="Session:", anchor="w", fill="#94a3b8", font=("Segoe UI", 7))
-            self.canvas.create_rectangle(bar_x, bar1_y, bar_x + bar_w, bar1_y + bar_h, fill="#1e293b", outline="")
-            fill_w1 = int(bar_w * (sess_pct / 100.0))
-            color1 = "#f43f5e" if sess_pct < 20 else "#06b6d4"
-            if fill_w1 > 0:
-                self.canvas.create_rectangle(bar_x, bar1_y, bar_x + fill_w1, bar1_y + bar_h, fill=color1, outline="")
-            self.canvas.create_text(card_w - 12, bar1_y + 3, text=f"{sess_pct}%", anchor="e", fill="#cbd5e1", font=("Segoe UI", 7))
+                    # Level 2: 👤 James Eckhardt (Individual Quota)
+                    ind_info = h.get("individual", {})
+                    i_sess = ind_info.get("session_remaining_pct", 40.0)
+                    i_week = ind_info.get("weekly_remaining_pct", 73.0)
+                    self.canvas.create_rectangle(8, card_y + 66, card_w - 6, card_y + 102, fill="#0f172a", outline="#1e293b")
+                    self.canvas.create_text(14, card_y + 74, text="👤 James Eckhardt (My Quota)", anchor="w", fill="#38bdf8", font=("Segoe UI", 7, "bold"))
+                    self._draw_sub_bar(14, card_y + 82, card_w - 22, i_sess, "My Sess:", "#38bdf8")
+                    self._draw_sub_bar(14, card_y + 91, card_w - 22, i_week, "My Wk:", "#3b82f6")
 
-            # Bar 2: Weekly Balance
-            week_pct = max(0, min(100, item.get("weekly_balance_remaining_pct", 100)))
-            bar2_y = card_y + 39
+                elif p_key == "gemini":
+                    # Level 1: 🌐 acidcow@gmail.com (Google Account Pool)
+                    self.canvas.create_rectangle(8, card_y + 26, card_w - 6, card_y + 58, fill="#0d1b30", outline="#1e293b")
+                    self.canvas.create_text(14, card_y + 34, text="🌐 acidcow@gmail.com (Account Pool)", anchor="w", fill="#60a5fa", font=("Segoe UI", 7, "bold"))
+                    self._draw_sub_bar(14, card_y + 42, card_w - 22, item.get("session_balance_remaining_pct", 88.0), "Account:", "#3b82f6")
 
-            self.canvas.create_text(12, bar2_y + 3, text="Weekly:", anchor="w", fill="#94a3b8", font=("Segoe UI", 7))
-            self.canvas.create_rectangle(bar_x, bar2_y, bar_x + bar_w, bar2_y + bar_h, fill="#1e293b", outline="")
-            fill_w2 = int(bar_w * (week_pct / 100.0))
-            color2 = "#f59e0b" if week_pct < 20 else "#8b5cf6"
-            if fill_w2 > 0:
-                self.canvas.create_rectangle(bar_x, bar2_y, bar_x + fill_w2, bar2_y + bar_h, fill=color2, outline="")
-            self.canvas.create_text(card_w - 12, bar2_y + 3, text=f"{week_pct}%", anchor="e", fill="#cbd5e1", font=("Segoe UI", 7))
+                    # Level 2..N: Child Named Tokens
+                    sub_y = card_y + 62
+                    child_toks = h.get("tokens", [])
+                    for tok in child_toks:
+                        tok_name = tok.get("name", "Gemini Token")
+                        tok_sess = tok.get("session_balance_remaining_pct", 90.0)
+                        tok_week = tok.get("weekly_balance_remaining_pct", 85.0)
+
+                        self.canvas.create_rectangle(8, sub_y, card_w - 6, sub_y + 34, fill="#111c2e", outline="#1e293b")
+                        self.canvas.create_text(14, sub_y + 8, text=f"🔑 {tok_name[:24]}", anchor="w", fill="#34d399", font=("Segoe UI", 7, "bold"))
+                        self._draw_sub_bar(14, sub_y + 16, card_w - 22, tok_sess, "Sess:", "#10b981")
+                        self._draw_sub_bar(14, sub_y + 24, card_w - 22, tok_week, "Wk:", "#06b6d4")
+                        sub_y += 36
+                else:
+                    sess_pct = max(0, min(100, item.get("session_balance_remaining_pct", 100)))
+                    week_pct = max(0, min(100, item.get("weekly_balance_remaining_pct", 100)))
+                    self._draw_sub_bar(10, card_y + 26, card_w - 16, sess_pct, "Session:", "#06b6d4")
+                    self._draw_sub_bar(10, card_y + 39, card_w - 16, week_pct, "Weekly:", "#8b5cf6")
 
             card_y += card_h + 6
+
+        # Configure scrollregion for mousewheel scrolling
+        self.canvas.configure(scrollregion=(0, 0, card_w, max(self.height - 70, card_y + 10)))
 
         # Update Savings Label
         if comp.get("local_savings"):
@@ -308,8 +420,11 @@ class NativeTaskbarWidget:
     def _on_canvas_motion(self, event):
         """Displays a weather-style telemetry hover flyout when hovering over an account."""
         hovered = None
-        for (x1, y1, x2, y2, p_key, item, p_stat) in getattr(self, "_hit_boxes", []):
-            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+        canvas_y = self.canvas.canvasy(event.y)
+        for box in getattr(self, "_hit_boxes", []):
+            x1, y1, x2, y2, p_key = box[0], box[1], box[2], box[3], box[4]
+            item, p_stat = box[6], box[7]
+            if x1 <= event.x <= x2 and y1 <= canvas_y <= y2:
                 hovered = (p_key, item, p_stat)
                 break
 

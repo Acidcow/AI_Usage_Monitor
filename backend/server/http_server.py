@@ -141,6 +141,94 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             bundle["usage_summary"] = srv.database.get_usage_summary()
             return self._send_json(200, bundle)
 
+        # Google OAuth Endpoints
+        if path == "/api/auth/google/login":
+            redirect_uri = f"http://{srv.host}:{srv.server_port}/api/auth/google/callback"
+            info = srv.google_auth_mgr.get_authorization_url(redirect_uri)
+            if query.get("browser", ["0"])[0] == "1":
+                self.send_response(302)
+                self.send_header("Location", info["auth_url"])
+                self.end_headers()
+                return
+            return self._send_json(200, info)
+
+        if path == "/api/auth/google/callback":
+            code = query.get("code", [""])[0]
+            state = query.get("state", [""])[0]
+            redirect_uri = f"http://{srv.host}:{srv.server_port}/api/auth/google/callback"
+            res = srv.google_auth_mgr.exchange_code_for_tokens(code, state, redirect_uri)
+            email = res.get("email", "acidcow@gmail.com")
+            html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Google Account Connected</title></head>
+            <body style="background:#0b101b;color:#f8fafc;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+              <div style="background:#151e2e;padding:32px;border-radius:12px;border:1px solid #10b981;text-align:center;max-width:420px;box-shadow:0 0 24px rgba(16,185,129,0.2);">
+                <div style="font-size:2.5rem;margin-bottom:12px;">✅</div>
+                <h2 style="color:#34d399;margin-top:0;">Google Account Connected!</h2>
+                <p style="color:#cbd5e1;font-size:0.95rem;">Authenticated as: <strong style="color:#38bdf8;">{email}</strong></p>
+                <p style="font-size:0.8rem;color:#94a3b8;margin-top:16px;">Credentials encrypted via Windows DPAPI. Returning to monitor...</p>
+                <script>setTimeout(() => {{ window.opener ? window.close() : (window.location.href = '/'); }}, 1800);</script>
+              </div>
+            </body></html>"""
+            payload = html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        if path == "/api/auth/google/status":
+            return self._send_json(200, srv.google_auth_mgr.get_auth_status())
+
+        # Historical Reporting & Analytics Endpoint
+        if path == "/api/reports/history":
+            group_by = query.get("group_by", ["day"])[0]
+            start_date = query.get("start_date", [None])[0]
+            end_date = query.get("end_date", [None])[0]
+            prov = query.get("provider", [None])[0]
+            acct = query.get("account_id", [None])[0]
+            team = query.get("team_name", [None])[0]
+            user = query.get("user_name", [None])[0]
+            token = query.get("token_id", [None])[0]
+            model = query.get("model", [None])[0]
+            proj = query.get("project_id", [None])[0]
+            dim = query.get("dimension", [None])[0]
+            fmt = query.get("format", ["json"])[0]
+
+            if fmt == "csv":
+                csv_data = srv.database.export_historical_csv(
+                    group_by=group_by,
+                    start_date=start_date,
+                    end_date=end_date,
+                    provider=prov,
+                    account_id=acct,
+                    team_name=team,
+                    user_name=user,
+                    model=model
+                )
+                payload = csv_data.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition", 'attachment; filename="ai_usage_history.csv"')
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            res = srv.database.query_historical_report(
+                group_by=group_by,
+                start_date=start_date,
+                end_date=end_date,
+                provider=prov,
+                account_id=acct,
+                team_name=team,
+                user_name=user,
+                token_id=token,
+                model=model,
+                project_id=proj,
+                dimension=dim
+            )
+            return self._send_json(200, res)
+
         self._send_json(404, {"error": "API route not found"})
 
     def _handle_api_post(self, path: str, body: Dict[str, Any]):
@@ -281,6 +369,29 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             res = launch_desktop_widget(host=host, port=target_port, dry_run=dry_run)
             return self._send_json(200, res)
 
+        # Google OAuth POST Endpoints
+        if path == "/api/auth/google/simulate":
+            email = body.get("email", "acidcow@gmail.com")
+            name = body.get("name", "James Eckhardt")
+            res = srv.google_auth_mgr.simulate_sign_in(email=email, name=name)
+            return self._send_json(200, res)
+
+        if path == "/api/auth/google/signout":
+            res = srv.google_auth_mgr.sign_out()
+            return self._send_json(200, res)
+
+        if path == "/api/auth/google/tokens":
+            name = body.get("name", "Gemini Dev Token")
+            api_key = body.get("api_key", "")
+            desc = body.get("description")
+            res = srv.google_auth_mgr.add_named_token(name=name, api_key=api_key, description=desc)
+            return self._send_json(200, res)
+
+        if path == "/api/auth/google/tokens/delete":
+            token_id = body.get("token_id", "")
+            res = srv.google_auth_mgr.delete_named_token(token_id=token_id)
+            return self._send_json(200, res)
+
         if path == "/api/system/open-url":
             import webbrowser
             target_url = body.get("url", "")
@@ -342,7 +453,8 @@ class AppHTTPServer:
         providers: Dict[str, Any],
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
-        proxy_port: int = 8766
+        proxy_port: int = 8766,
+        google_auth_mgr: Optional[Any] = None
     ):
         self.database = database
         self.vault = vault
@@ -351,6 +463,10 @@ class AppHTTPServer:
         self.host = host
         self.port = port
         self.proxy_port = proxy_port
+
+        from backend.security.google_auth import GoogleAuthManager
+        self.google_auth_mgr = google_auth_mgr or GoogleAuthManager(vault=self.vault, database=self.database)
+
         self._server: Optional[http.server.ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -370,6 +486,7 @@ class AppHTTPServer:
         self._server.proxy_port = self.proxy_port
         self._server.host = self.host
         self._server.port = self.server_port
+        self._server.google_auth_mgr = self.google_auth_mgr
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 

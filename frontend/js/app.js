@@ -28,11 +28,13 @@ window.App = {
       this.loadComponent("container-usage-gauges", "/components/usage_gauge_card.html"),
       this.loadComponent("container-session-timeline", "/components/session_timeline.html"),
       this.loadComponent("container-provider-hub", "/components/provider_hub.html"),
+      this.loadComponent("container-reports-panel", "/components/reports_panel.html"),
       this.loadComponent("container-troubleshooter", "/components/troubleshooter_panel.html")
     ]);
 
     this.setupEventListeners();
     await this.loadUsageData();
+    await this.loadHistoricalReport();
 
     // Start background auto-refresh every 4 seconds
     this.pollInterval = setInterval(() => this.loadUsageData(), 4000);
@@ -329,74 +331,112 @@ window.App = {
                 </span>
                 <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">Active View: ${(comp.active_scope || 'individual').toUpperCase()}</span>
               </div>
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px;">
-                <!-- 1. Individual Member (You) -->
-                <div style="background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 10px 12px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <strong style="color: #38bdf8; font-size: 0.82rem;">👤 Individual Member (You)</strong>
-                    <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'Personal Seat'}</span>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                ${key === 'gemini' && h.tokens && h.tokens.length > 0 ? `
+                  <!-- Gemini Account Umbrella (acidcow@gmail.com) -->
+                  <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <strong style="color: #60a5fa; font-size: 0.82rem;">🌐 Google Account Umbrella</strong>
+                      <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'acidcow@gmail.com'}</span>
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Account Session:</strong> <span style="color: #60a5fa; font-weight: 700;">${ind.session_remaining_pct}% remaining</span>
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Account Weekly:</strong> <span style="color: #60a5fa; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span>
+                    </div>
+                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                      Includes ${h.tokens.length} Child Tokens
+                    </div>
                   </div>
-                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                    <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.session_remaining_pct}% remaining</span> (${ind.session_used_pct}% used)
-                  </div>
-                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                    <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span> (${ind.weekly_used_pct}% used)
-                  </div>
-                  <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                    Resets: ${ind.weekly_reset_str || 'Mon 3:00 AM'}
-                  </div>
-                </div>
 
-                <!-- 2. Team Workspace Pool -->
-                <div style="background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px; padding: 10px 12px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <strong style="color: #c084fc; font-size: 0.82rem;">👥 Team Workspace Pool</strong>
-                    <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Core Engineering'}</span>
+                  <!-- Gemini Child Named Tokens -->
+                  ${h.tokens.map(t => `
+                    <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px 12px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <strong style="color: #38bdf8; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(t.name)}">🔑 ${this.escapeHtml(t.name)}</strong>
+                      </div>
+                      <div style="font-size: 0.68rem; color: var(--text-dim); margin-bottom: 6px;">${this.escapeHtml(t.masked_key)} • ${this.escapeHtml(t.description || 'API Token')}</div>
+                      <div style="font-size: 0.75rem; color: #e2e8f0; margin-bottom: 2px;">
+                        <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${t.session_balance_remaining_pct}% rem</span>
+                      </div>
+                      <div style="font-size: 0.75rem; color: #e2e8f0; margin-bottom: 4px;">
+                        <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${t.weekly_balance_remaining_pct}% rem</span>
+                      </div>
+                      <div style="font-size: 0.69rem; color: var(--accent-emerald);">
+                        Today: ${Number(t.tokens_today || 0).toLocaleString()} tokens
+                      </div>
+                    </div>
+                  `).join("")}
+                ` : `
+                  <!-- 1. Individual Member (You) -->
+                  <div style="background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 10px 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <strong style="color: #38bdf8; font-size: 0.82rem;">👤 Individual Member (You)</strong>
+                      <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'James Eckhardt'}</span>
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.session_remaining_pct}% remaining</span> (${ind.session_used_pct}% used)
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span> (${ind.weekly_used_pct}% used)
+                    </div>
+                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                      Resets: ${ind.weekly_reset_str || 'Mon 3:00 AM'}
+                    </div>
                   </div>
-                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                    <strong>Team Session:</strong> <span style="color: #c084fc; font-weight: 700;">${team.session_remaining_pct}% remaining</span> (${team.session_used_pct}% used)
-                  </div>
-                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                    <strong>Team Weekly:</strong> <span style="color: #c084fc; font-weight: 700;">${team.weekly_remaining_pct}% remaining</span> (${team.weekly_used_pct}% used)
-                  </div>
-                  <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                    Resets: ${team.weekly_reset_str || 'Mon 3:00 AM'}
-                  </div>
-                </div>
 
-                <!-- 3. Department Division -->
-                <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <strong style="color: #34d399; font-size: 0.82rem;">🏢 Department / Division</strong>
-                    <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
+                  <!-- 2. Team Workspace Pool -->
+                  <div style="background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px; padding: 10px 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <strong style="color: #c084fc; font-size: 0.82rem;">👥 Team Workspace Pool</strong>
+                      <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Synthesis2'}</span>
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Team Session:</strong> <span style="color: #c084fc; font-weight: 700;">${team.session_remaining_pct}% remaining</span> (${team.session_used_pct}% used)
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Team Weekly:</strong> <span style="color: #c084fc; font-weight: 700;">${team.weekly_remaining_pct}% remaining</span> (${team.weekly_used_pct}% used)
+                    </div>
+                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                      Resets: ${team.weekly_reset_str || 'Mon 3:00 AM'}
+                    </div>
                   </div>
-                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                    <strong>Division:</strong> ${dept.dept_name || 'Technology & AI'}
-                  </div>
-                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                    <strong>Monthly Volume:</strong> ${Number(dept.monthly_tokens || 0).toLocaleString()} tok
-                  </div>
-                  <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                    Dept Budget: $${Number(dept.budget_limit_usd || 1500).toFixed(2)}
-                  </div>
-                </div>
 
-                <!-- 4. Enterprise Organization -->
-                <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 10px 12px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <strong style="color: #fbbf24; font-size: 0.82rem;">🌐 Organization / Enterprise</strong>
-                    <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
+                  <!-- 3. Department Division -->
+                  <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <strong style="color: #34d399; font-size: 0.82rem;">🏢 Department / Division</strong>
+                      <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Division:</strong> ${dept.dept_name || 'Technology & AI'}
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Monthly Volume:</strong> ${Number(dept.monthly_tokens || 0).toLocaleString()} tok
+                    </div>
+                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                      Dept Budget: $${Number(dept.budget_limit_usd || 1500).toFixed(2)}
+                    </div>
                   </div>
-                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                    <strong>Org Name:</strong> ${ent.org_name || 'Enterprise Workspace'}
+
+                  <!-- 4. Enterprise Organization -->
+                  <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 10px 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <strong style="color: #fbbf24; font-size: 0.82rem;">🌐 Organization / Enterprise</strong>
+                      <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Org Name:</strong> ${ent.org_name || 'Enterprise Workspace'}
+                    </div>
+                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                      <strong>Pool Sync:</strong> <span style="color: #34d399; font-weight: 600;">Active & Synced</span>
+                    </div>
+                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                      Centralized Token Telemetry
+                    </div>
                   </div>
-                  <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                    <strong>Pool Sync:</strong> <span style="color: #34d399; font-weight: 600;">Active & Synced</span>
-                  </div>
-                  <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                    Centralized Token Telemetry
-                  </div>
-                </div>
+                `}
               </div>
             </td>
           </tr>
@@ -962,11 +1002,158 @@ window.App = {
   // Gemini Configuration
   openConfigureGeminiModal() {
     const modal = document.getElementById("gemini-config-modal");
-    if (modal) modal.classList.add("active");
+    if (modal) {
+      modal.classList.add("active");
+      this.checkGoogleAuthStatus();
+    }
   },
   closeConfigureGeminiModal() {
     const modal = document.getElementById("gemini-config-modal");
     if (modal) modal.classList.remove("active");
+  },
+
+  async checkGoogleAuthStatus() {
+    try {
+      const res = await fetch("/api/auth/google/status");
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const badge = document.getElementById("gemini-oauth-badge");
+      if (badge) {
+        if (data.is_authenticated) {
+          badge.className = "badge";
+          badge.style.background = "rgba(16, 185, 129, 0.2)";
+          badge.style.color = "#34d399";
+          badge.style.borderColor = "rgba(16, 185, 129, 0.3)";
+          badge.innerText = `Connected: ${data.email || 'acidcow@gmail.com'}`;
+        } else {
+          badge.className = "badge";
+          badge.style.background = "rgba(239, 68, 68, 0.2)";
+          badge.style.color = "#f87171";
+          badge.style.borderColor = "rgba(239, 68, 68, 0.3)";
+          badge.innerText = "Not Connected";
+        }
+      }
+
+      const listContainer = document.getElementById("gemini-named-tokens-list");
+      if (listContainer) {
+        const tokens = data.tokens || [];
+        if (tokens.length === 0) {
+          listContainer.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-dim); padding: 6px;">No child tokens registered. Add one below to track granular token usage.</div>`;
+        } else {
+          listContainer.innerHTML = tokens.map(t => `
+            <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px 10px;">
+              <div>
+                <strong style="color: #60a5fa; font-size: 0.78rem;">${this.escapeHtml(t.name)}</strong>
+                <span style="font-size: 0.7rem; color: var(--text-dim); margin-left: 8px;">(${this.escapeHtml(t.masked_key)})</span>
+                ${t.description ? `<div style="font-size: 0.68rem; color: var(--text-muted);">${this.escapeHtml(t.description)}</div>` : ''}
+              </div>
+              <button type="button" onclick="window.App.deleteNamedGeminiToken('${t.id}')" class="btn btn-secondary btn-sm" style="color: var(--accent-rose); padding: 2px 6px; font-size: 0.7rem;" title="Delete Token">✕</button>
+            </div>
+          `).join("");
+        }
+      }
+    } catch (e) {
+      console.error("Error checking Google Auth status:", e);
+    }
+  },
+
+  async startGoogleOAuth() {
+    try {
+      const res = await fetch("/api/auth/google/login");
+      if (!res.ok) {
+        alert("Failed to initiate Google OAuth.");
+        return;
+      }
+      const data = await res.json();
+      if (data.auth_url) {
+        window.open(data.auth_url, "_blank");
+        alert("A Google OAuth login window has been opened. Complete the sign-in in your browser and it will return directly to the local AI Usage Monitor loopback listener!");
+      }
+    } catch (e) {
+      alert(`Error starting Google OAuth: ${e}`);
+    }
+  },
+
+  async simulateGoogleAccount(email) {
+    try {
+      const res = await fetch("/api/auth/google/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email || "acidcow@gmail.com", name: "James Eckhardt" })
+      });
+      if (res.ok) {
+        alert(`✓ Successfully connected Google Account: ${email || "acidcow@gmail.com"}!\nAccount-level usage view and child token telemetry are now active.`);
+        await this.checkGoogleAuthStatus();
+        await this.loadUsageData();
+      } else {
+        alert("Failed to connect simulated Google account.");
+      }
+    } catch (e) {
+      alert(`Error simulating Google account: ${e}`);
+    }
+  },
+
+  async disconnectGoogleAccount() {
+    try {
+      const res = await fetch("/api/auth/google/signout", { method: "POST" });
+      if (res.ok) {
+        alert("Google account disconnected.");
+        await this.checkGoogleAuthStatus();
+        await this.loadUsageData();
+      }
+    } catch (e) {
+      alert(`Error signing out: ${e}`);
+    }
+  },
+
+  async addNamedGeminiToken() {
+    const nameInput = document.getElementById("gemini-new-tok-name");
+    const keyInput = document.getElementById("gemini-new-tok-key");
+    const name = nameInput ? nameInput.value.trim() : "";
+    const key = keyInput ? keyInput.value.trim() : "";
+
+    if (!name || !key) {
+      alert("Please provide both a Token Name / Label and the API Key.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/auth/google/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name, api_key: key, description: `Key for ${name}` })
+      });
+      if (res.ok) {
+        alert(`✓ Token "${name}" registered and encrypted with Windows DPAPI!`);
+        if (nameInput) nameInput.value = "";
+        if (keyInput) keyInput.value = "";
+        await this.checkGoogleAuthStatus();
+        await this.loadUsageData();
+      } else {
+        const err = await res.json();
+        alert(`Failed to add token: ${err.error || res.statusText}`);
+      }
+    } catch (e) {
+      alert(`Error adding named token: ${e}`);
+    }
+  },
+
+  async deleteNamedGeminiToken(tokenId) {
+    if (!confirm("Are you sure you want to remove this child API token?")) return;
+    try {
+      const res = await fetch("/api/auth/google/tokens/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token_id: tokenId })
+      });
+      if (res.ok) {
+        await this.checkGoogleAuthStatus();
+        await this.loadUsageData();
+      }
+    } catch (e) {
+      alert(`Error deleting token: ${e}`);
+    }
   },
 
   async saveGeminiConfig() {
@@ -1240,6 +1427,161 @@ window.App = {
         mascotImg.style.transform = "scale(1.0) rotate(0deg)";
       }, 300);
     }
+  },
+
+  // Historical Reporting & Multi-Dimensional Analytics Engine
+  selectedReportGrouping: 'day',
+
+  setReportGrouping(group) {
+    this.selectedReportGrouping = group;
+    ['hour', 'day', 'week', 'month'].forEach(g => {
+      const btn = document.getElementById(`slice-btn-${g}`);
+      if (btn) {
+        btn.className = (g === group) ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
+      }
+    });
+    this.loadHistoricalReport();
+  },
+
+  handleDateRangeChange() {
+    this.loadHistoricalReport();
+  },
+
+  async loadHistoricalReport() {
+    const tbody = document.getElementById("reports-table-body");
+    if (!tbody) return;
+
+    const group = this.selectedReportGrouping || 'day';
+    const rangeSelect = document.getElementById("report-date-range-select");
+    const rangeVal = rangeSelect ? rangeSelect.value : '7d';
+
+    const provSelect = document.getElementById("report-filter-provider");
+    const prov = provSelect ? provSelect.value : '';
+
+    const dimSelect = document.getElementById("report-filter-dimension");
+    const dim = dimSelect ? dimSelect.value : '';
+
+    const teamInput = document.getElementById("report-filter-team");
+    const team = teamInput ? teamInput.value.trim() : '';
+
+    const userInput = document.getElementById("report-filter-user");
+    const user = userInput ? userInput.value.trim() : '';
+
+    let startDate = null;
+    let endDate = null;
+    const now = new Date();
+    if (rangeVal === 'today') {
+      startDate = now.toISOString().substring(0, 10);
+    } else if (rangeVal === '7d') {
+      const d7 = new Date(now.getTime() - 7 * 86400000);
+      startDate = d7.toISOString().substring(0, 10);
+    } else if (rangeVal === '30d') {
+      const d30 = new Date(now.getTime() - 30 * 86400000);
+      startDate = d30.toISOString().substring(0, 10);
+    }
+
+    const params = new URLSearchParams({ group_by: group });
+    if (startDate) params.set("start_date", startDate);
+    if (endDate) params.set("end_date", endDate);
+    if (prov) params.set("provider", prov);
+    if (dim) params.set("dimension", dim);
+    if (team) params.set("team_name", team);
+    if (user) params.set("user_name", user);
+
+    try {
+      const res = await fetch(`/api/reports/history?${params.toString()}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const summary = data.summary || {};
+      const totTokEl = document.getElementById("rep-tot-tokens");
+      const totCostEl = document.getElementById("rep-tot-cost");
+      const totEvtEl = document.getElementById("rep-tot-events");
+      const totDimEl = document.getElementById("rep-tot-dims");
+
+      if (totTokEl) totTokEl.innerText = Number(summary.total_tokens || 0).toLocaleString();
+      if (totCostEl) totCostEl.innerText = `$${Number(summary.total_estimated_cost || 0).toFixed(4)}`;
+      if (totEvtEl) totEvtEl.innerText = Number(summary.total_events || 0).toLocaleString();
+      if (totDimEl) totDimEl.innerText = Number(summary.distinct_dimensions || (data.rows ? data.rows.length : 0)).toLocaleString();
+
+      const rows = data.rows || [];
+      if (rows.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="9" style="text-align: center; color: var(--text-dim); padding: 24px;">
+              No usage activity found for the selected time slice and filters.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      const maxTokens = Math.max(...rows.map(r => r.total_tokens || 0), 1);
+
+      tbody.innerHTML = rows.map(r => {
+        const pct = Math.min(100, Math.max(3, Math.round((r.total_tokens / maxTokens) * 100)));
+        const costPer1k = r.total_tokens > 0 ? ((r.estimated_cost / r.total_tokens) * 1000).toFixed(4) : "0.0000";
+        return `
+          <tr>
+            <td style="font-family: var(--font-mono); font-weight: 600; color: #fff;">${this.escapeHtml(r.period)}</td>
+            <td><strong style="color: #60a5fa; font-size: 0.8rem;">${this.escapeHtml(r.group_key || r.provider || 'All')}</strong></td>
+            <td style="font-family: var(--font-mono); color: var(--text-muted);">${Number(r.event_count || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono);">${Number(r.input_tokens || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono);">${Number(r.output_tokens || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8;">${Number(r.total_tokens || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: #34d399;">$${Number(r.estimated_cost || 0).toFixed(4)}</td>
+            <td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem;">$${costPer1k}</td>
+            <td>
+              <div style="background: rgba(255,255,255,0.05); border-radius: 4px; height: 10px; width: 100px; overflow: hidden;">
+                <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, #3b82f6, #06b6d4); border-radius: 4px;"></div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+    } catch (e) {
+      console.error("Error loading historical report:", e);
+    }
+  },
+
+  exportReportsCsv() {
+    const group = this.selectedReportGrouping || 'day';
+    const rangeSelect = document.getElementById("report-date-range-select");
+    const rangeVal = rangeSelect ? rangeSelect.value : '7d';
+
+    const provSelect = document.getElementById("report-filter-provider");
+    const prov = provSelect ? provSelect.value : '';
+
+    const dimSelect = document.getElementById("report-filter-dimension");
+    const dim = dimSelect ? dimSelect.value : '';
+
+    const teamInput = document.getElementById("report-filter-team");
+    const team = teamInput ? teamInput.value.trim() : '';
+
+    const userInput = document.getElementById("report-filter-user");
+    const user = userInput ? userInput.value.trim() : '';
+
+    let startDate = '';
+    const now = new Date();
+    if (rangeVal === 'today') {
+      startDate = now.toISOString().substring(0, 10);
+    } else if (rangeVal === '7d') {
+      const d7 = new Date(now.getTime() - 7 * 86400000);
+      startDate = d7.toISOString().substring(0, 10);
+    } else if (rangeVal === '30d') {
+      const d30 = new Date(now.getTime() - 30 * 86400000);
+      startDate = d30.toISOString().substring(0, 10);
+    }
+
+    const params = new URLSearchParams({ group_by: group, format: 'csv' });
+    if (startDate) params.set("start_date", startDate);
+    if (prov) params.set("provider", prov);
+    if (dim) params.set("dimension", dim);
+    if (team) params.set("team_name", team);
+    if (user) params.set("user_name", user);
+
+    window.location.href = `/api/reports/history?${params.toString()}`;
   },
 
   escapeHtml(str) {

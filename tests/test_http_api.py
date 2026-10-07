@@ -228,6 +228,39 @@ class TestHTTPAPI(unittest.TestCase):
         self.assertIn("AIzaSyKeyOne", stored_key)
         self.assertEqual(stored_proj, "my-gcp-project-123")
 
+    def test_api_google_auth_status_and_simulate(self):
+        status, data = self._get("/api/auth/google/status")
+        self.assertEqual(status, 200)
+        self.assertIn("is_authenticated", data)
+
+        # Simulate sign-in for acidcow@gmail.com
+        status, sim_data = self._post("/api/auth/google/simulate", {"email": "acidcow@gmail.com", "name": "James Eckhardt"})
+        self.assertEqual(status, 200)
+        self.assertTrue(sim_data["success"])
+
+        # Check status again
+        status, data2 = self._get("/api/auth/google/status")
+        self.assertEqual(status, 200)
+        self.assertTrue(data2["is_authenticated"])
+        self.assertEqual(data2["email"], "acidcow@gmail.com")
+
+    def test_api_reports_history_and_csv(self):
+        # JSON endpoint
+        status, data = self._get("/api/reports/history?group_by=day")
+        self.assertEqual(status, 200)
+        self.assertIn("rows", data)
+        self.assertIn("summary", data)
+
+        # CSV endpoint
+        port = self.server.server_port
+        url = f"http://127.0.0.1:{port}/api/reports/history?group_by=day&format=csv"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/csv", resp.headers.get("Content-Type", ""))
+            csv_content = resp.read().decode("utf-8")
+            self.assertIn("Period,Provider", csv_content)
+
 if __name__ == "__main__":
     unittest.main()
 
