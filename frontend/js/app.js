@@ -329,65 +329,188 @@ window.App = {
     const peakInfo = document.getElementById("chart-peak-info");
     if (!svg) return;
 
+    const platforms = ["claude", "gemini", "chatgpt", "ollama", "copilot"];
+    const platformColors = {
+      claude: "#f59e0b",
+      gemini: "#3b82f6",
+      chatgpt: "#10a37f",
+      ollama: "#8b5cf6",
+      copilot: "#0284c7",
+      total: "#06b6d4"
+    };
+    const platformNames = {
+      claude: "Claude",
+      gemini: "Google Gemini",
+      chatgpt: "ChatGPT",
+      ollama: "Ollama (Local)",
+      copilot: "M365 Copilot",
+      total: "Total Combined"
+    };
+
     if (!hourly || hourly.length === 0) {
       svg.innerHTML = `
-        <text x="400" y="65" text-anchor="middle" fill="#64748b" font-size="14" font-family="sans-serif">
-          No hourly tokens recorded yet in past 24 hours.
+        <text x="450" y="95" text-anchor="middle" fill="#64748b" font-size="13" font-family="sans-serif">
+          No hourly tokens recorded yet in past 24 hours. Interacting with AI models will plot real-time multi-platform velocity curves here.
         </text>
       `;
       if (peakInfo) peakInfo.innerText = "Peak: 0 tokens/hr";
       return;
     }
 
-    // Group by hour
+    // Build timeline of distinct hour keys
     const hourMap = {};
-    let maxTokens = 100;
+    const allHoursSet = new Set();
+    let maxTokens = 50;
+
     hourly.forEach(item => {
-      const k = item.hour_key;
-      hourMap[k] = (hourMap[k] || 0) + item.tokens;
-      if (hourMap[k] > maxTokens) maxTokens = hourMap[k];
+      const h = item.hour_key;
+      const prov = (item.provider || "claude").toLowerCase();
+      allHoursSet.add(h);
+
+      if (!hourMap[h]) {
+        hourMap[h] = { total: 0 };
+        platforms.forEach(p => hourMap[h][p] = 0);
+      }
+      const tok = Number(item.tokens || 0);
+      hourMap[h][prov] = (hourMap[h][prov] || 0) + tok;
+      hourMap[h].total += tok;
+
+      if (hourMap[h].total > maxTokens) maxTokens = hourMap[h].total;
     });
 
-    const entries = Object.entries(hourMap);
+    const sortedHours = Array.from(allHoursSet).sort();
     if (peakInfo) peakInfo.innerText = `Peak: ${maxTokens.toLocaleString()} tokens/hr`;
 
-    const width = 800;
-    const height = 120;
-    const padding = 20;
-    const plotWidth = width - (padding * 2);
-    const plotHeight = height - (padding * 2);
+    // SVG ViewBox dimensions: 900 x 200
+    const width = 900;
+    const height = 200;
+    const padL = 60;
+    const padR = 25;
+    const padT = 20;
+    const padB = 30;
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
 
-    const step = plotWidth / Math.max(1, entries.length);
-    let barsHtml = "";
+    const numPoints = sortedHours.length;
+    const step = numPoints > 1 ? plotW / (numPoints - 1) : plotW;
 
-    entries.forEach(([hour, tok], idx) => {
-      const barHeight = Math.max(4, (tok / maxTokens) * plotHeight);
-      const x = padding + (idx * step);
-      const y = height - padding - barHeight;
-      const hourLabel = hour.substring(11, 13) + ":00";
-
-      barsHtml += `
-        <g class="chart-bar-group" style="cursor: pointer;">
-          <title>${hourLabel} UTC: ${tok.toLocaleString()} tokens</title>
-          <rect x="${x + 2}" y="${y}" width="${Math.max(6, step - 6)}" height="${barHeight}" rx="3" fill="url(#chart-grad)" opacity="0.85">
-            <animate attributeName="opacity" from="0.4" to="0.85" dur="0.3s"/>
-          </rect>
-          <text x="${x + (step/2)}" y="${height - 4}" font-size="9" fill="#64748b" text-anchor="middle" font-family="sans-serif">${hourLabel}</text>
-        </g>
+    // Grid lines (3 levels: 0%, 50%, 100%)
+    let gridHtml = "";
+    [0, 0.5, 1.0].forEach(ratio => {
+      const y = padT + (plotH * (1.0 - ratio));
+      const val = Math.round(maxTokens * ratio);
+      gridHtml += `
+        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="4,4"/>
+        <text x="${padL - 8}" y="${y + 4}" fill="#64748b" font-size="9" text-anchor="end" font-family="monospace">${val >= 1000 ? (val/1000).toFixed(0)+'k' : val}</text>
       `;
     });
 
+    // Time axis labels along the bottom
+    let axisHtml = "";
+    sortedHours.forEach((hourStr, idx) => {
+      const x = padL + (idx * step);
+      const label = hourStr.substring(11, 13) + ":00";
+      // Show every label if <= 12 hours, otherwise every 2nd or 3rd
+      const showLabel = numPoints <= 12 || idx % Math.ceil(numPoints / 8) === 0 || idx === numPoints - 1;
+      if (showLabel) {
+        axisHtml += `
+          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 4}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+          <text x="${x}" y="${height - 8}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${label}</text>
+        `;
+      }
+    });
+
+    // Generate Path Data for each platform & total
+    const seriesToRender = [...platforms, "total"];
+    let linesHtml = "";
+    let dotsHtml = "";
+
+    seriesToRender.forEach(seriesKey => {
+      const color = platformColors[seriesKey];
+      const isTotal = seriesKey === "total";
+      const points = [];
+
+      sortedHours.forEach((hourStr, idx) => {
+        const tok = hourMap[hourStr][seriesKey] || 0;
+        const x = numPoints > 1 ? (padL + (idx * step)) : (padL + plotW / 2);
+        const y = padT + plotH - ((tok / maxTokens) * plotH);
+        points.push({ x, y, tok, hour: hourStr.substring(11, 13) + ":00" });
+      });
+
+      // Only draw if there's non-zero data or if it's total
+      const hasData = points.some(p => p.tok > 0);
+      if (!hasData && !isTotal) return;
+
+      let d = "";
+      points.forEach((pt, idx) => {
+        d += (idx === 0 ? `M ${pt.x} ${pt.y}` : ` L ${pt.x} ${pt.y}`);
+      });
+
+      const strokeDash = isTotal ? 'stroke-dasharray="6,4"' : '';
+      const strokeWidth = isTotal ? '2' : '2.5';
+      const opacity = isTotal ? '0.6' : '0.9';
+
+      linesHtml += `
+        <path class="chart-line-path" data-series="${seriesKey}" d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" ${strokeDash} opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round" style="transition: all 0.2s ease;">
+          <title>${platformNames[seriesKey]} Trend</title>
+        </path>
+      `;
+
+      // Dots on active points
+      points.forEach(pt => {
+        if (pt.tok > 0) {
+          dotsHtml += `
+            <circle class="chart-dot" data-series="${seriesKey}" cx="${pt.x}" cy="${pt.y}" r="${isTotal ? 3 : 4}" fill="${color}" stroke="#0b0f19" stroke-width="1.5" style="cursor: pointer;">
+              <title>${platformNames[seriesKey]}: ${pt.tok.toLocaleString()} tokens at ${pt.hour} UTC</title>
+            </circle>
+          `;
+        }
+      });
+    });
+
     svg.innerHTML = `
-      <defs>
-        <linearGradient id="chart-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#06b6d4" stop-opacity="1"/>
-          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.3"/>
-        </linearGradient>
-      </defs>
-      <!-- Base Axis -->
-      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-      ${barsHtml}
+      <!-- Base Axes -->
+      <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+      ${gridHtml}
+      ${axisHtml}
+      ${linesHtml}
+      ${dotsHtml}
     `;
+
+    // Setup interactive legend click filtering
+    this._setupChartLegendInteractivity();
+  },
+
+  _setupChartLegendInteractivity() {
+    const legendPills = document.querySelectorAll(".chart-legend-pill");
+    legendPills.forEach(pill => {
+      pill.onclick = () => {
+        const plat = pill.getAttribute("data-platform");
+        const allPaths = document.querySelectorAll(".chart-line-path");
+        const allDots = document.querySelectorAll(".chart-dot");
+        const isAlreadyIsolated = pill.classList.contains("isolated");
+
+        legendPills.forEach(p => p.classList.remove("isolated"));
+
+        if (isAlreadyIsolated) {
+          // Restore all
+          allPaths.forEach(p => { p.style.opacity = p.getAttribute("data-series") === "total" ? "0.6" : "0.9"; p.style.strokeWidth = "2.5"; });
+          allDots.forEach(d => d.style.opacity = "1");
+        } else {
+          // Isolate clicked platform
+          pill.classList.add("isolated");
+          allPaths.forEach(p => {
+            const match = p.getAttribute("data-series") === plat;
+            p.style.opacity = match ? "1" : "0.15";
+            p.style.strokeWidth = match ? "4" : "1.5";
+          });
+          allDots.forEach(d => {
+            const match = d.getAttribute("data-series") === plat;
+            d.style.opacity = match ? "1" : "0.1";
+          });
+        }
+      };
+    });
   },
 
   renderSessions(sessions) {

@@ -129,20 +129,49 @@
   </div>
 </div>
 
-<!-- Pure SVG Analytics Chart Card -->
+<!-- Pure SVG Analytics Multi-Line Chart Card -->
 <div class="glass-card" style="margin-bottom: 28px;">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
     <div>
-      <h3 style="font-size: 1rem; font-weight: 700; color: #fff;">24-Hour Token Velocity & Hourly Trends</h3>
-      <p style="font-size: 0.75rem; color: var(--text-muted);">Real-time aggregated consumption across all monitored AI models.</p>
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: #fff;">24-Hour Token Velocity & Multi-Platform Trends</h3>
+      <p style="font-size: 0.78rem; color: var(--text-muted);">Real-time comparative velocity curves tracking hourly token consumption across each monitored AI platform.</p>
     </div>
-    <div style="display: flex; gap: 10px; align-items: center;">
-      <span style="font-size: 0.75rem; color: var(--accent-cyan); font-family: var(--font-mono);" id="chart-peak-info">Peak: -- tokens/hr</span>
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <span style="font-size: 0.75rem; color: var(--accent-cyan); font-family: var(--font-mono); background: rgba(6, 182, 212, 0.1); padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.25);" id="chart-peak-info">Peak: -- tokens/hr</span>
     </div>
   </div>
-  <div style="width: 100%; height: 140px; background: rgba(0,0,0,0.25); border-radius: var(--radius-sm); padding: 8px; display: flex; align-items: center; justify-content: center;" id="svg-chart-container">
-    <svg id="token-velocity-chart" width="100%" height="100%" viewBox="0 0 800 120" preserveAspectRatio="none">
-      <!-- Dynamically generated SVG bars & trend lines -->
+
+  <!-- Multi-Platform Legend -->
+  <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; padding: 6px 10px; background: rgba(255,255,255,0.02); border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.05);" id="chart-legend-container">
+    <div class="chart-legend-pill" data-platform="claude" style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #fbbf24; cursor: pointer; padding: 2px 8px; border-radius: 4px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3);">
+      <span style="display: inline-block; width: 14px; height: 3px; background: #f59e0b; border-radius: 2px;"></span>
+      <strong>Claude</strong>
+    </div>
+    <div class="chart-legend-pill" data-platform="gemini" style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #93c5fd; cursor: pointer; padding: 2px 8px; border-radius: 4px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3);">
+      <span style="display: inline-block; width: 14px; height: 3px; background: #3b82f6; border-radius: 2px;"></span>
+      <strong>Google Gemini</strong>
+    </div>
+    <div class="chart-legend-pill" data-platform="chatgpt" style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #6ee7b7; cursor: pointer; padding: 2px 8px; border-radius: 4px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3);">
+      <span style="display: inline-block; width: 14px; height: 3px; background: #10a37f; border-radius: 2px;"></span>
+      <strong>ChatGPT</strong>
+    </div>
+    <div class="chart-legend-pill" data-platform="ollama" style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #c084fc; cursor: pointer; padding: 2px 8px; border-radius: 4px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3);">
+      <span style="display: inline-block; width: 14px; height: 3px; background: #8b5cf6; border-radius: 2px;"></span>
+      <strong>Ollama (Local)</strong>
+    </div>
+    <div class="chart-legend-pill" data-platform="copilot" style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #7dd3fc; cursor: pointer; padding: 2px 8px; border-radius: 4px; background: rgba(2, 132, 199, 0.1); border: 1px solid rgba(2, 132, 199, 0.3);">
+      <span style="display: inline-block; width: 14px; height: 3px; background: #0284c7; border-radius: 2px;"></span>
+      <strong>M365 Copilot</strong>
+    </div>
+    <div class="chart-legend-pill" data-platform="total" style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: var(--accent-cyan); cursor: pointer; padding: 2px 8px; border-radius: 4px; background: rgba(6, 182, 212, 0.1); border: 1px dashed rgba(6, 182, 212, 0.4);">
+      <span style="display: inline-block; width: 14px; height: 2px; background: #06b6d4; border-top: 1px dashed #06b6d4;"></span>
+      <span>Total Combined</span>
+    </div>
+  </div>
+
+  <div style="width: 100%; height: 210px; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); padding: 10px; display: flex; align-items: center; justify-content: center;" id="svg-chart-container">
+    <svg id="token-velocity-chart" width="100%" height="100%" viewBox="0 0 900 200" preserveAspectRatio="none">
+      <!-- Dynamically generated multi-platform SVG line curves & data points -->
     </svg>
   </div>
 </div>

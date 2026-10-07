@@ -16,19 +16,22 @@ class WindowsTrayManager:
         on_open_dashboard: Optional[Callable] = None,
         on_open_widget: Optional[Callable] = None,
         on_sync_now: Optional[Callable] = None,
-        on_exit: Optional[Callable] = None
+        on_exit: Optional[Callable] = None,
+        icon_type: str = "johnny5"
     ):
         self.app_name = app_name
         self.on_open_dashboard = on_open_dashboard
         self.on_open_widget = on_open_widget
         self.on_sync_now = on_sync_now
         self.on_exit = on_exit
+        self.icon_type = icon_type
 
         self.is_windows = sys.platform == "win32"
         self._thread: Optional[threading.Thread] = None
         self._hwnd = None
         self._running = False
         self._tooltip = f"{app_name}\nInitializing..."
+        self._current_hicon = None
 
     def start(self):
         if not self.is_windows:
@@ -56,6 +59,19 @@ class WindowsTrayManager:
         if self.is_windows and self._hwnd:
             try:
                 self._update_icon()
+            except Exception:
+                pass
+
+    def set_icon_type(self, icon_type: str):
+        """Switches the tray icon dynamically between 'johnny5' and 'shield'."""
+        self.icon_type = icon_type
+        if self.is_windows and self._hwnd:
+            try:
+                from backend.tray.icon_factory import get_tray_icon_handle
+                hicon = get_tray_icon_handle(self.icon_type)
+                if hicon:
+                    self._current_hicon = hicon
+                    self._update_icon()
             except Exception:
                 pass
 
@@ -92,13 +108,16 @@ class WindowsTrayManager:
 
         NIM_MODIFY = 0x00000001
         NIF_TIP = 0x00000004
+        NIF_ICON = 0x00000002
 
         nid = NOTIFYICONDATAW()
         nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
         nid.hWnd = self._hwnd
         nid.uID = 1
-        nid.uFlags = NIF_TIP
+        nid.uFlags = NIF_TIP | (NIF_ICON if self._current_hicon else 0)
         nid.szTip = self._tooltip
+        if self._current_hicon:
+            nid.hIcon = self._current_hicon
 
         ctypes.windll.shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
 
@@ -255,7 +274,12 @@ class WindowsTrayManager:
             self._hwnd = hwnd
 
             # Add System Tray Icon
-            hicon = user32.LoadIconW(None, IDI_APPLICATION)
+            from backend.tray.icon_factory import get_tray_icon_handle
+            hicon = get_tray_icon_handle(self.icon_type)
+            if not hicon:
+                hicon = user32.LoadIconW(None, IDI_APPLICATION)
+            self._current_hicon = hicon
+
             nid = NOTIFYICONDATAW()
             nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
             nid.hWnd = hwnd

@@ -101,12 +101,32 @@ def calculate_widget_position(widget_width: int = 360, widget_height: int = 210,
 def launch_desktop_widget(
     host: str = "127.0.0.1",
     port: int = 8765,
-    width: int = 360,
-    height: int = 210
+    width: int = 370,
+    height: int = 390,
+    prefer_native: bool = True
 ) -> Dict[str, Any]:
     """
-    Launches the mini widget in standalone chromeless desktop app mode.
+    Launches the mini widget.
+    By default, launches the native standalone desktop taskbar widget (zero browser required).
+    Falls back to Edge app mode or browser if requested or if native launch fails.
     """
+    if prefer_native:
+        try:
+            args = [sys.executable, "-m", "backend.tray.native_widget", str(host), str(port)]
+            proc = subprocess.Popen(
+                args,
+                cwd=str(REPO_ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return {
+                "success": True,
+                "mode": "native_taskbar_widget",
+                "pid": proc.pid
+            }
+        except Exception:
+            pass
+
     edge_bin = find_edge_binary()
     url = f"http://{host}:{port}/mini_widget.html"
     pos = calculate_widget_position(widget_width=width, widget_height=height)
@@ -154,3 +174,4 @@ def launch_desktop_widget(
         "mode": "browser_fallback",
         "url": url
     }
+

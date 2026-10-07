@@ -66,5 +66,49 @@ class TestWindowsTray(unittest.TestCase):
 
         tray.stop()
 
+    def test_tray_icon_factory_generates_valid_assets_and_handles(self):
+        """Assert that icon_factory creates valid .ico files and Win32 HICON handles."""
+        from backend.tray.icon_factory import ensure_ico_assets, get_tray_icon_handle
+        ensure_ico_assets()
+
+        icons_dir = REPO_ROOT / "frontend" / "assets" / "icons"
+        j5_ico = icons_dir / "app_icon_johnny5.ico"
+        sh_ico = icons_dir / "app_icon_shield.ico"
+
+        self.assertTrue(j5_ico.exists(), "Johnny 5 .ico file was not generated")
+        self.assertTrue(sh_ico.exists(), "Cyber Shield .ico file was not generated")
+        self.assertGreater(j5_ico.stat().st_size, 500)
+        self.assertGreater(sh_ico.stat().st_size, 500)
+
+        if sys.platform == "win32":
+            h_j5 = get_tray_icon_handle("johnny5")
+            h_sh = get_tray_icon_handle("shield")
+            self.assertIsNotNone(h_j5, "Failed to load Johnny 5 HICON handle")
+            self.assertIsNotNone(h_sh, "Failed to load Cyber Shield HICON handle")
+
+    def test_native_taskbar_widget_initialization_and_geometry(self):
+        """Assert that the NativeTaskbarWidget initializes and renders without errors."""
+        from backend.tray.native_widget import NativeTaskbarWidget
+        widget = NativeTaskbarWidget(width=360, height=380)
+        x, y = widget.calculate_position()
+        self.assertGreater(x, 0)
+        self.assertGreater(y, 0)
+
+        widget.build_ui()
+        widget.cached_comparison = {
+            "providers": {
+                "claude": {"tokens_today": 1200, "session_balance_remaining_pct": 85, "weekly_balance_remaining_pct": 92},
+                "gemini": {"tokens_today": 3400, "session_balance_remaining_pct": 90, "weekly_balance_remaining_pct": 95},
+                "chatgpt": {"tokens_today": 0, "session_balance_remaining_pct": 100, "weekly_balance_remaining_pct": 100},
+                "ollama": {"tokens_today": 50000, "session_balance_remaining_pct": 98, "weekly_balance_remaining_pct": 99},
+                "copilot": {"tokens_today": 0, "session_balance_remaining_pct": 100, "weekly_balance_remaining_pct": 100}
+            },
+            "local_savings": {"savings_today_usd": 0.30}
+        }
+        widget.render_canvas()
+        self.assertIsNotNone(widget.canvas)
+        widget.close()
+
 if __name__ == "__main__":
     unittest.main()
+
