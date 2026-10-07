@@ -1,0 +1,240 @@
+<!-- AI Usage Monitor - Canonical Settings & Configuration Component -->
+<div class="settings-container">
+  <!-- System & Real-World Telemetry Integrity Notice -->
+  <div class="glass-card" style="margin-bottom: 24px; border-left: 4px solid var(--accent-cyan); background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(15, 22, 36, 0.85));">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+          <span style="font-size: 1.4rem;">🛡️</span>
+          <h3 style="font-size: 1.1rem; font-weight: 700; color: #fff;">Real-World Telemetry Integrity & Quota Calibration</h3>
+          <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Windows DPAPI Secured</span>
+        </div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; max-width: 860px;">
+          <strong>Real-World API vs. Web Session Calibration:</strong> Anthropic's public API provides live rate-limit headers for Organization and API key limits (<code style="color: var(--accent-cyan); font-family: var(--font-mono);">anthropic-ratelimit-*</code>), but does not expose private browser-session limits (such as the 5-hour rolling reset on <a href="https://claude.ai/settings/usage" target="_blank" style="color: #fbbf24; text-decoration: underline;">claude.ai/settings/usage</a>).
+          AI Usage Monitor clearly distinguishes between <strong>Live Real-World API Telemetry</strong> (logged via proxy and direct API) and <strong>Calibrated Personal Web Quotas</strong>.
+        </p>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openClaudeQuotaModal()" style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;">
+          ⚖️ Calibrate Claude Limits
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 24px; margin-bottom: 24px;">
+    <!-- Section 1: Mini Taskbar Widget Preferences -->
+    <div class="glass-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">🪟</span>
+          <h4 style="font-size: 1rem; font-weight: 700; color: #fff;">Mini Taskbar Widget Display</h4>
+        </div>
+        <span class="badge" style="background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan);">Native Tkinter</span>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="cfg-widget-auto-resize" style="width: 18px; height: 18px; accent-color: var(--accent-cyan);">
+          <div>
+            <strong style="color: #f1f5f9; font-size: 0.88rem;">Dynamic Vertical Auto-Resize</strong>
+            <p style="font-size: 0.76rem; color: var(--text-muted); margin: 2px 0 0 0;">
+              Automagically expands window height when accounts/models are added, and shrinks when collapsed.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="cfg-widget-fade-unpinned" style="width: 18px; height: 18px; accent-color: var(--accent-cyan);">
+          <div>
+            <strong style="color: #f1f5f9; font-size: 0.88rem;">Fade & Collapse Unpinned on Blur</strong>
+            <p style="font-size: 0.76rem; color: var(--text-muted); margin: 2px 0 0 0;">
+              When the mini widget loses focus, unpinned accounts fade away, leaving only pinned items visible.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">
+          Widget Color Palette & Theme
+        </label>
+        <select id="cfg-widget-theme" class="form-control" style="width: 100%; background: #131b2e; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
+          <option value="obsidian_neon">Obsidian Neon (Deep Slate & Cyan Glow)</option>
+          <option value="cyberpunk">Cyberpunk (Neon Rose, Violet & Amber)</option>
+          <option value="matrix_emerald">Matrix Emerald (Phosphor Green & Dark Olive)</option>
+          <option value="midnight_slate">Midnight Slate (Navy Blue & Steel Sky)</option>
+        </select>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">
+          Widget Typography Scale
+        </label>
+        <div style="display: flex; gap: 12px;">
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #cbd5e1; cursor: pointer;">
+            <input type="radio" name="cfg-font-scale" value="small"> Compact
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #cbd5e1; cursor: pointer;">
+            <input type="radio" name="cfg-font-scale" value="standard" checked> Standard
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #cbd5e1; cursor: pointer;">
+            <input type="radio" name="cfg-font-scale" value="large"> Large / HiDPI
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">
+          Pinned Providers (Right-click item in widget or toggle here)
+        </label>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;" id="cfg-pinned-providers-container">
+          <label class="tag-pill" style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">
+            <input type="checkbox" value="claude" class="cfg-pin-check" checked> 📌 Claude
+          </label>
+          <label class="tag-pill" style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">
+            <input type="checkbox" value="gemini" class="cfg-pin-check" checked> 📌 Gemini
+          </label>
+          <label class="tag-pill" style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">
+            <input type="checkbox" value="chatgpt" class="cfg-pin-check"> 📌 ChatGPT
+          </label>
+          <label class="tag-pill" style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">
+            <input type="checkbox" value="ollama" class="cfg-pin-check" checked> 📌 Ollama (Local)
+          </label>
+          <label class="tag-pill" style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">
+            <input type="checkbox" value="copilot" class="cfg-pin-check"> 📌 Copilot
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 2: Cadence, Refresh Rates & Telemetry Intervals -->
+    <div class="glass-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">⏱️</span>
+          <h4 style="font-size: 1rem; font-weight: 700; color: #fff;">Cadence & Telemetry Refresh Intervals</h4>
+        </div>
+        <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">Active Polling</span>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">
+          Web Dashboard Refresh Interval (seconds)
+        </label>
+        <input type="number" id="cfg-poll-cadence" min="1" max="60" value="4" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
+        <span style="font-size: 0.74rem; color: var(--text-dim);">Background poll cadence for browser dashboard telemetry.</span>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">
+          Ollama Model Telemetry Sync Interval (seconds)
+        </label>
+        <input type="number" id="cfg-ollama-sync" min="5" max="300" value="15" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
+        <span style="font-size: 0.74rem; color: var(--text-dim);">Polling cadence for detecting active Ollama models, memory (VRAM), and local token usage.</span>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">
+          Default View Mode
+        </label>
+        <select id="cfg-default-view-mode" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
+          <option value="balances">📊 Current Balances & Quota Gauges</option>
+          <option value="trends">📈 Telemetry Line Charts & Velocity Trends</option>
+        </select>
+      </div>
+
+      <div style="background: rgba(0,0,0,0.25); padding: 12px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); margin-top: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.8rem; color: #cbd5e1;">Test Local Ollama Daemon Connection:</span>
+          <button class="btn btn-secondary btn-sm" onclick="window.App.testOllamaConnection()">
+            ⚡ Probe localhost:11434
+          </button>
+        </div>
+        <div id="ollama-probe-result" style="font-size: 0.75rem; color: var(--text-dim); margin-top: 6px; font-family: var(--font-mono);">
+          Status: Ready to probe
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 3: Cross-Platform Grouping Labels & Tags (Requirement 9) -->
+  <div class="glass-card" style="margin-bottom: 24px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">🏷️</span>
+          <h4 style="font-size: 1.05rem; font-weight: 700; color: #fff;">Cross-Platform Grouping Labels & Aggregation Tags</h4>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 3px;">
+          Create unified tags (e.g. <code>Project-Atlas</code>, <code>Core-Engineers</code>, <code>Production-Inference</code>) spanning disparate platforms (Claude, Gemini, Ollama, etc.) to consolidate analytics, reports, and token quotas.
+        </p>
+      </div>
+    </div>
+
+    <!-- Tag Creation Form -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) 120px; gap: 12px; margin-bottom: 16px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06);">
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">TAG NAME</label>
+        <input type="text" id="new-tag-name" placeholder="e.g. Project-Atlas" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.8rem;">
+      </div>
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">TARGET TYPE</label>
+        <select id="new-tag-type" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.8rem;">
+          <option value="provider">Provider / Platform</option>
+          <option value="account">Account / Email</option>
+          <option value="model">Specific Model</option>
+          <option value="team">Team Workspace</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">TARGET IDENTIFIER</label>
+        <input type="text" id="new-tag-identifier" placeholder="e.g. claude, llama3:latest, acidcow@gmail.com" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.8rem;">
+      </div>
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">DESCRIPTION (OPTIONAL)</label>
+        <input type="text" id="new-tag-desc" placeholder="e.g. Atlas research project" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.8rem;">
+      </div>
+      <div style="display: flex; align-items: flex-end;">
+        <button class="btn btn-primary" onclick="window.App.addCrossPlatformTag()" style="width: 100%; height: 34px; font-size: 0.8rem;">
+          + Add Tag
+        </button>
+      </div>
+    </div>
+
+    <!-- Active Tags Table -->
+    <div class="data-table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Grouping Label / Tag</th>
+            <th>Target Type</th>
+            <th>Target Identifier</th>
+            <th>Description</th>
+            <th>Created</th>
+            <th style="text-align: right;">Action</th>
+          </tr>
+        </thead>
+        <tbody id="tags-table-body">
+          <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 18px;">
+              Loading cross-platform grouping tags...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Bottom Save Floating Actions -->
+  <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+    <button class="btn btn-secondary" onclick="window.App.loadSettings()">
+      ↺ Reset to Saved
+    </button>
+    <button class="btn btn-primary" onclick="window.App.saveSettings()">
+      💾 Save All Preferences
+    </button>
+  </div>
+</div>

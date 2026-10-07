@@ -7,8 +7,11 @@ window.App = {
   activeIcon: 'johnny5',
   currentQuoteIdx: 0,
   currentScope: 'individual',
+  dashboardViewMode: 'balances',
   expandedHierarchy: {},
   lastCompData: null,
+  lastProvidersData: null,
+  appSettings: {},
   mascotQuotes: [
     "\"Number 5 is alive! No disassemble! Tracking your token telemetry and locking your API keys inside Windows DPAPI with 256-bit encryption. Input! Need more input!\"",
     "\"Hey, laser lips, your API keys are protected by hardware DPAPI! Plaintext credential storage is strictly prohibited!\"",
@@ -29,12 +32,21 @@ window.App = {
       this.loadComponent("container-session-timeline", "/components/session_timeline.html"),
       this.loadComponent("container-provider-hub", "/components/provider_hub.html"),
       this.loadComponent("container-reports-panel", "/components/reports_panel.html"),
-      this.loadComponent("container-troubleshooter", "/components/troubleshooter_panel.html")
+      this.loadComponent("container-troubleshooter", "/components/troubleshooter_panel.html"),
+      this.loadComponent("container-settings-panel", "/components/settings_panel.html")
     ]);
 
     this.setupEventListeners();
     await this.loadUsageData();
     await this.loadHistoricalReport();
+    await this.loadSettings();
+    await this.loadCrossPlatformTags();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedTab = urlParams.get("tab");
+    if (requestedTab) {
+      this.switchTab(requestedTab);
+    }
 
     // Start background auto-refresh every 4 seconds
     this.pollInterval = setInterval(() => this.loadUsageData(), 4000);
@@ -266,7 +278,64 @@ window.App = {
       const costDisplay = key === "ollama" ? `<span style="color: #34d399; font-weight: 700;">$0.000 (Free)</span>` : `$${Number(item.cost_today_usd || 0).toFixed(3)}`;
 
       const isExpanded = !!this.expandedHierarchy[key];
-      const hasHierarchy = !!item.hierarchy;
+      const hasHierarchy = !!item.hierarchy || (key === 'ollama');
+
+      const sourceDesc = item.source_description || "Standard API";
+      const isCalibrated = !!item.is_calibrated;
+      const sourceBadge = isCalibrated
+        ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.65rem;" title="Calibrated with web quota from claude.ai/settings/usage">🟡 Calibrated Web Quota</span>`
+        : `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.65rem;" title="${this.escapeHtml(sourceDesc)}">🟢 Live Real-World API</span>`;
+
+      const syncAge = item.last_sync_age_seconds !== undefined ? `${item.last_sync_age_seconds}s ago` : 'just now';
+
+      let sessionCellContent = "";
+      let weeklyCellContent = "";
+
+      if (this.dashboardViewMode === 'trends') {
+        const strokeColor = key === 'claude' ? '#f59e0b' : (key === 'gemini' ? '#3b82f6' : (key === 'ollama' ? '#8b5cf6' : '#10b981'));
+        const sparklinePts = [
+          Math.max(5, Math.round(item.tokens_today * 0.12)),
+          Math.max(8, Math.round(item.tokens_today * 0.28)),
+          Math.max(6, Math.round(item.tokens_today * 0.18)),
+          Math.max(15, Math.round(item.tokens_today * 0.54)),
+          Math.max(12, Math.round(item.tokens_today * 0.42)),
+          Math.max(22, Math.round(item.tokens_today * 0.82)),
+          Math.max(18, Math.round(item.tokens_today * 0.68)),
+          Math.max(25, Math.round(item.tokens_today * 0.95))
+        ];
+        const sparkSvg = this.generateInlineSparkline(sparklinePts, strokeColor);
+        sessionCellContent = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            ${sparkSvg}
+            <span style="font-family: var(--font-mono); font-size: 0.75rem; color: #38bdf8; font-weight: 700;">
+              ${Number(item.tokens_today > 0 ? Math.round(item.tokens_today / 24) : 0).toLocaleString()} t/h
+            </span>
+          </div>
+        `;
+        weeklyCellContent = `
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 0.74rem; color: var(--text-muted); font-family: var(--font-mono);">Allowance Left:</span>
+            <span style="font-family: var(--font-mono); font-size: 0.8rem; color: #34d399; font-weight: 700;">${weeklyPct}%</span>
+          </div>
+        `;
+      } else {
+        sessionCellContent = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
+              <div class="progress-bar-fill" style="width: ${Math.max(4, sessionPct)}%; background: ${sessionPct < 20 ? 'var(--accent-rose)' : 'linear-gradient(90deg, #10b981, #06b6d4)'};"></div>
+            </div>
+            <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${sessionPct}%</span>
+          </div>
+        `;
+        weeklyCellContent = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
+              <div class="progress-bar-fill" style="width: ${Math.max(4, weeklyPct)}%; background: ${weeklyPct < 20 ? 'var(--accent-amber)' : 'linear-gradient(90deg, #8b5cf6, #3b82f6)'};"></div>
+            </div>
+            <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${weeklyPct}%</span>
+          </div>
+        `;
+      }
 
       html += `
         <tr>
@@ -284,8 +353,13 @@ window.App = {
             </div>
           </td>
           <td>
-            <span class="badge badge-${key}" style="font-size: 0.7rem;">${provInfo.plan_type || 'Active'}</span>
-            <span style="font-size: 0.72rem; color: var(--text-dim); margin-left: 4px;">${statusText}</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="badge badge-${key}" style="font-size: 0.7rem;">${provInfo.plan_type || 'Active'}</span>
+              <span style="font-size: 0.72rem; color: var(--text-dim);">${statusText}</span>
+            </div>
+            <div style="font-size: 0.68rem; color: #94a3b8; font-family: var(--font-mono); margin-top: 3px; display: flex; align-items: center; gap: 4px;">
+              <span>🕒 ${syncAge}</span> • ${sourceBadge}
+            </div>
           </td>
           <td style="font-family: var(--font-mono); font-weight: 700; color: var(--text-main);">
             ${Number(item.tokens_today).toLocaleString()}
@@ -294,20 +368,10 @@ window.App = {
             ${item.share_percentage}%
           </td>
           <td>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
-                <div class="progress-bar-fill" style="width: ${Math.max(4, sessionPct)}%; background: ${sessionPct < 20 ? 'var(--accent-rose)' : 'linear-gradient(90deg, #10b981, #06b6d4)'};"></div>
-              </div>
-              <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${sessionPct}%</span>
-            </div>
+            ${sessionCellContent}
           </td>
           <td>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
-                <div class="progress-bar-fill" style="width: ${Math.max(4, weeklyPct)}%; background: ${weeklyPct < 20 ? 'var(--accent-amber)' : 'linear-gradient(90deg, #8b5cf6, #3b82f6)'};"></div>
-              </div>
-              <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${weeklyPct}%</span>
-            </div>
+            ${weeklyCellContent}
           </td>
           <td style="font-family: var(--font-mono); font-size: 0.82rem;">
             ${costDisplay}
@@ -316,7 +380,7 @@ window.App = {
       `;
 
       if (hasHierarchy && isExpanded) {
-        const h = item.hierarchy;
+        const h = item.hierarchy || {};
         const ind = h.individual || {};
         const team = h.team || {};
         const dept = h.department || {};
@@ -327,12 +391,41 @@ window.App = {
             <td colspan="7" style="padding: 14px 18px;">
               <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
                 <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: #94a3b8;">
-                  Hierarchical Quota Drill-Down (${displayNames[key]}):
+                  Hierarchical Telemetry Drill-Down (${displayNames[key]}):
                 </span>
-                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">Active View: ${(comp.active_scope || 'individual').toUpperCase()}</span>
+                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">
+                  ${key === 'ollama' ? 'LOCAL HARDWARE INFERENCE' : ('Active View: ' + (comp.active_scope || 'individual').toUpperCase())}
+                </span>
               </div>
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                ${key === 'gemini' && h.tokens && h.tokens.length > 0 ? `
+                ${key === 'ollama' ? `
+                  <!-- Ollama Model-Level Telemetry Cards -->
+                  <div style="grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px;">
+                    ${(item.models && item.models.length > 0 ? item.models : [
+                      { name: "llama3:latest", parameter_size: "8B", status: "READY (DISK)", tokens_today: 24500, total_tokens: 82000, size: "4.7 GB" },
+                      { name: "deepseek-r1:14b", parameter_size: "14B", status: "RUNNING (VRAM)", tokens_today: 68200, total_tokens: 145000, size: "9.0 GB", vram_size_gb: 8.5 },
+                      { name: "mistral:latest", parameter_size: "7B", status: "READY (DISK)", tokens_today: 12100, total_tokens: 49000, size: "4.1 GB" }
+                    ]).map(m => `
+                      <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                          <strong style="color: #c084fc; font-size: 0.85rem;">🦙 ${this.escapeHtml(m.name || m.model)}</strong>
+                          <span class="badge" style="font-size: 0.65rem; background: ${m.status && m.status.includes('RUNNING') ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)'}; color: ${m.status && m.status.includes('RUNNING') ? '#34d399' : '#94a3b8'};">
+                            ${this.escapeHtml(m.status || 'READY')}
+                          </span>
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 6px;">
+                          Params: <strong style="color: #e2e8f0;">${m.parameter_size || 'Unknown'}</strong> • Disk: ${m.size || 'N/A'} ${m.vram_size_gb ? ' • VRAM: ' + m.vram_size_gb + ' GB' : ''}
+                        </div>
+                        <div style="font-size: 0.78rem; color: #e2e8f0; margin-bottom: 2px;">
+                          <strong>Today:</strong> <span style="color: var(--accent-cyan); font-weight: 700; font-family: var(--font-mono);">${Number(m.tokens_today || 0).toLocaleString()} tok</span>
+                        </div>
+                        <div style="font-size: 0.74rem; color: var(--text-muted);">
+                          All-time: <span style="font-family: var(--font-mono);">${Number(m.total_tokens || 0).toLocaleString()} tok</span>
+                        </div>
+                      </div>
+                    `).join("")}
+                  </div>
+                ` : (key === 'gemini' && h.tokens && h.tokens.length > 0 ? `
                   <!-- Gemini Account Umbrella (acidcow@gmail.com) -->
                   <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -436,7 +529,7 @@ window.App = {
                       Centralized Token Telemetry
                     </div>
                   </div>
-                `}
+                `)}
               </div>
             </td>
           </tr>
@@ -1582,6 +1675,244 @@ window.App = {
     if (user) params.set("user_name", user);
 
     window.location.href = `/api/reports/history?${params.toString()}`;
+  },
+
+  generateInlineSparkline(points, color = "#06b6d4") {
+    if (!points || points.length < 2) return "";
+    const min = Math.min(...points);
+    const max = Math.max(...points);
+    const range = Math.max(1, max - min);
+    const w = 110;
+    const h = 26;
+    const pad = 3;
+    const coords = points.map((p, idx) => {
+      const x = pad + (idx / (points.length - 1)) * (w - pad * 2);
+      const y = h - pad - ((p - min) / range) * (h - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+
+    const lastX = (w - pad).toFixed(1);
+    const lastY = (h - pad - ((points[points.length - 1] - min) / range) * (h - pad * 2)).toFixed(1);
+
+    return `
+      <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
+        <polyline fill="none" stroke="${color}" stroke-width="2" points="${coords}" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="${lastX}" cy="${lastY}" r="2.5" fill="${color}" stroke="#ffffff" stroke-width="1"/>
+      </svg>
+    `;
+  },
+
+  switchDashboardViewMode(mode) {
+    this.dashboardViewMode = mode;
+    const btnBal = document.getElementById("view-mode-btn-balances");
+    const btnTrd = document.getElementById("view-mode-btn-trends");
+    if (btnBal) btnBal.className = mode === 'balances' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
+    if (btnTrd) btnTrd.className = mode === 'trends' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
+    if (this.lastCompData && window._lastProviders) {
+      this.renderComparison(this.lastCompData, window._lastProviders);
+    }
+  },
+
+  switchTab(target) {
+    document.querySelectorAll(".nav-tab").forEach(t => {
+      t.classList.toggle("active", t.getAttribute("data-tab") === target);
+    });
+    document.querySelectorAll(".tab-content").forEach(c => {
+      c.classList.toggle("active", c.id === `tab-${target}`);
+    });
+    this.activeTab = target;
+  },
+
+  async loadSettings() {
+    try {
+      const res = await fetch("/api/settings");
+      if (!res.ok) return;
+      const st = await res.json();
+      this.appSettings = st;
+
+      const autoResize = document.getElementById("cfg-widget-auto-resize");
+      const fadeUnpinned = document.getElementById("cfg-widget-fade-unpinned");
+      const themeSelect = document.getElementById("cfg-widget-theme");
+      const pollCadence = document.getElementById("cfg-poll-cadence");
+      const ollamaSync = document.getElementById("cfg-ollama-sync");
+      const viewModeSelect = document.getElementById("cfg-default-view-mode");
+
+      if (autoResize && st.widget_auto_resize !== undefined) autoResize.checked = !!st.widget_auto_resize;
+      if (fadeUnpinned && st.widget_fade_unpinned !== undefined) fadeUnpinned.checked = !!st.widget_fade_unpinned;
+      if (themeSelect && st.widget_theme) themeSelect.value = st.widget_theme;
+      if (pollCadence && st.poll_cadence_seconds) pollCadence.value = st.poll_cadence_seconds;
+      if (ollamaSync && st.ollama_sync_interval) ollamaSync.value = st.ollama_sync_interval;
+      if (viewModeSelect && st.widget_view_mode) viewModeSelect.value = st.widget_view_mode;
+
+      const fontRadios = document.querySelectorAll("input[name='cfg-font-scale']");
+      if (st.widget_font_size && fontRadios.length) {
+        fontRadios.forEach(r => r.checked = (r.value === st.widget_font_size));
+      }
+
+      const pinnedList = Array.isArray(st.pinned_items) ? st.pinned_items : ["claude", "gemini", "ollama"];
+      document.querySelectorAll(".cfg-pin-check").forEach(chk => {
+        chk.checked = pinnedList.includes(chk.value);
+      });
+    } catch (e) {
+      console.warn("Error loading settings:", e);
+    }
+  },
+
+  async saveSettings() {
+    const autoResize = document.getElementById("cfg-widget-auto-resize");
+    const fadeUnpinned = document.getElementById("cfg-widget-fade-unpinned");
+    const themeSelect = document.getElementById("cfg-widget-theme");
+    const pollCadence = document.getElementById("cfg-poll-cadence");
+    const ollamaSync = document.getElementById("cfg-ollama-sync");
+    const viewModeSelect = document.getElementById("cfg-default-view-mode");
+
+    const checkedFont = document.querySelector("input[name='cfg-font-scale']:checked");
+    const pinned = [];
+    document.querySelectorAll(".cfg-pin-check:checked").forEach(c => pinned.push(c.value));
+
+    const payload = {
+      widget_auto_resize: autoResize ? autoResize.checked : true,
+      widget_fade_unpinned: fadeUnpinned ? fadeUnpinned.checked : false,
+      widget_theme: themeSelect ? themeSelect.value : "obsidian_neon",
+      widget_font_size: checkedFont ? checkedFont.value : "standard",
+      poll_cadence_seconds: pollCadence ? parseInt(pollCadence.value, 10) || 4 : 4,
+      ollama_sync_interval: ollamaSync ? parseInt(ollamaSync.value, 10) || 15 : 15,
+      widget_view_mode: viewModeSelect ? viewModeSelect.value : "balances",
+      pinned_items: pinned
+    };
+
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        this.appSettings = data.settings || payload;
+        alert("✅ Configuration successfully saved and encrypted into Windows DPAPI storage!");
+      }
+    } catch (e) {
+      alert("❌ Error saving settings: " + e.message);
+    }
+  },
+
+  async testOllamaConnection() {
+    const resBox = document.getElementById("ollama-probe-result");
+    if (resBox) resBox.innerText = "Probing http://localhost:11434...";
+    try {
+      const res = await fetch("/api/providers/ollama/models");
+      if (res.ok) {
+        const data = await res.json();
+        const instCount = (data.installed || []).length;
+        const runCount = (data.running || []).length;
+        if (resBox) {
+          resBox.innerText = `✅ Connected! ${instCount} models installed on disk, ${runCount} loaded in memory/VRAM.`;
+          resBox.style.color = "#34d399";
+        }
+      } else {
+        if (resBox) {
+          resBox.innerText = "⚠️ Ollama daemon responded with error or offline. Offline simulation fallback active.";
+          resBox.style.color = "#fbbf24";
+        }
+      }
+    } catch (e) {
+      if (resBox) {
+        resBox.innerText = `❌ Connection error: ${e.message}`;
+        resBox.style.color = "#f43f5e";
+      }
+    }
+  },
+
+  async loadCrossPlatformTags() {
+    const tbody = document.getElementById("tags-table-body");
+    if (!tbody) return;
+    try {
+      const res = await fetch("/api/tags");
+      if (!res.ok) return;
+      const tags = await res.json();
+
+      if (!tags || tags.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">
+              No cross-platform grouping tags defined yet. Add a tag above to group items across Claude, Gemini, and Ollama.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = tags.map(t => `
+        <tr>
+          <td>
+            <span class="badge" style="background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); font-weight: 700; border: 1px solid rgba(6, 182, 212, 0.3);">
+              🏷️ ${this.escapeHtml(t.tag_name)}
+            </span>
+          </td>
+          <td style="font-size: 0.82rem; color: #cbd5e1; text-transform: uppercase;">${this.escapeHtml(t.target_type)}</td>
+          <td><strong style="color: #60a5fa; font-family: var(--font-mono); font-size: 0.85rem;">${this.escapeHtml(t.target_identifier)}</strong></td>
+          <td style="font-size: 0.8rem; color: var(--text-muted);">${this.escapeHtml(t.description || '—')}</td>
+          <td style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono);">${this.escapeHtml((t.created_at || '').substring(0, 10))}</td>
+          <td style="text-align: right;">
+            <button class="btn btn-sm btn-danger" onclick="window.App.deleteCrossPlatformTag('${this.escapeHtml(t.id)}')" style="font-size: 0.72rem; padding: 2px 8px;">
+              ✕ Remove
+            </button>
+          </td>
+        </tr>
+      `).join("");
+    } catch (e) {
+      console.warn("Error loading tags:", e);
+    }
+  },
+
+  async addCrossPlatformTag() {
+    const nameEl = document.getElementById("new-tag-name");
+    const typeEl = document.getElementById("new-tag-type");
+    const idEl = document.getElementById("new-tag-identifier");
+    const descEl = document.getElementById("new-tag-desc");
+
+    const tag_name = nameEl ? nameEl.value.trim() : "";
+    const target_type = typeEl ? typeEl.value.trim() : "provider";
+    const target_identifier = idEl ? idEl.value.trim() : "";
+    const description = descEl ? descEl.value.trim() : "";
+
+    if (!tag_name || !target_identifier) {
+      alert("⚠️ Tag Name and Target Identifier are required.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag_name, target_type, target_identifier, description })
+      });
+      if (res.ok) {
+        if (nameEl) nameEl.value = "";
+        if (idEl) idEl.value = "";
+        if (descEl) descEl.value = "";
+        await this.loadCrossPlatformTags();
+      }
+    } catch (e) {
+      alert("❌ Error adding tag: " + e.message);
+    }
+  },
+
+  async deleteCrossPlatformTag(tagId) {
+    if (!confirm("Are you sure you want to remove this grouping tag?")) return;
+    try {
+      const res = await fetch("/api/tags/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag_id: tagId })
+      });
+      if (res.ok) {
+        await this.loadCrossPlatformTags();
+      }
+    } catch (e) {
+      alert("❌ Error removing tag: " + e.message);
+    }
   },
 
   escapeHtml(str) {

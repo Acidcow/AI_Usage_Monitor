@@ -17,6 +17,7 @@ class WindowsTrayManager:
         on_open_widget: Optional[Callable] = None,
         on_sync_now: Optional[Callable] = None,
         on_exit: Optional[Callable] = None,
+        on_open_settings: Optional[Callable] = None,
         icon_type: str = "johnny5"
     ):
         self.app_name = app_name
@@ -24,6 +25,7 @@ class WindowsTrayManager:
         self.on_open_widget = on_open_widget
         self.on_sync_now = on_sync_now
         self.on_exit = on_exit
+        self.on_open_settings = on_open_settings
         self.icon_type = icon_type
 
         self.is_windows = sys.platform == "win32"
@@ -176,7 +178,8 @@ class WindowsTrayManager:
             CMD_DASHBOARD = 1001
             CMD_WIDGET = 1002
             CMD_SYNC = 1003
-            CMD_EXIT = 1004
+            CMD_SETTINGS = 1004
+            CMD_EXIT = 1005
 
             LRESULT = getattr(wintypes, 'LRESULT', ctypes.c_ssize_t)
             user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
@@ -197,6 +200,7 @@ class WindowsTrayManager:
 
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_DASHBOARD, "⚡ Open AI Usage Dashboard")
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_WIDGET, "🪟 Launch Mini Status Widget")
+                        user32.AppendMenuW(hmenu, MF_STRING, CMD_SETTINGS, "⚙ Settings & Configuration")
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_SYNC, "🔄 Sync Quota Now")
                         user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_EXIT, "❌ Exit AI Usage Monitor")
@@ -223,6 +227,9 @@ class WindowsTrayManager:
                     elif cmd_id == CMD_SYNC:
                         if self.on_sync_now:
                             self.on_sync_now()
+                    elif cmd_id == CMD_SETTINGS:
+                        if self.on_open_settings:
+                            self.on_open_settings()
                     elif cmd_id == CMD_EXIT:
                         if self.on_exit:
                             self.on_exit()

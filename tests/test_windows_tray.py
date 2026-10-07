@@ -30,19 +30,22 @@ class TestWindowsTray(unittest.TestCase):
         tray.stop()
 
     def test_tray_menu_commands(self):
-        called = {"dashboard": False, "widget": False, "sync": False}
+        called = {"dashboard": False, "widget": False, "sync": False, "settings": False}
         def on_dash():
             called["dashboard"] = True
         def on_widget():
             called["widget"] = True
         def on_sync():
             called["sync"] = True
+        def on_settings():
+            called["settings"] = True
 
         tray = WindowsTrayManager(
             app_name="Test AI Monitor Commands",
             on_open_dashboard=on_dash,
             on_open_widget=on_widget,
-            on_sync_now=on_sync
+            on_sync_now=on_sync,
+            on_open_settings=on_settings
         )
         tray.start()
         time.sleep(0.15)
@@ -55,14 +58,17 @@ class TestWindowsTray(unittest.TestCase):
             CMD_DASHBOARD = 1001
             CMD_WIDGET = 1002
             CMD_SYNC = 1003
+            CMD_SETTINGS = 1004
 
             user32.SendMessageW(tray._hwnd, WM_COMMAND, CMD_DASHBOARD, 0)
             user32.SendMessageW(tray._hwnd, WM_COMMAND, CMD_WIDGET, 0)
             user32.SendMessageW(tray._hwnd, WM_COMMAND, CMD_SYNC, 0)
+            user32.SendMessageW(tray._hwnd, WM_COMMAND, CMD_SETTINGS, 0)
 
             self.assertTrue(called["dashboard"], "Dashboard callback not invoked by WM_COMMAND")
             self.assertTrue(called["widget"], "Widget callback not invoked by WM_COMMAND")
             self.assertTrue(called["sync"], "Sync callback not invoked by WM_COMMAND")
+            self.assertTrue(called["settings"], "Settings callback not invoked by WM_COMMAND")
 
         tray.stop()
 
@@ -126,6 +132,39 @@ class TestWindowsTray(unittest.TestCase):
         self.assertIsNotNone(widget.flyout_canvas)
         self.assertIsNotNone(widget.flyout_scrollbar)
         widget._hide_flyout()
+
+        widget.close()
+
+    def test_native_widget_themes_pinning_and_view_mode(self):
+        """Assert native widget theme customization, right-click pinning, and trends toggle."""
+        from backend.tray.native_widget import NativeTaskbarWidget
+        widget = NativeTaskbarWidget(width=360, height=380)
+        widget.build_ui()
+
+        # 1. Test pinning
+        self.assertIn("claude", widget.pinned_items)
+        widget.toggle_pin("claude")
+        self.assertNotIn("claude", widget.pinned_items)
+        widget.toggle_pin("claude")
+        self.assertIn("claude", widget.pinned_items)
+
+        # 2. Test themes and font scale
+        widget.apply_theme("cyberpunk", 1.25)
+        self.assertEqual(widget.theme_name, "cyberpunk")
+        self.assertEqual(widget.font_scale, 1.25)
+        self.assertEqual(widget.theme["cyan"], "#ec4899")
+
+        # 3. Test view mode toggle
+        self.assertEqual(widget.view_mode, "balances")
+        widget.toggle_view_mode()
+        self.assertEqual(widget.view_mode, "trends")
+        widget.toggle_view_mode()
+        self.assertEqual(widget.view_mode, "balances")
+
+        # 4. Test sparkline generator
+        spark_pts = widget._get_sparkline_points(1500, 10500, width=90, height=22)
+        self.assertEqual(len(spark_pts), 7)
+        self.assertTrue(all(isinstance(p, tuple) and len(p) == 2 for p in spark_pts))
 
         widget.close()
 

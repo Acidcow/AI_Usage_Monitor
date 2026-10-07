@@ -127,9 +127,16 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             if ollama:
                 return self._send_json(200, {
                     "installed": ollama.get_installed_models(),
-                    "running": ollama.get_running_models()
+                    "running": ollama.get_running_models(),
+                    "models": ollama.get_model_telemetry_summary()
                 })
             return self._send_json(404, {"error": "Ollama provider not registered"})
+
+        if path == "/api/settings":
+            return self._send_json(200, srv.database.get_all_settings())
+
+        if path == "/api/tags":
+            return self._send_json(200, srv.database.get_cross_platform_tags())
 
         if path == "/api/diagnostics/errors":
             limit = int(query.get("limit", [50])[0])
@@ -400,9 +407,53 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 return self._send_json(200, {"success": True, "url": target_url})
             return self._send_json(400, {"error": "Invalid or disallowed URL scheme"})
 
-        if path == "/api/diagnostics/clear":
-            srv.diagnostics.clear_errors()
-            return self._send_json(200, {"success": True, "message": "Diagnostic errors cleared"})
+        if path == "/api/settings":
+            settings_dict = body.get("settings", body)
+            if isinstance(settings_dict, dict):
+                for k, v in settings_dict.items():
+                    srv.database.set_setting(k, v)
+                return self._send_json(200, {"success": True, "settings": srv.database.get_all_settings()})
+            return self._send_json(400, {"error": "Settings must be a key-value dictionary"})
+
+        if path == "/api/tags":
+            tag_name = body.get("tag_name", "").strip()
+            target_type = (body.get("target_type") or body.get("entity_type") or "account").strip()
+            target_identifier = (body.get("target_identifier") or body.get("entity_identifier") or "").strip()
+            provider = body.get("provider", "").strip()
+            desc = body.get("description", "")
+            if not tag_name or not target_identifier:
+                return self._send_json(400, {"error": "tag_name and target_identifier are required"})
+            tag_id = srv.database.add_cross_platform_tag(
+                tag_name=tag_name,
+                target_type=target_type,
+                target_identifier=target_identifier,
+                description=desc,
+                provider=provider
+            )
+            return self._send_json(200, {"success": True, "tag_id": tag_id, "tag_name": tag_name})
+
+        if path == "/api/tags/delete":
+            tag_id = body.get("tag_id") or body.get("id") or body.get("tag_name")
+            if not tag_id:
+                return self._send_json(400, {"error": "tag_id or tag_name is required"})
+            deleted = srv.database.remove_cross_platform_tag(tag_id)
+            return self._send_json(200, {"success": True, "deleted": deleted})
+
+        if path == "/api/providers/ollama/telemetry":
+            ollama = srv.providers.get("ollama")
+            if not ollama:
+                return self._send_json(404, {"error": "Ollama provider not registered"})
+            model = body.get("model", "llama3:latest")
+            prompt_tokens = int(body.get("prompt_tokens") or body.get("input_tokens") or 0)
+            completion_tokens = int(body.get("completion_tokens") or body.get("output_tokens") or 0)
+            session_id = body.get("session_id")
+            evt_id = ollama.ingest_inference_tokens(
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                session_id=session_id
+            )
+            return self._send_json(200, {"success": True, "event_id": evt_id, "model": model})
 
         self._send_json(404, {"error": "API route not found"})
 

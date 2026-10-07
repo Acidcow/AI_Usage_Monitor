@@ -3,6 +3,8 @@ import sqlite3
 import datetime
 import threading
 import uuid
+import json
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -63,6 +65,28 @@ class UsageDatabase:
                     weekly_reset_str TEXT
                 )
             ''')
+
+            # Application settings table (widget styling, behaviors, cadences)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            ''')
+
+            # Cross-platform grouping labels / tags table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS cross_platform_tags (
+                    id TEXT PRIMARY KEY,
+                    tag_name TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_identifier TEXT NOT NULL,
+                    description TEXT,
+                    created_at TEXT NOT NULL
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_tags_name ON cross_platform_tags(tag_name)')
 
             # Migration for existing DBs
             for col in [
@@ -593,9 +617,34 @@ class UsageDatabase:
                 hierarchy["account_id"] = snap.get("account_id") or "acidcow@gmail.com"
                 hierarchy["account_name"] = snap.get("account_id") or "acidcow@gmail.com"
 
+            # Model-level telemetry breakdown
+            prov_models = self.get_provider_models_telemetry(prov)
+            hierarchy["models"] = prov_models
+
+            # Real-world data source description and cadence metrics
+            source_descriptions = {
+                "claude": "Anthropic API & Transparent Local Proxy (Port 8766)",
+                "gemini": "Google AI Studio API / OAuth Loopback (acidcow@gmail.com)",
+                "chatgpt": "OpenAI v1 Direct & Proxy API",
+                "ollama": "Local Ollama Engine (localhost:11434)",
+                "copilot": "Microsoft 365 Copilot Ingestion"
+            }
+            last_sync_iso = snap.get("last_sync")
+            last_sync_age = 0
+            if last_sync_iso:
+                try:
+                    dt = datetime.datetime.fromisoformat(last_sync_iso.replace("Z", "+00:00"))
+                    now_utc_aware = datetime.datetime.now(datetime.timezone.utc)
+                    last_sync_age = max(0, int((now_utc_aware - dt).total_seconds()))
+                except Exception:
+                    last_sync_age = 0
+
+            is_calibrated = bool(prov == "claude" and snap.get("individual_session_rem_pct") is not None)
+
             providers_comparison[prov] = {
                 "provider": prov,
                 "plan_type": snap.get("plan_type", "Active"),
+                "status": snap.get("status", "ACTIVE"),
                 "tokens_today": tokens_today,
                 "tokens_week": tokens_week,
                 "tokens_total": tokens_total,
@@ -612,6 +661,11 @@ class UsageDatabase:
                 "weekly_used_pct": round(100.0 - weekly_rem_pct, 1),
                 "reset_epoch": snap.get("reset_epoch"),
                 "weekly_reset_str": snap.get("weekly_reset_str", "Mon 3:00 AM"),
+                "last_sync": last_sync_iso,
+                "last_sync_age_seconds": last_sync_age,
+                "source_description": source_descriptions.get(prov, "Standard API"),
+                "is_calibrated": is_calibrated,
+                "models": prov_models,
                 "hierarchy": hierarchy
             }
 
@@ -824,5 +878,168 @@ class UsageDatabase:
             lines.append(f'"{period}","{prov}","{acct}","{team}","{user}","{mdl}",{in_t},{out_t},{tot_t},{cost:.4f},{sess},{evt}')
 
         return "\r\n".join(lines)
+
+    # -------------------------------------------------------------
+    # App Settings & Preferences
+    # -------------------------------------------------------------
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                try:
+                    return json.loads(row["value"])
+                except Exception:
+                    return row["value"]
+            return default
+
+    def set_setting(self, key: str, value: Any) -> None:
+        now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        val_str = json.dumps(value) if not isinstance(value, str) else value
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """, (key, val_str, now_utc))
+            conn.commit()
+            conn.close()
+
+    def get_all_settings(self) -> Dict[str, Any]:
+        defaults = {
+            "widget_theme": "obsidian_neon",
+            "widget_font_size": "standard",
+            "widget_auto_resize": True,
+            "widget_fade_unpinned": False,
+            "widget_view_mode": "balances",
+            "poll_cadence_seconds": 4,
+            "refresh_cadence_seconds": 4,
+            "ollama_sync_interval": 15,
+            "pinned_items": ["claude", "gemini", "ollama"]
+        }
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT key, value FROM app_settings")
+            rows = cursor.fetchall()
+            conn.close()
+
+        for r in rows:
+            k = r["key"]
+            try:
+                defaults[k] = json.loads(r["value"])
+            except Exception:
+                defaults[k] = r["value"]
+        return defaults
+
+    # -------------------------------------------------------------
+    # Cross-Platform Grouping Labels / Tags
+    # -------------------------------------------------------------
+    def add_cross_platform_tag(
+        self,
+        tag_name: str,
+        target_type: str = "account",
+        target_identifier: str = "",
+        description: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        entity_identifier: Optional[str] = None,
+        provider: Optional[str] = None
+    ) -> str:
+        tt = (entity_type or target_type or "account").strip()
+        ti = (entity_identifier or target_identifier or "").strip()
+        if provider and provider not in ti:
+            ti = f"{provider}:{ti}"
+        tag_id = f"tag_{uuid.uuid4().hex[:10]}"
+        now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO cross_platform_tags (id, tag_name, target_type, target_identifier, description, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (tag_id, tag_name.strip(), tt, ti, description or "", now_utc))
+            conn.commit()
+            conn.close()
+        return tag_id
+
+    def get_cross_platform_tags(self, tag_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if tag_name:
+                cursor.execute("SELECT id, tag_name, target_type, target_identifier, description, created_at FROM cross_platform_tags WHERE tag_name = ? ORDER BY tag_name ASC", (tag_name.strip(),))
+            else:
+                cursor.execute("SELECT id, tag_name, target_type, target_identifier, description, created_at FROM cross_platform_tags ORDER BY tag_name ASC")
+            rows = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        # Enhance with provider and entity_type compatibility keys
+        for r in rows:
+            r["entity_type"] = r.get("target_type")
+            ti = r.get("target_identifier", "")
+            if ":" in ti:
+                parts = ti.split(":", 1)
+                r["provider"] = parts[0]
+                r["entity_identifier"] = parts[1]
+            else:
+                r["provider"] = "global"
+                r["entity_identifier"] = ti
+        return rows
+
+    def remove_cross_platform_tag(self, tag_id: str) -> bool:
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM cross_platform_tags WHERE id = ? OR tag_name = ?", (tag_id, tag_id))
+            affected = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+        return affected
+
+    # -------------------------------------------------------------
+    # Model-Level Telemetry
+    # -------------------------------------------------------------
+    def get_provider_models_telemetry(self, provider: str) -> List[Dict[str, Any]]:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        today_prefix = now.strftime("%Y-%m-%d")
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    model,
+                    COALESCE(SUM(total_tokens), 0) as total_tokens,
+                    COALESCE(SUM(CASE WHEN recorded_at LIKE ? THEN total_tokens ELSE 0 END), 0) as tokens_today,
+                    COUNT(id) as event_count,
+                    MAX(recorded_at) as last_seen
+                FROM usage_events
+                WHERE provider = ?
+                GROUP BY model
+                ORDER BY tokens_today DESC, total_tokens DESC
+            """, (f"{today_prefix}%", provider.lower()))
+            rows = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        # Format and provide defaults
+        formatted = []
+        for r in rows:
+            m_name = r.get("model") or "default"
+            cnt = r.get("event_count", 0)
+            formatted.append({
+                "model": m_name,
+                "name": m_name,
+                "tokens_today": r.get("tokens_today", 0),
+                "total_tokens": r.get("total_tokens", 0),
+                "event_count": cnt,
+                "sessions_count": cnt,
+                "last_seen": r.get("last_seen"),
+                "session_balance_remaining_pct": 100.0,
+                "weekly_balance_remaining_pct": 100.0
+            })
+        return formatted
 
 DatabaseEngine = UsageDatabase

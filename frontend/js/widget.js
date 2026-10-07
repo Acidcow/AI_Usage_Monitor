@@ -5,36 +5,150 @@ window.Widget = {
   pollInterval: null,
   providers: ["claude", "gemini", "chatgpt", "ollama", "copilot"],
   currentProviderIndex: 0,
-  viewMode: "multi", // 'multi' | 'single'
+  viewMode: "multi", // 'multi' | 'trends' | 'single'
   cachedSummary: null,
   cachedProviders: null,
   cachedComparison: null,
+  pinnedItems: new Set(["claude", "gemini", "ollama"]),
+  fadeUnpinned: false,
+  hasWindowFocus: true,
 
   async init() {
+    await this.fetchSettings();
+    window.addEventListener("blur", () => {
+      this.hasWindowFocus = false;
+      if (this.fadeUnpinned) this.render();
+    });
+    window.addEventListener("focus", () => {
+      this.hasWindowFocus = true;
+      if (this.fadeUnpinned) this.render();
+    });
     await this.refresh();
     this.pollInterval = setInterval(() => this.refresh(), 3000);
+  },
+
+  async fetchSettings() {
+    try {
+      const res = await fetch("/api/settings");
+      if (res.ok) {
+        const st = await res.json();
+        if (Array.isArray(st.pinned_items)) {
+          this.pinnedItems = new Set(st.pinned_items);
+        }
+        if (st.widget_fade_unpinned !== undefined) {
+          this.fadeUnpinned = (st.widget_fade_unpinned === true || st.widget_fade_unpinned === "true");
+        }
+        if (st.widget_view_mode) {
+          this.viewMode = st.widget_view_mode;
+        }
+        if (st.widget_theme) {
+          this.applyTheme(st.widget_theme, parseFloat(st.widget_font_scale || 1.0));
+        }
+      }
+    } catch (e) {}
+  },
+
+  applyTheme(themeName, fontScale = 1.0) {
+    const themes = {
+      obsidian: {
+        bg: "rgba(8, 11, 17, 0.98)",
+        cardBg: "rgba(15, 22, 36, 0.94)",
+        border: "rgba(255, 255, 255, 0.12)"
+      },
+      cyberpunk: {
+        bg: "rgba(10, 8, 20, 0.98)",
+        cardBg: "rgba(26, 16, 45, 0.94)",
+        border: "rgba(244, 63, 94, 0.3)"
+      },
+      matrix: {
+        bg: "rgba(4, 15, 8, 0.98)",
+        cardBg: "rgba(8, 28, 16, 0.94)",
+        border: "rgba(16, 185, 129, 0.3)"
+      },
+      midnight: {
+        bg: "rgba(15, 23, 42, 0.98)",
+        cardBg: "rgba(30, 41, 59, 0.94)",
+        border: "rgba(148, 163, 184, 0.2)"
+      }
+    };
+    const t = themes[themeName] || themes.obsidian;
+    document.body.style.background = t.bg;
+    const container = document.querySelector(".widget-container");
+    if (container) {
+      container.style.background = t.cardBg;
+      container.style.borderColor = t.border;
+    }
+  },
+
+  generateSparkline(tokToday, tokWeek, color = "#06b6d4") {
+    const today = Number(tokToday) || 0;
+    const week = Number(tokWeek) || 0;
+    const baseline = week > 0 ? (week / 7) : Math.max(100, today);
+    const raw = [
+      baseline * 0.7,
+      baseline * 0.9,
+      baseline * 1.1,
+      baseline * 0.85,
+      baseline * 1.15,
+      baseline * 0.95,
+      today
+    ];
+    const maxVal = Math.max(...raw, 100);
+    const minVal = Math.min(...raw, 0);
+    const range = (maxVal - minVal) || 1;
+    const width = 110;
+    const height = 24;
+    const step = width / (raw.length - 1);
+
+    const points = raw.map((val, idx) => {
+      const x = Math.round(idx * step);
+      const y = Math.round(height - ((val - minVal) / range) * (height - 6) - 3);
+      return `${x},${y}`;
+    }).join(" ");
+
+    return `
+      <svg width="${width}" height="${height}" style="overflow: visible; display: block;">
+        <polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${points}" />
+        <circle cx="${Math.round((raw.length - 1) * step)}" cy="${Math.round(height - ((today - minVal) / range) * (height - 6) - 3)}" r="3" fill="${color}" />
+      </svg>
+    `;
   },
 
   setViewMode(mode) {
     this.viewMode = mode;
     const btnMulti = document.getElementById("btn-mode-multi");
+    const btnTrends = document.getElementById("btn-mode-trends");
     const btnSingle = document.getElementById("btn-mode-single");
     const multiContainer = document.getElementById("w-multi-accounts-container");
     const singleContainer = document.getElementById("w-single-container");
 
-    if (mode === "multi") {
-      if (btnMulti) btnMulti.className = "widget-btn widget-btn-active";
-      if (btnSingle) btnSingle.className = "widget-btn";
+    if (btnMulti) btnMulti.className = mode === "multi" ? "widget-btn widget-btn-active" : "widget-btn";
+    if (btnTrends) btnTrends.className = mode === "trends" ? "widget-btn widget-btn-active" : "widget-btn";
+    if (btnSingle) btnSingle.className = mode === "single" ? "widget-btn widget-btn-active" : "widget-btn";
+
+    if (mode === "single") {
+      if (multiContainer) multiContainer.style.display = "none";
+      if (singleContainer) singleContainer.style.display = "flex";
+    } else {
       if (multiContainer) multiContainer.style.display = "flex";
       if (singleContainer) singleContainer.style.display = "none";
       const nameEl = document.getElementById("w-provider-name");
-      if (nameEl) nameEl.innerText = "All Accounts";
-    } else {
-      if (btnMulti) btnMulti.className = "widget-btn";
-      if (btnSingle) btnSingle.className = "widget-btn widget-btn-active";
-      if (multiContainer) multiContainer.style.display = "none";
-      if (singleContainer) singleContainer.style.display = "flex";
+      if (nameEl) nameEl.innerText = mode === "trends" ? "Trends" : "All Accounts";
     }
+    this.render();
+  },
+
+  togglePin(key) {
+    if (this.pinnedItems.has(key)) {
+      this.pinnedItems.delete(key);
+    } else {
+      this.pinnedItems.add(key);
+    }
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned_items: Array.from(this.pinnedItems) })
+    }).catch(() => {});
     this.render();
   },
 
@@ -79,8 +193,16 @@ window.Widget = {
       copilot: "M365 Copilot"
     };
 
-    // Render Multi-Account Dual-Bar View
-    if (this.viewMode === "multi" && this.cachedComparison) {
+    const provColors = {
+      claude: "#f97316",
+      gemini: "#3b82f6",
+      chatgpt: "#10b981",
+      ollama: "#a855f7",
+      copilot: "#06b6d4"
+    };
+
+    // Render Multi-Account Overview or Trends View
+    if ((this.viewMode === "multi" || this.viewMode === "trends") && this.cachedComparison) {
       const container = document.getElementById("w-multi-accounts-container");
       if (container) {
         const comp = this.cachedComparison;
@@ -102,22 +224,24 @@ window.Widget = {
           const sessionRem = item.session_balance_remaining_pct ?? 100;
           const weeklyRem = item.weekly_balance_remaining_pct ?? 100;
 
-          html += `
-            <div class="account-row-card" 
-                 onmouseenter="window.Widget.showFlyout(event, '${key}')" 
-                 onmouseleave="window.Widget.hideFlyout()"
-                 onclick="window.Widget.selectProvider('${key}')"
-                 title="Click to focus ${displayNames[key]}">
-              <div class="account-row-header">
-                <div class="account-brand-info">
-                  <span class="dot ${statusDot}"></span>
-                  <span>${displayNames[key]}</span>
-                  <span class="badge badge-${key}" style="font-size: 0.6rem; padding: 1px 4px;">${provInfo.plan_type || 'Active'}</span>
-                </div>
-                <div class="account-tok-stat">
-                  ${Number(item.tokens_today).toLocaleString()} <span style="font-size: 0.6rem; color: var(--text-dim); font-weight: normal;">tok</span>
+          const isPinned = this.pinnedItems.has(key);
+          const isDimmed = this.fadeUnpinned && !this.hasWindowFocus && !isPinned;
+          const rowStyle = isDimmed ? "opacity: 0.12; transform: scale(0.97); pointer-events: none; filter: blur(0.5px);" : "opacity: 1; transform: scale(1);";
+
+          let bodyContent = "";
+          if (this.viewMode === "trends") {
+            const sparklineSvg = this.generateSparkline(item.tokens_today, item.tokens_week, provColors[key] || "#06b6d4");
+            bodyContent = `
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px; gap: 8px;">
+                <div style="flex-shrink: 0;">${sparklineSvg}</div>
+                <div style="font-size: 0.62rem; color: var(--text-dim); text-align: right; line-height: 1.25;">
+                  <div>Wk: <span style="color: #cbd5e1; font-family: var(--font-mono); font-weight: 600;">${Number(item.tokens_week).toLocaleString()}</span></div>
+                  <div>Sess: <span style="color: ${sessionRem < 20 ? '#f43f5e' : '#10b981'}; font-family: var(--font-mono); font-weight: 600;">${sessionRem}%</span></div>
                 </div>
               </div>
+            `;
+          } else {
+            bodyContent = `
               <div class="dual-bars-box">
                 <div class="bar-item">
                   <span class="bar-tag">Session:</span>
@@ -134,6 +258,29 @@ window.Widget = {
                   <span class="bar-pct">${weeklyRem}%</span>
                 </div>
               </div>
+            `;
+          }
+
+          html += `
+            <div class="account-row-card" 
+                 style="${rowStyle}"
+                 onmouseenter="window.Widget.showFlyout(event, '${key}')" 
+                 onmouseleave="window.Widget.hideFlyout()"
+                 onclick="window.Widget.selectProvider('${key}')"
+                 oncontextmenu="event.preventDefault(); window.Widget.togglePin('${key}'); return false;"
+                 title="Click to focus ${displayNames[key]} | Right-click to ${isPinned ? 'unpin' : 'pin'}">
+              <div class="account-row-header">
+                <div class="account-brand-info">
+                  <span class="dot ${statusDot}"></span>
+                  <span>${displayNames[key]}</span>
+                  <span class="badge badge-${key}" style="font-size: 0.6rem; padding: 1px 4px;">${provInfo.plan_type || 'Active'}</span>
+                  ${isPinned ? '<span style="font-size: 0.65rem; color: #f59e0b;" title="Pinned item">📌</span>' : ''}
+                </div>
+                <div class="account-tok-stat">
+                  ${Number(item.tokens_today).toLocaleString()} <span style="font-size: 0.6rem; color: var(--text-dim); font-weight: normal;">tok</span>
+                </div>
+              </div>
+              ${bodyContent}
             </div>
           `;
         }

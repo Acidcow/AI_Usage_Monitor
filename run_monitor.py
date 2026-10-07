@@ -145,6 +145,10 @@ def main():
                 print(f"[WIDGET ERROR] Exception launching widget: {e}, opening browser...")
                 webbrowser.open(f"http://{args.host}:{server.server_port}/mini_widget.html")
 
+        def open_settings():
+            print(f"[SETTINGS] Opening Settings panel...")
+            webbrowser.open(f"http://{args.host}:{server.server_port}/?tab=settings")
+
         def sync_all():
             print("[SYNC] Triggering provider sync...")
             claude.sync_usage()
@@ -155,6 +159,7 @@ def main():
             on_open_dashboard=open_dash,
             on_open_widget=open_wid,
             on_sync_now=sync_all,
+            on_open_settings=open_settings,
             on_exit=lambda: os._exit(0)
         )
         tray.start()

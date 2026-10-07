@@ -261,6 +261,93 @@ class TestHTTPAPI(unittest.TestCase):
             csv_content = resp.read().decode("utf-8")
             self.assertIn("Period,Provider", csv_content)
 
+    def test_api_settings_get_and_post(self):
+        # 1. GET settings returns defaults
+        status, data = self._get("/api/settings")
+        self.assertEqual(status, 200)
+        self.assertIn("widget_theme", data)
+        self.assertIn("refresh_cadence_seconds", data)
+
+        # 2. POST update settings
+        new_settings = {
+            "widget_theme": "cyberpunk",
+            "widget_font_scale": 1.25,
+            "widget_auto_resize": True,
+            "widget_fade_unpinned": True,
+            "pinned_items": ["claude", "ollama"],
+            "refresh_cadence_seconds": 15
+        }
+        status, post_res = self._post("/api/settings", new_settings)
+        self.assertEqual(status, 200)
+        self.assertTrue(post_res["success"])
+
+        # 3. Verify settings were persisted
+        status, updated_data = self._get("/api/settings")
+        self.assertEqual(status, 200)
+        self.assertEqual(updated_data["widget_theme"], "cyberpunk")
+        self.assertEqual(float(updated_data["widget_font_scale"]), 1.25)
+        self.assertTrue(updated_data["widget_auto_resize"])
+        self.assertTrue(updated_data["widget_fade_unpinned"])
+        self.assertEqual(updated_data["pinned_items"], ["claude", "ollama"])
+        self.assertEqual(int(updated_data["refresh_cadence_seconds"]), 15)
+
+    def test_api_cross_platform_tags(self):
+        # 1. Add cross platform tags
+        tag_payload = {
+            "tag_name": "Project-Atlas",
+            "entity_type": "account",
+            "provider": "claude",
+            "entity_identifier": "Synthesis2"
+        }
+        status, add_res = self._post("/api/tags", tag_payload)
+        self.assertEqual(status, 200)
+        self.assertTrue(add_res["success"])
+
+        tag_payload2 = {
+            "tag_name": "Project-Atlas",
+            "entity_type": "model",
+            "provider": "ollama",
+            "entity_identifier": "llama3.2:latest"
+        }
+        status, add_res2 = self._post("/api/tags", tag_payload2)
+        self.assertEqual(status, 200)
+        self.assertTrue(add_res2["success"])
+
+        # 2. Retrieve tags
+        status, tags_list = self._get("/api/tags")
+        self.assertEqual(status, 200)
+        atlas_tags = [t for t in tags_list if t["tag_name"] == "Project-Atlas"]
+        self.assertEqual(len(atlas_tags), 2)
+
+        # 3. Delete a tag
+        status, del_res = self._post("/api/tags/delete", {"id": atlas_tags[0]["id"]})
+        self.assertEqual(status, 200)
+        self.assertTrue(del_res["success"])
+
+        status, remaining_tags = self._get("/api/tags")
+        self.assertEqual(len([t for t in remaining_tags if t["id"] == atlas_tags[0]["id"]]), 0)
+
+    def test_api_ollama_model_telemetry(self):
+        # 1. Post model-level telemetry
+        telemetry_payload = {
+            "model": "deepseek-coder:6.7b",
+            "input_tokens": 1250,
+            "output_tokens": 350,
+            "session_id": "sess_ollama_test_01"
+        }
+        status, tel_res = self._post("/api/providers/ollama/telemetry", telemetry_payload)
+        self.assertEqual(status, 200)
+        self.assertTrue(tel_res["success"])
+        self.assertIn("event_id", tel_res)
+
+        # 2. Check usage comparison contains the model telemetry
+        status, comp = self._get("/api/usage/comparison")
+        self.assertEqual(status, 200)
+        ollama_data = comp["providers"]["ollama"]
+        self.assertIn("models", ollama_data)
+        model_names = [m["model"] for m in ollama_data["models"]]
+        self.assertIn("deepseek-coder:6.7b", model_names)
+
 if __name__ == "__main__":
     unittest.main()
 
