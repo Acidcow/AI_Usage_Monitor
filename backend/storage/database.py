@@ -57,9 +57,26 @@ class UsageDatabase:
                     requests_remaining INTEGER,
                     reset_epoch REAL,
                     status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    last_sync TEXT NOT NULL
+                    last_sync TEXT NOT NULL,
+                    session_remaining_pct REAL,
+                    weekly_remaining_pct REAL,
+                    weekly_reset_str TEXT
                 )
             ''')
+
+            # Migration for existing DBs
+            try:
+                cursor.execute("ALTER TABLE provider_snapshots ADD COLUMN session_remaining_pct REAL")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE provider_snapshots ADD COLUMN weekly_remaining_pct REAL")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE provider_snapshots ADD COLUMN weekly_reset_str TEXT")
+            except Exception:
+                pass
 
             # Indices for rapid querying
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_recorded_at ON usage_events(recorded_at)')
@@ -119,7 +136,10 @@ class UsageDatabase:
         requests_remaining: Optional[int] = None,
         reset_epoch: Optional[float] = None,
         status: str = "ACTIVE",
-        account_id: Optional[str] = "default"
+        account_id: Optional[str] = "default",
+        session_remaining_pct: Optional[float] = None,
+        weekly_remaining_pct: Optional[float] = None,
+        weekly_reset_str: Optional[str] = None
     ):
         """Updates or inserts the latest status and quota for a provider."""
         now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -129,8 +149,9 @@ class UsageDatabase:
             cursor.execute('''
                 INSERT INTO provider_snapshots (
                     provider, account_id, plan_type, tokens_remaining,
-                    requests_remaining, reset_epoch, status, last_sync
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    requests_remaining, reset_epoch, status, last_sync,
+                    session_remaining_pct, weekly_remaining_pct, weekly_reset_str
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider) DO UPDATE SET
                     account_id = excluded.account_id,
                     plan_type = excluded.plan_type,
@@ -138,7 +159,10 @@ class UsageDatabase:
                     requests_remaining = excluded.requests_remaining,
                     reset_epoch = excluded.reset_epoch,
                     status = excluded.status,
-                    last_sync = excluded.last_sync
+                    last_sync = excluded.last_sync,
+                    session_remaining_pct = COALESCE(excluded.session_remaining_pct, provider_snapshots.session_remaining_pct),
+                    weekly_remaining_pct = COALESCE(excluded.weekly_remaining_pct, provider_snapshots.weekly_remaining_pct),
+                    weekly_reset_str = COALESCE(excluded.weekly_reset_str, provider_snapshots.weekly_reset_str)
             ''', (
                 provider.lower(),
                 account_id,
@@ -147,7 +171,10 @@ class UsageDatabase:
                 requests_remaining,
                 reset_epoch,
                 status,
-                now_utc
+                now_utc,
+                session_remaining_pct,
+                weekly_remaining_pct,
+                weekly_reset_str
             ))
             conn.commit()
             conn.close()
@@ -349,11 +376,13 @@ class UsageDatabase:
         total_tokens_today_all = sum(r.get("tokens_today", 0) for r in today_rows.values())
         total_tokens_week_all = sum(r.get("tokens_week", 0) for r in week_rows.values())
 
+        snapshots = self.get_provider_snapshots()
         providers_comparison = {}
         for prov in all_known_providers:
             at = all_time_rows.get(prov, {})
             td = today_rows.get(prov, {})
             wk = week_rows.get(prov, {})
+            snap = snapshots.get(prov, {})
 
             tokens_today = td.get("tokens_today", 0)
             tokens_week = wk.get("tokens_week", 0)
@@ -362,11 +391,21 @@ class UsageDatabase:
             weekly_allowance = daily_allowance * 7
 
             share_pct = round((tokens_today / total_tokens_today_all * 100), 1) if total_tokens_today_all > 0 else 0.0
-            session_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_today / daily_allowance)) * 100, 1)))
-            weekly_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_week / weekly_allowance)) * 100, 1)))
+
+            # If provider snapshot has calibrated session/weekly remaining percentages, use them!
+            if snap.get("session_remaining_pct") is not None:
+                session_rem_pct = round(float(snap["session_remaining_pct"]), 1)
+            else:
+                session_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_today / daily_allowance)) * 100, 1)))
+
+            if snap.get("weekly_remaining_pct") is not None:
+                weekly_rem_pct = round(float(snap["weekly_remaining_pct"]), 1)
+            else:
+                weekly_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_week / weekly_allowance)) * 100, 1)))
 
             providers_comparison[prov] = {
                 "provider": prov,
+                "plan_type": snap.get("plan_type", "Active"),
                 "tokens_today": tokens_today,
                 "tokens_week": tokens_week,
                 "tokens_total": tokens_total,
@@ -378,7 +417,11 @@ class UsageDatabase:
                 "daily_allowance": daily_allowance,
                 "weekly_allowance": weekly_allowance,
                 "session_balance_remaining_pct": session_rem_pct,
-                "weekly_balance_remaining_pct": weekly_rem_pct
+                "session_used_pct": round(100.0 - session_rem_pct, 1),
+                "weekly_balance_remaining_pct": weekly_rem_pct,
+                "weekly_used_pct": round(100.0 - weekly_rem_pct, 1),
+                "reset_epoch": snap.get("reset_epoch"),
+                "weekly_reset_str": snap.get("weekly_reset_str", "Mon 3:00 AM")
             }
 
         # Local Model (Ollama) Cost Savings Calculation

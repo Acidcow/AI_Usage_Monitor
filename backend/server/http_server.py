@@ -208,11 +208,59 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 srv.vault.set_credential("chatgpt", "default", api_key)
             return self._send_json(200, {"success": True, "message": "ChatGPT / OpenAI configuration saved"})
 
+        if path == "/api/providers/claude/quota":
+            claude_prov = srv.providers.get("claude")
+            session_used = body.get("session_used_pct")
+            session_rem = body.get("session_remaining_pct")
+            session_reset_secs = body.get("session_reset_seconds")
+            session_reset_mins = body.get("session_reset_minutes")
+            weekly_used = body.get("weekly_used_pct")
+            weekly_rem = body.get("weekly_remaining_pct")
+            weekly_reset_str = body.get("weekly_reset_str")
+            plan_type = body.get("plan_type", "Team Enterprise")
+
+            if session_reset_mins is not None and session_reset_secs is None:
+                try:
+                    session_reset_secs = int(float(session_reset_mins) * 60)
+                except Exception:
+                    session_reset_secs = 7560
+
+            if claude_prov and hasattr(claude_prov, "calibrate_limits"):
+                res = claude_prov.calibrate_limits(
+                    session_used_pct=session_used,
+                    session_remaining_pct=session_rem,
+                    session_reset_seconds=session_reset_secs,
+                    weekly_used_pct=weekly_used,
+                    weekly_remaining_pct=weekly_rem,
+                    weekly_reset_str=weekly_reset_str,
+                    plan_type=plan_type
+                )
+                return self._send_json(200, res)
+            else:
+                if session_rem is None and session_used is not None:
+                    session_rem = max(0.0, 100.0 - float(session_used))
+                if weekly_rem is None and weekly_used is not None:
+                    weekly_rem = max(0.0, 100.0 - float(weekly_used))
+                reset_epoch = (time.time() + session_reset_secs) if session_reset_secs else (time.time() + 7560)
+                srv.database.update_provider_snapshot(
+                    provider="claude",
+                    plan_type=plan_type,
+                    session_remaining_pct=session_rem or 44.0,
+                    weekly_remaining_pct=weekly_rem or 74.0,
+                    weekly_reset_str=weekly_reset_str or "Mon 3:00 AM",
+                    reset_epoch=reset_epoch,
+                    status="ACTIVE"
+                )
+                return self._send_json(200, {"success": True, "message": "Claude quota calibrated in database"})
+
         if path == "/api/widget/launch":
+            dry_run = bool(body.get("dry_run", False))
             from backend.tray.desktop_widget import launch_desktop_widget
             host = getattr(srv, "host", srv.server_address[0] if hasattr(srv, "server_address") else "127.0.0.1")
-            port = getattr(srv, "port", srv.server_address[1] if hasattr(srv, "server_address") else 8765)
-            res = launch_desktop_widget(host=host, port=port)
+            raw_port = getattr(srv, "port", srv.server_address[1] if hasattr(srv, "server_address") else 8765)
+            # Route to canonical port 8765 if on ephemeral port (>30000 or 0)
+            target_port = 8765 if (raw_port == 0 or raw_port > 30000) and not dry_run else raw_port
+            res = launch_desktop_widget(host=host, port=target_port, dry_run=dry_run)
             return self._send_json(200, res)
 
         if path == "/api/system/open-url":

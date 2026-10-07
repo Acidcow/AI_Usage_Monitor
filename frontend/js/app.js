@@ -658,6 +658,53 @@ window.App = {
     if (modal) modal.classList.remove("active");
   },
 
+  // Claude Quota & Limit Calibration
+  openClaudeQuotaModal() {
+    const modal = document.getElementById("claude-quota-modal");
+    if (modal) modal.classList.add("active");
+  },
+  closeClaudeQuotaModal() {
+    const modal = document.getElementById("claude-quota-modal");
+    if (modal) modal.classList.remove("active");
+  },
+  async saveClaudeQuotaCalibration() {
+    const planSelect = document.getElementById("claude-quota-plan");
+    const sessUsedInput = document.getElementById("claude-quota-session-used");
+    const sessMinsInput = document.getElementById("claude-quota-session-reset-mins");
+    const weekUsedInput = document.getElementById("claude-quota-weekly-used");
+    const weekResetInput = document.getElementById("claude-quota-weekly-reset-str");
+
+    const planType = planSelect ? planSelect.value : "Team Enterprise";
+    const sessUsed = sessUsedInput ? parseFloat(sessUsedInput.value) : 56.0;
+    const sessMins = sessMinsInput ? parseFloat(sessMinsInput.value) : 126.0;
+    const weekUsed = weekUsedInput ? parseFloat(weekUsedInput.value) : 26.0;
+    const weekReset = weekResetInput ? weekResetInput.value.trim() : "Mon 3:00 AM";
+
+    try {
+      const res = await fetch("/api/providers/claude/quota", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan_type: planType,
+          session_used_pct: sessUsed,
+          session_reset_minutes: sessMins,
+          weekly_used_pct: weekUsed,
+          weekly_reset_str: weekReset
+        })
+      });
+      if (res.ok) {
+        alert(`✓ Claude limits successfully calibrated!\n• Session: ${100 - sessUsed}% remaining (${sessUsed}% used)\n• Weekly: ${100 - weekUsed}% remaining (${weekUsed}% used)\n• Reset: ${weekReset}`);
+        this.closeClaudeQuotaModal();
+        await this.loadUsageData();
+      } else {
+        const err = await res.json();
+        alert(`Failed to calibrate Claude limits: ${err.error || res.statusText}`);
+      }
+    } catch (e) {
+      alert(`Error calibrating Claude quota: ${e}`);
+    }
+  },
+
   async saveClaudeConfig() {
     const keyInput = document.getElementById("claude-api-key-input");
     const simCheckbox = document.getElementById("claude-sim-checkbox");

@@ -107,6 +107,26 @@ class TestWindowsTray(unittest.TestCase):
         }
         widget.render_canvas()
         self.assertIsNotNone(widget.canvas)
+        self.assertEqual(widget.active_port, widget.port)
+
+        # Test hover flyout creation and scaled geometry
+        item = {
+            "tokens_today": 6666,
+            "tokens_week": 6666,
+            "session_balance_remaining_pct": 44.0,
+            "session_used_pct": 56.0,
+            "weekly_balance_remaining_pct": 74.0,
+            "weekly_used_pct": 26.0,
+            "weekly_reset_str": "Mon 3:00 AM",
+            "cost_today_usd": 0.042
+        }
+        stat = {"plan_type": "Team Enterprise", "status": "ACTIVE"}
+        widget._show_flyout("claude", item, stat)
+        self.assertIsNotNone(widget.flyout_window)
+        self.assertIsNotNone(widget.flyout_canvas)
+        self.assertIsNotNone(widget.flyout_scrollbar)
+        widget._hide_flyout()
+
         widget.close()
 
 if __name__ == "__main__":

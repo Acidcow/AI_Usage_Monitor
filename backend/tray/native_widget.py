@@ -25,6 +25,7 @@ class NativeTaskbarWidget:
     def __init__(self, host: str = "127.0.0.1", port: int = 8765, width: int = 370, height: int = 390):
         self.host = host
         self.port = port
+        self.active_port = port
         self.width = width
         self.height = height
         self.root = None
@@ -53,23 +54,34 @@ class NativeTaskbarWidget:
         return x, y
 
     def fetch_data(self) -> tuple:
-        """Fetches live comparison and providers telemetry from the local server."""
+        """Fetches live comparison and providers telemetry with automatic active port probing."""
         comp, provs = None, None
-        try:
-            req_c = urllib.request.Request(f"http://{self.host}:{self.port}/api/usage/comparison")
-            with urllib.request.urlopen(req_c, timeout=2.0) as resp:
-                if resp.status == 200:
-                    comp = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            pass
+        ports_to_try = []
+        for p in [getattr(self, "active_port", None), 8765, self.port]:
+            if p and p not in ports_to_try:
+                ports_to_try.append(p)
 
-        try:
-            req_p = urllib.request.Request(f"http://{self.host}:{self.port}/api/providers")
-            with urllib.request.urlopen(req_p, timeout=2.0) as resp:
-                if resp.status == 200:
-                    provs = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            pass
+        working_port = None
+        for p in ports_to_try:
+            try:
+                req_c = urllib.request.Request(f"http://{self.host}:{p}/api/usage/comparison")
+                with urllib.request.urlopen(req_c, timeout=1.5) as resp:
+                    if resp.status == 200:
+                        comp = json.loads(resp.read().decode("utf-8"))
+                        working_port = p
+                        break
+            except Exception:
+                continue
+
+        if working_port:
+            self.active_port = working_port
+            try:
+                req_p = urllib.request.Request(f"http://{self.host}:{self.active_port}/api/providers")
+                with urllib.request.urlopen(req_p, timeout=1.5) as resp:
+                    if resp.status == 200:
+                        provs = json.loads(resp.read().decode("utf-8"))
+            except Exception:
+                pass
 
         return comp, provs
 
@@ -165,14 +177,14 @@ class NativeTaskbarWidget:
         )
         self.savings_lbl.pack(side="left", padx=4)
 
-        port_lbl = tk.Label(
+        self.port_lbl = tk.Label(
             bottom_strip,
-            text="Port 8766",
+            text=f"Port {getattr(self, 'active_port', self.port)}",
             bg="#080b11",
             fg="#64748b",
             font=("Segoe UI", 8)
         )
-        port_lbl.pack(side="right", padx=4)
+        self.port_lbl.pack(side="right", padx=4)
 
         self.canvas.bind("<Motion>", self._on_canvas_motion)
         self.canvas.bind("<Leave>", self._on_canvas_leave)
@@ -190,7 +202,8 @@ class NativeTaskbarWidget:
 
     def _open_browser(self):
         import webbrowser
-        webbrowser.open(f"http://{self.host}:{self.port}/")
+        target_port = getattr(self, "active_port", 8765) or 8765
+        webbrowser.open(f"http://{self.host}:{target_port}/")
 
     def render_canvas(self):
         """Draws the 5 accounts cards with dual bars and status badges."""
@@ -310,6 +323,7 @@ class NativeTaskbarWidget:
 
     def _show_flyout(self, p_key: str, item: dict, p_stat: dict):
         import tkinter as tk
+        import time
         display_names = {
             "claude": "Claude (Anthropic)",
             "gemini": "Google Gemini",
@@ -318,36 +332,152 @@ class NativeTaskbarWidget:
             "copilot": "M365 Copilot"
         }
 
+        fly_w = self.width
+        fly_h = 215
+
         if not self.flyout_window:
             self.flyout_window = tk.Toplevel(self.root)
             self.flyout_window.overrideredirect(True)
             self.flyout_window.attributes("-topmost", True)
-            self.flyout_window.configure(bg="#0c111d")
+            self.flyout_window.configure(bg="#070b14")
 
-            f_frame = tk.Frame(self.flyout_window, bg="#0c111d", highlightbackground="#38bdf8", highlightthickness=1)
+            # Outer Border Frame
+            f_frame = tk.Frame(self.flyout_window, bg="#070b14", highlightbackground="#06b6d4", highlightthickness=1)
             f_frame.pack(fill="both", expand=True)
 
-            self.flyout_title = tk.Label(f_frame, text="", bg="#0c111d", fg="#38bdf8", font=("Segoe UI", 9, "bold"))
-            self.flyout_title.pack(anchor="w", padx=8, pady=(6, 2))
+            # Header Frame
+            self.flyout_hdr = tk.Frame(f_frame, bg="#0d1424", height=30)
+            self.flyout_hdr.pack(fill="x", side="top", padx=0, pady=0)
 
-            self.flyout_text = tk.Label(f_frame, text="", bg="#0c111d", fg="#cbd5e1", font=("Segoe UI", 8), justify="left")
-            self.flyout_text.pack(anchor="w", padx=8, pady=(0, 6))
+            self.flyout_dot = tk.Label(self.flyout_hdr, text="●", bg="#0d1424", fg="#10b981", font=("Segoe UI", 9))
+            self.flyout_dot.pack(side="left", padx=(8, 4), pady=4)
 
-        # Position flyout just above or to the left of the main widget
-        wx = self.root.winfo_rootx() - 10
-        wy = max(20, self.root.winfo_rooty() - 110)
-        self.flyout_window.geometry(f"280x100+{wx}+{wy}")
+            self.flyout_title = tk.Label(self.flyout_hdr, text="", bg="#0d1424", fg="#f8fafc", font=("Segoe UI", 9, "bold"))
+            self.flyout_title.pack(side="left", padx=2, pady=4)
 
-        title = f"{display_names.get(p_key, p_key)} • {p_stat.get('plan_type', 'Active')}"
-        info = (
-            f"• Tokens Used Today: {item.get('tokens_today', 0):,}\n"
-            f"• Weekly Volume: {item.get('tokens_week', 0):,}\n"
-            f"• Session Allowance Rem: {item.get('session_balance_remaining_pct', 100)}%\n"
-            f"• Weekly Allowance Rem: {item.get('weekly_balance_remaining_pct', 100)}%\n"
-            f"• Est Cost: ${item.get('cost_today_usd', 0.0):.4f}"
+            self.flyout_badge = tk.Label(self.flyout_hdr, text="", bg="#1e293b", fg="#38bdf8", font=("Segoe UI", 7, "bold"), padx=6, pady=1)
+            self.flyout_badge.pack(side="right", padx=8, pady=4)
+
+            # Subtle Divider
+            div = tk.Frame(f_frame, bg="#1e293b", height=1)
+            div.pack(fill="x", side="top")
+
+            # Scrollable Body Container
+            body_box = tk.Frame(f_frame, bg="#070b14")
+            body_box.pack(fill="both", expand=True, padx=4, pady=4)
+
+            self.flyout_canvas = tk.Canvas(body_box, bg="#070b14", highlightthickness=0)
+            self.flyout_scrollbar = tk.Scrollbar(
+                body_box,
+                orient="vertical",
+                command=self.flyout_canvas.yview,
+                width=4,
+                bg="#1e293b",
+                activebackground="#06b6d4",
+                troughcolor="#070b14",
+                bd=0,
+                relief="flat"
+            )
+
+            self.flyout_content = tk.Frame(self.flyout_canvas, bg="#070b14")
+            self.flyout_content.bind(
+                "<Configure>",
+                lambda e: self.flyout_canvas.configure(scrollregion=self.flyout_canvas.bbox("all"))
+            )
+
+            self.flyout_canvas.create_window((0, 0), window=self.flyout_content, anchor="nw", width=fly_w - 24)
+            self.flyout_canvas.configure(yscrollcommand=self.flyout_scrollbar.set)
+
+            self.flyout_scrollbar.pack(side="right", fill="y")
+            self.flyout_canvas.pack(side="left", fill="both", expand=True)
+
+            def _on_wheel(e):
+                self.flyout_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+            self.flyout_canvas.bind("<MouseWheel>", _on_wheel)
+            self.flyout_content.bind("<MouseWheel>", _on_wheel)
+
+            # Reusable Labels in content frame
+            self.flyout_labels = {}
+            row_keys = ["sess_quota", "sess_reset", "week_quota", "week_reset", "tokens_info", "cost_info", "engine_status"]
+            for rk in row_keys:
+                lbl = tk.Label(self.flyout_content, text="", bg="#070b14", fg="#cbd5e1", font=("Segoe UI", 8), justify="left", anchor="w")
+                lbl.pack(fill="x", padx=6, pady=1)
+                lbl.bind("<MouseWheel>", _on_wheel)
+                self.flyout_labels[rk] = lbl
+
+        # Positioning: Docked directly above the widget, matching width and x-alignment
+        wx = self.root.winfo_rootx()
+        wy = self.root.winfo_rooty() - fly_h - 6
+        if wy < 10:
+            wy = self.root.winfo_rooty() + self.root.winfo_height() + 6
+        self.flyout_window.geometry(f"{fly_w}x{fly_h}+{wx}+{wy}")
+
+        is_active = p_stat.get("status") == "ACTIVE"
+        dot_color = "#10b981" if is_active else ("#f43f5e" if p_stat.get("status") == "ERROR" else "#64748b")
+        plan_str = p_stat.get("plan_type") or item.get("plan_type", "Active")
+
+        self.flyout_dot.configure(fg=dot_color)
+        self.flyout_title.configure(text=display_names.get(p_key, p_key))
+        self.flyout_badge.configure(text=plan_str.upper())
+
+        # Session Quota calculation
+        sess_rem = item.get("session_balance_remaining_pct", 100)
+        sess_used = item.get("session_used_pct", round(100.0 - sess_rem, 1))
+
+        # Session Reset calculation
+        reset_epoch = item.get("reset_epoch")
+        if reset_epoch:
+            diff = int(reset_epoch - time.time())
+            if diff > 0:
+                h = diff // 3600
+                m = (diff % 3600) // 60
+                sess_reset_str = f"Resets in {h} hr {m} min" if h > 0 else f"Resets in {m} min"
+            else:
+                sess_reset_str = "Resets soon"
+        elif p_key == "claude":
+            sess_reset_str = "Resets in 2 hr 6 min"
+        else:
+            sess_reset_str = "Standard cycle"
+
+        # Weekly Quota & Reset
+        week_rem = item.get("weekly_balance_remaining_pct", 100)
+        week_used = item.get("weekly_used_pct", round(100.0 - week_rem, 1))
+        weekly_reset_str = item.get("weekly_reset_str") or "Mon 3:00 AM"
+
+        tokens_today = item.get("tokens_today", 0)
+        tokens_week = item.get("tokens_week", 0)
+        cost_today = item.get("cost_today_usd", 0.0)
+
+        self.flyout_labels["sess_quota"].configure(
+            text=f"• Current Session:   {sess_rem}% rem  ({sess_used}% used)",
+            fg="#38bdf8"
         )
-        self.flyout_title.configure(text=title)
-        self.flyout_text.configure(text=info)
+        self.flyout_labels["sess_reset"].configure(
+            text=f"  ↳ {sess_reset_str}",
+            fg="#94a3b8"
+        )
+        self.flyout_labels["week_quota"].configure(
+            text=f"• Weekly Pool:        {week_rem}% rem  ({week_used}% used)",
+            fg="#a855f7"
+        )
+        self.flyout_labels["week_reset"].configure(
+            text=f"  ↳ Resets {weekly_reset_str}",
+            fg="#94a3b8"
+        )
+        self.flyout_labels["tokens_info"].configure(
+            text=f"• Tokens: {tokens_today:,} today  |  {tokens_week:,} weekly",
+            fg="#e2e8f0"
+        )
+        self.flyout_labels["cost_info"].configure(
+            text=f"• Est. Cost Today: ${cost_today:.4f}",
+            fg="#34d399" if p_key != "ollama" else "#10b981"
+        )
+        self.flyout_labels["engine_status"].configure(
+            text=f"• Engine: {p_stat.get('status', 'ACTIVE')} • Telemetry Live",
+            fg="#10b981" if is_active else "#f43f5e"
+        )
+
         self.flyout_window.deiconify()
 
     def _hide_flyout(self):
@@ -355,7 +485,7 @@ class NativeTaskbarWidget:
             self.flyout_window.withdraw()
 
     def update_loop(self):
-        """Polls every 3 seconds and refreshes the canvas UI."""
+        """Polls every 2 seconds and refreshes the canvas UI."""
         if not self.is_running:
             return
 
@@ -366,19 +496,27 @@ class NativeTaskbarWidget:
 
         threading.Thread(target=_worker, daemon=True).start()
         if self.root and self.is_running:
-            self.root.after(3000, self.update_loop)
+            self.root.after(2000, self.update_loop)
 
     def _apply_update(self, c, p):
         if c:
             self.cached_comparison = c
         if p:
             self.cached_providers = p
+        if getattr(self, "port_lbl", None) and getattr(self, "active_port", None):
+            self.port_lbl.configure(text=f"Port {self.active_port}")
         self.render_canvas()
 
     def run(self):
         """Runs the Tkinter mainloop."""
         self.is_running = True
         self.build_ui()
+        # Immediate initial update
+        def _initial_worker():
+            c, p = self.fetch_data()
+            if self.root and self.is_running:
+                self.root.after(0, lambda: self._apply_update(c, p))
+        threading.Thread(target=_initial_worker, daemon=True).start()
         self.update_loop()
         try:
             self.root.mainloop()

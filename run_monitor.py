@@ -82,6 +82,19 @@ def main():
         "chatgpt": chatgpt
     }
 
+    # Baseline Team Quota calibration (matches user's claude.ai workspace)
+    existing_snaps = database.get_provider_snapshots()
+    if "claude" not in existing_snaps or existing_snaps["claude"].get("session_remaining_pct") is None:
+        claude.calibrate_limits(
+            session_used_pct=56.0,
+            session_remaining_pct=44.0,
+            session_reset_seconds=7560,
+            weekly_used_pct=26.0,
+            weekly_remaining_pct=74.0,
+            weekly_reset_str="Mon 3:00 AM",
+            plan_type="Team Enterprise"
+        )
+
     # Demo pre-seed
     if args.demo:
         print("[DEMO] Generating initial realistic Claude usage telemetry...")

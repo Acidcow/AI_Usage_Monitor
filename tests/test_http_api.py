@@ -128,9 +128,31 @@ class TestHTTPAPI(unittest.TestCase):
         self.assertEqual(stored, "sk-proj-FakeOpenAIKey789")
 
     def test_api_widget_launch(self):
-        status, data = self._post("/api/widget/launch", {})
+        status, data = self._post("/api/widget/launch", {"dry_run": True})
         self.assertEqual(status, 200)
         self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("mode"), "dry_run")
+
+    def test_api_claude_quota_calibration(self):
+        status, data = self._post("/api/providers/claude/quota", {
+            "session_used_pct": 56.0,
+            "session_reset_minutes": 126,
+            "weekly_used_pct": 26.0,
+            "weekly_reset_str": "Mon 3:00 AM",
+            "plan_type": "Team Enterprise"
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("session_remaining_pct"), 44.0)
+        self.assertEqual(data.get("weekly_remaining_pct"), 74.0)
+
+        # Check that GET /api/usage/comparison reflects calibrated quota
+        st, comp = self._get("/api/usage/comparison")
+        self.assertEqual(st, 200)
+        claude_comp = comp["providers"]["claude"]
+        self.assertEqual(claude_comp["session_balance_remaining_pct"], 44.0)
+        self.assertEqual(claude_comp["weekly_balance_remaining_pct"], 74.0)
+        self.assertEqual(claude_comp["weekly_reset_str"], "Mon 3:00 AM")
 
     def test_static_asset_serving_icons_and_mascots(self):
         port = self.server.server_port

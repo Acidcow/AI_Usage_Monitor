@@ -76,5 +76,30 @@ class TestClaudeProvider(unittest.TestCase):
         summary = self.db.get_usage_summary(provider="claude")
         self.assertEqual(summary["total_tokens_today"], 3250)
 
+    def test_calibrate_limits_and_metrics(self):
+        res = self.provider.calibrate_limits(
+            session_used_pct=56.0,
+            session_reset_seconds=7560,
+            weekly_used_pct=26.0,
+            weekly_reset_str="Mon 3:00 AM",
+            plan_type="Team Enterprise"
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["session_remaining_pct"], 44.0)
+        self.assertEqual(res["session_used_pct"], 56.0)
+        self.assertEqual(res["weekly_remaining_pct"], 74.0)
+        self.assertEqual(res["weekly_used_pct"], 26.0)
+        self.assertEqual(res["weekly_reset_str"], "Mon 3:00 AM")
+
+        # Verify DB comparative metrics reflects calibrated percentages
+        comp = self.db.get_comparative_metrics()
+        claude_m = comp["providers"]["claude"]
+        self.assertEqual(claude_m["session_balance_remaining_pct"], 44.0)
+        self.assertEqual(claude_m["session_used_pct"], 56.0)
+        self.assertEqual(claude_m["weekly_balance_remaining_pct"], 74.0)
+        self.assertEqual(claude_m["weekly_used_pct"], 26.0)
+        self.assertEqual(claude_m["weekly_reset_str"], "Mon 3:00 AM")
+        self.assertEqual(claude_m["plan_type"], "Team Enterprise")
+
 if __name__ == "__main__":
     unittest.main()

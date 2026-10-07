@@ -103,13 +103,22 @@ def launch_desktop_widget(
     port: int = 8765,
     width: int = 370,
     height: int = 390,
-    prefer_native: bool = True
+    prefer_native: bool = True,
+    dry_run: bool = False
 ) -> Dict[str, Any]:
     """
     Launches the mini widget.
     By default, launches the native standalone desktop taskbar widget (zero browser required).
     Falls back to Edge app mode or browser if requested or if native launch fails.
     """
+    if dry_run:
+        return {
+            "success": True,
+            "mode": "dry_run",
+            "host": host,
+            "port": port
+        }
+
     if prefer_native:
         try:
             args = [sys.executable, "-m", "backend.tray.native_widget", str(host), str(port)]

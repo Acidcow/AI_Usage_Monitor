@@ -21,9 +21,67 @@ class ClaudeProvider(BaseProvider):
     def __init__(self, database, vault, diagnostics):
         super().__init__(database, vault, diagnostics)
         self._simulation_mode = False
-        self._cached_plan = "Pro"
+        self._cached_plan = "Team Enterprise"
         self._tokens_limit = 400000
         self._requests_limit = 1000
+
+    def calibrate_limits(
+        self,
+        session_used_pct: Optional[float] = None,
+        session_remaining_pct: Optional[float] = None,
+        session_reset_seconds: Optional[int] = None,
+        session_reset_str: Optional[str] = None,
+        weekly_used_pct: Optional[float] = None,
+        weekly_remaining_pct: Optional[float] = None,
+        weekly_reset_str: Optional[str] = None,
+        plan_type: Optional[str] = "Team Enterprise"
+    ) -> Dict[str, Any]:
+        """
+        Calibrates official Anthropic rolling session and weekly quota limits.
+        Supports inputs directly matching the Claude Web UI (e.g. 56% session used, 26% weekly used).
+        """
+        if session_remaining_pct is None and session_used_pct is not None:
+            session_remaining_pct = max(0.0, 100.0 - float(session_used_pct))
+        elif session_remaining_pct is not None and session_used_pct is None:
+            session_used_pct = max(0.0, 100.0 - float(session_remaining_pct))
+
+        if weekly_remaining_pct is None and weekly_used_pct is not None:
+            weekly_remaining_pct = max(0.0, 100.0 - float(weekly_used_pct))
+        elif weekly_remaining_pct is not None and weekly_used_pct is None:
+            weekly_used_pct = max(0.0, 100.0 - float(weekly_remaining_pct))
+
+        final_sess_rem = float(session_remaining_pct) if session_remaining_pct is not None else 44.0
+        final_week_rem = float(weekly_remaining_pct) if weekly_remaining_pct is not None else 74.0
+        final_week_reset = str(weekly_reset_str) if weekly_reset_str else "Mon 3:00 AM"
+
+        if session_reset_seconds is not None:
+            reset_epoch = time.time() + int(session_reset_seconds)
+        else:
+            reset_epoch = time.time() + 7560  # Default ~2 hr 6 min
+
+        if plan_type:
+            self._cached_plan = plan_type
+
+        self.db.update_provider_snapshot(
+            provider="claude",
+            plan_type=self._cached_plan,
+            session_remaining_pct=final_sess_rem,
+            weekly_remaining_pct=final_week_rem,
+            weekly_reset_str=final_week_reset,
+            reset_epoch=reset_epoch,
+            status="ACTIVE"
+        )
+        self.diagnostics.mark_provider_healthy("claude")
+        return {
+            "success": True,
+            "session_remaining_pct": final_sess_rem,
+            "session_used_pct": round(100.0 - final_sess_rem, 1),
+            "weekly_remaining_pct": final_week_rem,
+            "weekly_used_pct": round(100.0 - final_week_rem, 1),
+            "reset_epoch": reset_epoch,
+            "weekly_reset_str": final_week_reset,
+            "plan_type": self._cached_plan
+        }
 
     @property
     def provider_name(self) -> str:
@@ -105,13 +163,22 @@ class ClaudeProvider(BaseProvider):
             requests_rem = parsed["requests_remaining"]
             reset_epoch = parsed["reset_epoch"]
 
+        existing_snaps = self.db.get_provider_snapshots()
+        claude_snap = existing_snaps.get("claude", {})
+        sess_rem = claude_snap.get("session_remaining_pct", 44.0)
+        week_rem = claude_snap.get("weekly_remaining_pct", 74.0)
+        week_reset = claude_snap.get("weekly_reset_str", "Mon 3:00 AM")
+
         self.db.update_provider_snapshot(
             provider="claude",
             plan_type=self._cached_plan,
             tokens_remaining=tokens_rem or 385000,
             requests_remaining=requests_rem or 950,
-            reset_epoch=reset_epoch or (time.time() + 1800),
-            status="ACTIVE"
+            reset_epoch=reset_epoch or claude_snap.get("reset_epoch") or (time.time() + 7560),
+            status="ACTIVE",
+            session_remaining_pct=sess_rem,
+            weekly_remaining_pct=week_rem,
+            weekly_reset_str=week_reset
         )
         self.diagnostics.mark_provider_healthy("claude")
         return evt_id
@@ -226,13 +293,23 @@ class ClaudeProvider(BaseProvider):
             cur_tokens_rem = max(10000, self._tokens_limit - (in_tok * 15))
             reset_time = time.time() + random.randint(900, 3600)
 
+            existing_snaps = self.db.get_provider_snapshots()
+            claude_snap = existing_snaps.get("claude", {})
+            sess_rem = claude_snap.get("session_remaining_pct", 44.0)
+            week_rem = claude_snap.get("weekly_remaining_pct", 74.0)
+            week_reset = claude_snap.get("weekly_reset_str", "Mon 3:00 AM")
+            target_reset = claude_snap.get("reset_epoch") or reset_time
+
             self.db.update_provider_snapshot(
                 provider="claude",
                 plan_type="Team Enterprise",
                 tokens_remaining=cur_tokens_rem,
                 requests_remaining=random.randint(450, 980),
-                reset_epoch=reset_time,
-                status="ACTIVE"
+                reset_epoch=target_reset,
+                status="ACTIVE",
+                session_remaining_pct=sess_rem,
+                weekly_remaining_pct=week_rem,
+                weekly_reset_str=week_reset
             )
             self.diagnostics.mark_provider_healthy("claude")
             return {
