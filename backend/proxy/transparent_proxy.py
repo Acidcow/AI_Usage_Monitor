@@ -116,7 +116,16 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
         upstream_headers = dict(self.headers)
 
         if "x-api-key" not in upstream_headers or not upstream_headers["x-api-key"]:
-            stored_key = self.server.claude_provider.vault.get_credential("claude", "default")
+            stored_key = None
+            if hasattr(self.server.claude_provider, "db") and hasattr(self.server.claude_provider.db, "get_active_account_profile"):
+                try:
+                    active_acct = self.server.claude_provider.db.get_active_account_profile("claude")
+                    if active_acct and active_acct.get("account_id"):
+                        stored_key = self.server.claude_provider.vault.get_credential("claude", active_acct["account_id"])
+                except Exception:
+                    pass
+            if not stored_key:
+                stored_key = self.server.claude_provider.vault.get_credential("claude", "default")
             if stored_key:
                 upstream_headers["x-api-key"] = stored_key
 

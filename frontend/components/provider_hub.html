@@ -1,16 +1,26 @@
 <div class="glass-card" style="margin-bottom: 28px;">
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 14px;">
     <div>
-      <h2 style="font-size: 1.15rem; font-weight: 700;">Provider Accounts & Adapters</h2>
-      <p style="font-size: 0.82rem; color: var(--text-muted);">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <h2 style="font-size: 1.15rem; font-weight: 700;">Provider Accounts, Tenants & Adapters</h2>
+        <span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); font-size: 0.7rem;">
+          Multi-Account Profiles Active
+        </span>
+      </div>
+      <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 3px;">
         Credentials are encrypted natively using <strong>Windows DPAPI</strong> (tied directly to your Windows login). Plaintext keys are never stored on disk.
       </p>
     </div>
-    <div style="display: flex; align-items: center; gap: 10px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); padding: 6px 12px; border-radius: var(--radius-sm);">
-      <img src="/assets/icons/app_icon_shield.jpg" alt="Cyber Shield Security Seal" style="width: 28px; height: 28px; border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.4); object-fit: cover;">
-      <div>
-        <div style="font-size: 0.76rem; font-weight: 700; color: #c4b5fd;">DPAPI Cyber Shield Active</div>
-        <div style="font-size: 0.68rem; color: var(--text-dim);">Hardware CryptProtectData</div>
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+      <button class="btn btn-secondary btn-sm" onclick="window.App.openAccountModal()" style="border-color: rgba(99, 102, 241, 0.4); color: #a5b4fc; display: flex; align-items: center; gap: 6px;" title="Register multiple personal or corporate accounts per provider">
+        <span>👥</span> Manage Account Profiles
+      </button>
+      <div style="display: flex; align-items: center; gap: 10px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); padding: 6px 12px; border-radius: var(--radius-sm);">
+        <img src="/assets/icons/app_icon_shield.jpg" alt="Cyber Shield Security Seal" style="width: 28px; height: 28px; border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.4); object-fit: cover;">
+        <div>
+          <div style="font-size: 0.76rem; font-weight: 700; color: #c4b5fd;">DPAPI Cyber Shield Active</div>
+          <div style="font-size: 0.68rem; color: var(--text-dim);">Hardware CryptProtectData</div>
+        </div>
       </div>
     </div>
   </div>
@@ -25,9 +35,22 @@
         </div>
         <span class="badge badge-claude" id="hub-claude-status">Active</span>
       </div>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
         Tracks token usage, rate limits, and quota across CLI tools, web sessions, and direct API.
       </p>
+
+      <!-- Multi-Account Profile Selector Strip -->
+      <div class="account-selector-strip" style="background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 170px;">
+          <span style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600;">Active Account:</span>
+          <select id="hub-account-select-claude" onchange="window.App.switchActiveAccount('claude', this.value)" style="background: #0f172a; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.76rem; border-radius: 4px; padding: 4px 8px; flex: 1;">
+            <option value="">Synthesis2 (Active)</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openAccountModal('claude')" style="font-size: 0.72rem; padding: 3px 8px;" title="Switch accounts or add personal/enterprise profiles">
+          👥 Accounts
+        </button>
+      </div>
 
       <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 0.78rem;">
         <div style="color: var(--accent-cyan); font-weight: 600; margin-bottom: 4px;">Transparent CLI Proxy Endpoint:</div>
@@ -58,9 +81,23 @@
         </div>
         <span class="badge badge-copilot">Restricted</span>
       </div>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
         Protected by intense corporate access controls. Monitored through local proxy telemetry and log ingestion fallbacks.
       </p>
+
+      <!-- Multi-Account Profile Selector Strip -->
+      <div class="account-selector-strip" style="background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 170px;">
+          <span style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600;">Active Account:</span>
+          <select id="hub-account-select-copilot" onchange="window.App.switchActiveAccount('copilot', this.value)" style="background: #0f172a; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.76rem; border-radius: 4px; padding: 4px 8px; flex: 1;">
+            <option value="">Corporate M365 Tenant (Active)</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openAccountModal('copilot')" style="font-size: 0.72rem; padding: 3px 8px;" title="Switch accounts or add corporate profiles">
+          👥 Accounts
+        </button>
+      </div>
+
       <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 0.78rem;">
         <div style="color: var(--accent-blue); font-weight: 600; margin-bottom: 4px;">Enterprise Adapter Mode:</div>
         <span style="color: #cbd5e1;">Passive Ingestion via Local Log Scraper & Proxy Header Monitor.</span>
@@ -86,9 +123,23 @@
         </div>
         <span class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa;" id="hub-gemini-status">Ready</span>
       </div>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
         Connect Google AI Studio or Vertex AI projects for token and quota monitoring.
       </p>
+
+      <!-- Multi-Account Profile Selector Strip -->
+      <div class="account-selector-strip" style="background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 170px;">
+          <span style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600;">Active Account:</span>
+          <select id="hub-account-select-gemini" onchange="window.App.switchActiveAccount('gemini', this.value)" style="background: #0f172a; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.76rem; border-radius: 4px; padding: 4px 8px; flex: 1;">
+            <option value="">acidcow@gmail.com (Active)</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openAccountModal('gemini')" style="font-size: 0.72rem; padding: 3px 8px;" title="Switch accounts or add Google workspaces">
+          👥 Accounts
+        </button>
+      </div>
+
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
         <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini" title="Open Google AI Studio to generate or copy your Gemini API key">
           <span>🚀</span> Get Gemini API Key ↗
@@ -110,9 +161,23 @@
         </div>
         <span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399;" id="hub-ollama-badge">Active</span>
       </div>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
         Live connection to <code>http://localhost:11434</code>. Zero cloud API token cost.
       </p>
+
+      <!-- Multi-Account Profile Selector Strip -->
+      <div class="account-selector-strip" style="background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 170px;">
+          <span style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600;">Active Profile:</span>
+          <select id="hub-account-select-ollama" onchange="window.App.switchActiveAccount('ollama', this.value)" style="background: #0f172a; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.76rem; border-radius: 4px; padding: 4px 8px; flex: 1;">
+            <option value="">Localhost Engine (Active)</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openAccountModal('ollama')" style="font-size: 0.72rem; padding: 3px 8px;" title="Manage Ollama profiles or remote cluster endpoints">
+          👥 Profiles
+        </button>
+      </div>
+
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
         <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-ollama" title="Download Ollama for Windows from the official site">
           <span>⬇️</span> Download Ollama ↗
@@ -134,9 +199,23 @@
         </div>
         <span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399;" id="hub-chatgpt-status">Ready</span>
       </div>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
         Connect OpenAI Platform developer keys for GPT-4o, o1, and embeddings tracking.
       </p>
+
+      <!-- Multi-Account Profile Selector Strip -->
+      <div class="account-selector-strip" style="background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 170px;">
+          <span style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600;">Active Account:</span>
+          <select id="hub-account-select-chatgpt" onchange="window.App.switchActiveAccount('chatgpt', this.value)" style="background: #0f172a; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.76rem; border-radius: 4px; padding: 4px 8px; flex: 1;">
+            <option value="">OpenAI Org (Active)</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openAccountModal('chatgpt')" style="font-size: 0.72rem; padding: 3px 8px;" title="Switch accounts or add OpenAI personal/org profiles">
+          👥 Accounts
+        </button>
+      </div>
+
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
         <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-openai" title="Open OpenAI Platform API Keys dashboard">
           <span>🚀</span> Get OpenAI Key ↗

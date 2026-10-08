@@ -60,13 +60,20 @@
       </div>
 
       <div>
+        <label for="report-filter-account" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Account / Tenant</label>
+        <select id="report-filter-account" onchange="window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 8px; border-radius: 6px; font-size: 0.78rem;">
+          <option value="">All Accounts (Aggregate)</option>
+        </select>
+      </div>
+
+      <div>
         <label for="report-filter-dimension" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Group Dimension</label>
         <select id="report-filter-dimension" onchange="window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 8px; border-radius: 6px; font-size: 0.78rem;">
           <option value="">Default (Provider & Account)</option>
+          <option value="account_id">By Account ID (acidcow@gmail.com)</option>
           <option value="team_name">By Team (Synthesis2, Core)</option>
           <option value="user_name">By User / Seat (James Eckhardt)</option>
           <option value="model">By Model (Sonnet, Flash, etc.)</option>
-          <option value="account_id">By Account ID (acidcow@gmail.com)</option>
         </select>
       </div>
 

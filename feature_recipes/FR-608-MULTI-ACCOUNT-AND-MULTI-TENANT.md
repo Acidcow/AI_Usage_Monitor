@@ -3,7 +3,7 @@
 **Epic**: `EPIC-COMPARATIVE-ANALYTICS`  
 **Ticket ID**: `AIUM-608`  
 **Author**: Antigravity  
-**Status**: Backlog / Draft  
+**Status**: Complete  
 **Standard**: ASD-STE100 Simplified Technical English  
 
 ---
@@ -34,7 +34,8 @@ Currently, provider snapshots track a single primary active account identity per
 ---
 
 ## 3. Acceptance Criteria
-- [ ] Users can register >= 2 distinct accounts per provider in the Web UI modal.
-- [ ] Active account toggle switches telemetry context and local proxy forwarding credentials.
-- [ ] Historical analytics dashboard provides filtering by specific account or "All Accounts" aggregate.
-- [ ] 100% test coverage with zero external dependencies.
+- [x] Users can register >= 2 distinct accounts per provider in the Web UI modal.
+- [x] Active account toggle switches telemetry context and local proxy forwarding credentials.
+- [x] Historical analytics dashboard provides filtering by specific account or "All Accounts" aggregate.
+- [x] 100% test coverage with zero external dependencies.
+

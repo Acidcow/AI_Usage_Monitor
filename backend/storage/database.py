@@ -88,6 +88,24 @@ class UsageDatabase:
             ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_tags_name ON cross_platform_tags(tag_name)')
 
+            # Multi-account profiles table (AIUM-608)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS account_profiles (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    account_name TEXT NOT NULL,
+                    account_id TEXT NOT NULL,
+                    email TEXT,
+                    plan_type TEXT DEFAULT 'Pro',
+                    is_active INTEGER DEFAULT 0,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(provider, account_id)
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_acct_profiles_prov ON account_profiles(provider)')
+
             # Migration for existing DBs
             for col in [
                 "session_remaining_pct REAL",
@@ -166,7 +184,11 @@ class UsageDatabase:
         if not team_name and provider.lower() == "claude":
             team_name = "Synthesis2"
         if not account_id:
-            account_id = "acidcow@gmail.com" if provider.lower() == "gemini" else ("Synthesis2" if provider.lower() == "claude" else user_name)
+            active_prof = self.get_active_account_profile(provider)
+            if active_prof and active_prof.get("account_id"):
+                account_id = active_prof.get("account_id")
+            else:
+                account_id = "acidcow@gmail.com" if provider.lower() == "gemini" else ("Synthesis2" if provider.lower() == "claude" else user_name)
 
         with self._lock:
             conn = self._get_connection()
@@ -394,6 +416,25 @@ class UsageDatabase:
             rows = cursor.fetchall()
             conn.close()
 
+        return [dict(r) for r in rows]
+
+    def get_recent_events(self, limit: int = 50, provider: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns the most recent raw usage events."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if provider:
+                cursor.execute(
+                    "SELECT * FROM usage_events WHERE provider = ? ORDER BY recorded_at DESC LIMIT ?",
+                    (provider.lower(), limit)
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM usage_events ORDER BY recorded_at DESC LIMIT ?",
+                    (limit,)
+                )
+            rows = cursor.fetchall()
+            conn.close()
         return [dict(r) for r in rows]
 
     def get_hourly_breakdown(self, hours: int = 24, provider: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -1041,5 +1082,179 @@ class UsageDatabase:
                 "weekly_balance_remaining_pct": 100.0
             })
         return formatted
+
+    # -------------------------------------------------------------
+    # Multi-Account Profiles & Multi-Tenant Management (AIUM-608)
+    # -------------------------------------------------------------
+    def register_account_profile(
+        self,
+        provider: str,
+        account_name: str,
+        account_id: str,
+        email: Optional[str] = None,
+        plan_type: str = "Pro",
+        is_active: Optional[bool] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Registers or updates an account profile for a provider.
+        Thread-safe ACID persistence with automatic active profile state enforcement.
+        """
+        prov = (provider or "").strip().lower()
+        acct_id = (account_id or "").strip()
+        acct_name = (account_name or "").strip() or acct_id
+        now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        meta_json = json.dumps(metadata) if metadata else "{}"
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Determine whether this should be the active profile
+            if is_active is None:
+                cursor.execute("SELECT COUNT(*) as cnt FROM account_profiles WHERE provider = ?", (prov,))
+                count = cursor.fetchone()["cnt"]
+                active_val = 1 if count == 0 else 0
+            else:
+                active_val = 1 if is_active else 0
+
+            if active_val == 1:
+                cursor.execute("UPDATE account_profiles SET is_active = 0 WHERE provider = ?", (prov,))
+
+            profile_uuid = f"acct_{uuid.uuid4().hex[:10]}"
+            cursor.execute('''
+                INSERT INTO account_profiles (
+                    id, provider, account_name, account_id, email,
+                    plan_type, is_active, metadata, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(provider, account_id) DO UPDATE SET
+                    account_name = excluded.account_name,
+                    email = COALESCE(excluded.email, account_profiles.email),
+                    plan_type = excluded.plan_type,
+                    is_active = excluded.is_active,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at
+            ''', (
+                profile_uuid, prov, acct_name, acct_id, email,
+                plan_type, active_val, meta_json, now_utc, now_utc
+            ))
+
+            cursor.execute("SELECT * FROM account_profiles WHERE provider = ? AND account_id = ?", (prov, acct_id))
+            row = dict(cursor.fetchone())
+            conn.commit()
+            conn.close()
+
+            row["is_active"] = bool(row.get("is_active"))
+            if row.get("metadata"):
+                try:
+                    row["metadata"] = json.loads(row["metadata"])
+                except Exception:
+                    pass
+            return row
+
+    def get_account_profiles(self, provider: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns list of configured account profiles."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if provider:
+                cursor.execute(
+                    "SELECT * FROM account_profiles WHERE provider = ? ORDER BY is_active DESC, account_name ASC",
+                    (provider.strip().lower(),)
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM account_profiles ORDER BY provider ASC, is_active DESC, account_name ASC"
+                )
+            rows = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        for r in rows:
+            r["is_active"] = bool(r.get("is_active"))
+            if r.get("metadata") and isinstance(r["metadata"], str):
+                try:
+                    r["metadata"] = json.loads(r["metadata"])
+                except Exception:
+                    pass
+        return rows
+
+    def get_active_account_profile(self, provider: str) -> Optional[Dict[str, Any]]:
+        """Returns the currently active account profile for the given provider."""
+        prov = (provider or "").strip().lower()
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM account_profiles WHERE provider = ? AND is_active = 1 LIMIT 1",
+                (prov,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                # Fallback to the first configured account for this provider
+                cursor.execute(
+                    "SELECT * FROM account_profiles WHERE provider = ? ORDER BY created_at ASC LIMIT 1",
+                    (prov,)
+                )
+                row = cursor.fetchone()
+            conn.close()
+
+        if row:
+            res = dict(row)
+            res["is_active"] = bool(res.get("is_active"))
+            if res.get("metadata") and isinstance(res["metadata"], str):
+                try:
+                    res["metadata"] = json.loads(res["metadata"])
+                except Exception:
+                    pass
+            return res
+        return None
+
+    def set_active_account_profile(self, provider: str, account_id: str) -> bool:
+        """Sets the designated account profile as active for the provider."""
+        prov = (provider or "").strip().lower()
+        acct_id = (account_id or "").strip()
+        now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE account_profiles SET is_active = 0 WHERE provider = ?", (prov,))
+            cursor.execute(
+                "UPDATE account_profiles SET is_active = 1, updated_at = ? WHERE provider = ? AND account_id = ?",
+                (now_utc, prov, acct_id)
+            )
+            updated = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+        return updated
+
+    def delete_account_profile(self, provider: str, account_id: str) -> bool:
+        """Deletes an account profile and auto-promotes remaining profile if deleted one was active."""
+        prov = (provider or "").strip().lower()
+        acct_id = (account_id or "").strip()
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT is_active FROM account_profiles WHERE provider = ? AND account_id = ?", (prov, acct_id))
+            target = cursor.fetchone()
+            if not target:
+                conn.close()
+                return False
+
+            was_active = bool(target["is_active"])
+            cursor.execute("DELETE FROM account_profiles WHERE provider = ? AND account_id = ?", (prov, acct_id))
+            deleted = cursor.rowcount > 0
+
+            if was_active:
+                cursor.execute(
+                    "SELECT id FROM account_profiles WHERE provider = ? ORDER BY created_at ASC LIMIT 1",
+                    (prov,)
+                )
+                nxt = cursor.fetchone()
+                if nxt:
+                    cursor.execute("UPDATE account_profiles SET is_active = 1 WHERE id = ?", (nxt["id"],))
+
+            conn.commit()
+            conn.close()
+        return deleted
 
 DatabaseEngine = UsageDatabase

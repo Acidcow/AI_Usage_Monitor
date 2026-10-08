@@ -39,6 +39,7 @@ window.App = {
 
     this.setupEventListeners();
     await this.loadUsageData();
+    await this.loadAccountProfiles();
     await this.loadHistoricalReport();
     await this.loadSettings();
     await this.loadCrossPlatformTags();
@@ -1570,10 +1571,14 @@ window.App = {
       startDate = d30.toISOString().substring(0, 10);
     }
 
+    const acctSelect = document.getElementById("report-filter-account");
+    const acct = acctSelect ? acctSelect.value.trim() : '';
+
     const params = new URLSearchParams({ group_by: group });
     if (startDate) params.set("start_date", startDate);
     if (endDate) params.set("end_date", endDate);
     if (prov) params.set("provider", prov);
+    if (acct) params.set("account_id", acct);
     if (dim) params.set("dimension", dim);
     if (team) params.set("team_name", team);
     if (user) params.set("user_name", user);
@@ -1664,9 +1669,13 @@ window.App = {
       startDate = d30.toISOString().substring(0, 10);
     }
 
+    const acctSelect = document.getElementById("report-filter-account");
+    const acct = acctSelect ? acctSelect.value.trim() : '';
+
     const params = new URLSearchParams({ group_by: group, format: 'csv' });
     if (startDate) params.set("start_date", startDate);
     if (prov) params.set("provider", prov);
+    if (acct) params.set("account_id", acct);
     if (dim) params.set("dimension", dim);
     if (team) params.set("team_name", team);
     if (user) params.set("user_name", user);
@@ -2058,6 +2067,246 @@ window.App = {
       }
     } catch (e) {
       console.warn("Error loading capacity analytics:", e);
+    }
+  },
+
+  // -------------------------------------------------------------
+  // Multi-Account Profiles & Multi-Tenant Management (AIUM-608)
+  // -------------------------------------------------------------
+  accountProfiles: [],
+  accountModalFilter: '',
+
+  async loadAccountProfiles() {
+    try {
+      const res = await fetch('/api/accounts');
+      if (!res.ok) return;
+      const data = await res.json();
+      this.accountProfiles = data.accounts || [];
+
+      // Update provider card account select dropdowns
+      const providers = ['claude', 'gemini', 'chatgpt', 'ollama', 'copilot'];
+      providers.forEach(p => {
+        const sel = document.getElementById(`hub-account-select-${p}`);
+        if (!sel) return;
+        const matching = this.accountProfiles.filter(a => a.provider === p);
+        if (matching.length === 0) {
+          sel.innerHTML = `<option value="">Default Profile</option>`;
+        } else {
+          sel.innerHTML = matching.map(a => `
+            <option value="${this.escapeHtml(a.account_id)}" ${a.is_active ? 'selected' : ''}>
+              ${this.escapeHtml(a.account_name || a.account_id)} ${a.is_active ? '★ (Active)' : ''}
+            </option>
+          `).join('');
+        }
+      });
+
+      // Update Reports Account filter dropdown
+      const repAcctSel = document.getElementById('report-filter-account');
+      if (repAcctSel) {
+        const curVal = repAcctSel.value;
+        let optHtml = '<option value="">All Accounts (Aggregate)</option>';
+        this.accountProfiles.forEach(a => {
+          optHtml += `<option value="${this.escapeHtml(a.account_id)}">${this.escapeHtml(a.provider.toUpperCase())}: ${this.escapeHtml(a.account_name || a.account_id)}</option>`;
+        });
+        repAcctSel.innerHTML = optHtml;
+        if (curVal) repAcctSel.value = curVal;
+      }
+
+      // Update multi-tenant count badge if present
+      const countBadge = document.getElementById('multi-tenant-count-badge');
+      if (countBadge) {
+        countBadge.innerText = `Total Profiles: ${this.accountProfiles.length}`;
+      }
+    } catch (e) {
+      console.warn("Failed to load account profiles:", e);
+    }
+  },
+
+  async switchActiveAccount(provider, accountId) {
+    if (!accountId) return;
+    try {
+      const res = await fetch('/api/accounts/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, account_id: accountId })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        console.log(`[Account] Switched active profile for ${provider} to ${accountId}`);
+        await this.loadAccountProfiles();
+        await this.loadUsageData();
+        await this.loadHistoricalReport();
+        if (document.getElementById('account-profile-modal')?.style.display === 'flex') {
+          this.renderAccountProfilesList();
+        }
+      } else {
+        alert(data.error || "Failed to switch active account");
+      }
+    } catch (e) {
+      console.error("Error switching active account:", e);
+      alert("Error switching active account");
+    }
+  },
+
+  openAccountModal(targetProvider = '') {
+    this.accountModalFilter = targetProvider || '';
+    const formProv = document.getElementById('acct-form-provider');
+    if (formProv && targetProvider) {
+      formProv.value = targetProvider;
+    }
+    this.filterAccountModalProvider(this.accountModalFilter);
+    const modal = document.getElementById('account-profile-modal');
+    if (modal) modal.style.display = 'flex';
+  },
+
+  closeAccountModal() {
+    const modal = document.getElementById('account-profile-modal');
+    if (modal) modal.style.display = 'none';
+  },
+
+  filterAccountModalProvider(provider) {
+    this.accountModalFilter = provider;
+    ['all', 'claude', 'gemini', 'chatgpt', 'ollama', 'copilot'].forEach(p => {
+      const btn = document.getElementById(`acct-tab-${p}`);
+      if (btn) {
+        const matches = (p === 'all' && !provider) || (p === provider);
+        btn.className = `btn btn-sm ${matches ? 'btn-primary' : 'btn-secondary'}`;
+      }
+    });
+    this.renderAccountProfilesList();
+  },
+
+  renderAccountProfilesList() {
+    const listEl = document.getElementById('acct-modal-profiles-list');
+    const countEl = document.getElementById('acct-modal-count-label');
+    if (!listEl) return;
+
+    let items = this.accountProfiles;
+    if (this.accountModalFilter) {
+      items = items.filter(a => a.provider === this.accountModalFilter);
+    }
+
+    if (countEl) {
+      countEl.innerText = `${items.length} ${this.accountModalFilter ? this.accountModalFilter.toUpperCase() : 'Configured'} Profile(s)`;
+    }
+
+    if (items.length === 0) {
+      listEl.innerHTML = `
+        <div style="padding: 16px; text-align: center; color: var(--text-dim); background: rgba(0,0,0,0.2); border-radius: var(--radius-sm); font-size: 0.82rem;">
+          No profiles registered yet ${this.accountModalFilter ? 'for ' + this.accountModalFilter : ''}. Use the form below to register your first profile.
+        </div>
+      `;
+      return;
+    }
+
+    const provIcons = {
+      claude: '🟠',
+      gemini: '💎',
+      chatgpt: '🟢',
+      ollama: '🦙',
+      copilot: '🔵'
+    };
+
+    listEl.innerHTML = items.map(a => `
+      <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid ${a.is_active ? 'rgba(99, 102, 241, 0.4)' : 'rgba(255,255,255,0.06)'}; border-radius: var(--radius-sm); padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.2rem;">${provIcons[a.provider] || '⚙️'}</span>
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <strong style="font-size: 0.86rem; color: #fff;">${this.escapeHtml(a.account_name || a.account_id)}</strong>
+              ${a.is_active ? '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.68rem; padding: 2px 6px;">Active Profile</span>' : '<span class="badge" style="background: rgba(100, 116, 139, 0.2); color: #94a3b8; font-size: 0.68rem; padding: 2px 6px;">Inactive</span>'}
+              <span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; font-size: 0.68rem; padding: 2px 6px;">${this.escapeHtml(a.plan_type || 'Pro')}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 3px; font-size: 0.74rem; color: var(--text-muted); font-family: var(--font-mono);">
+              <span>ID: ${this.escapeHtml(a.account_id)}</span>
+              ${a.has_credentials ? '<span style="color: #a5b4fc;">🔒 DPAPI Encrypted</span>' : '<span style="color: var(--text-dim);">No vaulted key</span>'}
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+          ${!a.is_active ? `
+            <button class="btn btn-secondary btn-sm" onclick="window.App.switchActiveAccount('${a.provider}', '${this.escapeHtml(a.account_id)}')" style="font-size: 0.72rem; padding: 4px 10px; border-color: rgba(99, 102, 241, 0.4); color: #818cf8;">
+              ✓ Set Active
+            </button>
+          ` : ''}
+          <button class="btn btn-secondary btn-sm" onclick="window.App.deleteAccountProfile('${a.provider}', '${this.escapeHtml(a.account_id)}')" style="font-size: 0.72rem; padding: 4px 8px; border-color: rgba(239, 68, 68, 0.3); color: #f87171;" title="Delete profile and purge vaulted credentials">
+            🗑
+          </button>
+        </div>
+      </div>
+    `).join('');
+  },
+
+  async submitAccountProfileForm() {
+    const provEl = document.getElementById('acct-form-provider');
+    const nameEl = document.getElementById('acct-form-name');
+    const idEl = document.getElementById('acct-form-id');
+    const planEl = document.getElementById('acct-form-plan');
+    const keyEl = document.getElementById('acct-form-key');
+    const activeEl = document.getElementById('acct-form-active');
+
+    const provider = provEl ? provEl.value.trim().toLowerCase() : 'claude';
+    const account_id = idEl ? idEl.value.trim() : '';
+    const account_name = nameEl ? nameEl.value.trim() : account_id;
+    const plan_type = planEl ? planEl.value.trim() : 'Pro';
+    const api_key = keyEl ? keyEl.value.trim() : '';
+    const is_active = activeEl ? activeEl.checked : true;
+
+    if (!account_id) {
+      alert("Please enter an Account ID, Email, or Org Identifier.");
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          account_id,
+          account_name,
+          plan_type,
+          api_key: api_key || undefined,
+          is_active
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (keyEl) keyEl.value = '';
+        if (nameEl) nameEl.value = '';
+        if (idEl) idEl.value = '';
+        await this.loadAccountProfiles();
+        this.renderAccountProfilesList();
+      } else {
+        alert(data.error || "Failed to register account profile");
+      }
+    } catch (e) {
+      console.error("Error submitting account profile:", e);
+      alert("Error saving account profile");
+    }
+  },
+
+  async deleteAccountProfile(provider, accountId) {
+    if (!confirm(`Are you sure you want to delete profile '${accountId}' for ${provider}? Stored DPAPI credentials will be removed.`)) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/accounts/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, account_id: accountId })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        await this.loadAccountProfiles();
+        this.renderAccountProfilesList();
+      } else {
+        alert(data.error || "Failed to delete account profile");
+      }
+    } catch (e) {
+      console.error("Error deleting account profile:", e);
+      alert("Error deleting account profile");
     }
   },
 

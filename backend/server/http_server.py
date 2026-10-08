@@ -135,6 +135,13 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         if path == "/api/settings":
             return self._send_json(200, srv.database.get_all_settings())
 
+        if path == "/api/accounts":
+            prov = query.get("provider", [None])[0]
+            accounts = srv.database.get_account_profiles(provider=prov)
+            for a in accounts:
+                a["has_credentials"] = srv.vault.get_credential(a["provider"], a["account_id"]) is not None
+            return self._send_json(200, {"success": True, "accounts": accounts})
+
         if path == "/api/tags":
             return self._send_json(200, srv.database.get_cross_platform_tags())
 
@@ -323,6 +330,76 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             elif api_key:
                 srv.vault.set_credential("chatgpt", "default", api_key)
             return self._send_json(200, {"success": True, "message": "ChatGPT / OpenAI configuration saved"})
+
+        # Multi-Account Profile Management (AIUM-608)
+        if path == "/api/accounts":
+            prov = body.get("provider", "").lower().strip()
+            acct_id = body.get("account_id", "").strip()
+            acct_name = body.get("account_name", "").strip() or acct_id
+            email = body.get("email")
+            plan_type = body.get("plan_type", "Pro")
+            is_active = body.get("is_active")
+            metadata = body.get("metadata")
+            api_key = body.get("api_key")
+
+            if not prov or not acct_id:
+                return self._send_json(400, {"error": "Missing required fields: 'provider' and 'account_id'"})
+
+            profile = srv.database.register_account_profile(
+                provider=prov,
+                account_name=acct_name,
+                account_id=acct_id,
+                email=email,
+                plan_type=plan_type,
+                is_active=is_active,
+                metadata=metadata
+            )
+
+            if api_key:
+                srv.vault.set_credential(prov, acct_id, api_key)
+                profile["has_credentials"] = True
+                if profile.get("is_active"):
+                    prov_obj = srv.providers.get(prov)
+                    if prov_obj and hasattr(prov_obj, "configure_api_key"):
+                        try:
+                            prov_obj.configure_api_key(api_key)
+                        except Exception:
+                            pass
+
+            return self._send_json(200, {"success": True, "account": profile})
+
+        if path == "/api/accounts/active":
+            prov = body.get("provider", "").lower().strip()
+            acct_id = body.get("account_id", "").strip()
+            if not prov or not acct_id:
+                return self._send_json(400, {"error": "Missing 'provider' or 'account_id'"})
+
+            success = srv.database.set_active_account_profile(prov, acct_id)
+            if success:
+                cred = srv.vault.get_credential(prov, acct_id)
+                prov_obj = srv.providers.get(prov)
+                if cred and prov_obj and hasattr(prov_obj, "configure_api_key"):
+                    try:
+                        prov_obj.configure_api_key(cred)
+                    except Exception:
+                        pass
+                return self._send_json(200, {"success": True, "message": f"Active profile set to {acct_id}"})
+            return self._send_json(404, {"error": f"Account '{acct_id}' not found for provider '{prov}'"})
+
+        if path == "/api/accounts/delete":
+            prov = body.get("provider", "").lower().strip()
+            acct_id = body.get("account_id", "").strip()
+            if not prov or not acct_id:
+                return self._send_json(400, {"error": "Missing 'provider' or 'account_id'"})
+
+            deleted = srv.database.delete_account_profile(prov, acct_id)
+            if deleted:
+                try:
+                    srv.vault.delete_credential(prov, acct_id)
+                except Exception:
+                    pass
+                return self._send_json(200, {"success": True, "message": f"Account '{acct_id}' deleted"})
+            return self._send_json(404, {"error": f"Account '{acct_id}' not found for provider '{prov}'"})
 
         if path == "/api/providers/claude/quota":
             claude_prov = srv.providers.get("claude")
