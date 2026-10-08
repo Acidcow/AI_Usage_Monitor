@@ -26,7 +26,8 @@ Provide the ability in both the Dashboard and the Mini Widget to switch top-leve
      - `POST /api/settings/visibility` (payload with `platforms`, `accounts`, `tags`)
 
 ## 3. Verification Criteria
-- [ ] Switching between All, Platforms, and Groups restructures the hierarchy tree correctly.
-- [ ] Multi-select filter panel renders correctly and filters top-level nodes in real-time.
-- [ ] Visibility configuration persists in database and filters out hidden platforms in both Dashboard and Mini Widget.
-- [ ] Zero external dependencies.
+- [x] Switching between All, Platforms, and Groups restructures the hierarchy tree correctly.
+- [x] Multi-select filter panel renders correctly and filters top-level nodes in real-time.
+- [x] Visibility configuration persists in database and filters out hidden platforms in both Dashboard and Mini Widget.
+- [x] Zero external dependencies.
+

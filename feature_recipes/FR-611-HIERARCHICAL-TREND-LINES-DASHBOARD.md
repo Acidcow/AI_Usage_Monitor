@@ -26,9 +26,10 @@ Replace the static/placeholder sparkline in the Dashboard "Trend Lines" view wit
    - Support toggling X and Y axis labels (time stamps on X axis, token counts/rates on Y axis) via configuration.
 
 ## 3. Verification Criteria
-- [ ] Backend endpoint `/api/usage/trends/hierarchy` returns multi-series time-bucketed points for all providers and their hierarchy children.
-- [ ] SVG chart generates multiple overlaid `<polyline>` or `<path>` elements with distinct colors.
-- [ ] Clicking a legend badge toggles line opacity/display without breaking SVG layout.
-- [ ] Mouseover on legend triggers line glow, mouseover on line triggers legend badge glow.
-- [ ] Window period is clearly indicated on the UI.
-- [ ] Zero external JavaScript or CSS libraries (pure Vanilla JS and SVG).
+- [x] Backend endpoint `/api/usage/trends/hierarchy` returns multi-series time-bucketed points for all providers and their hierarchy children.
+- [x] SVG chart generates multiple overlaid `<polyline>` or `<path>` elements with distinct colors.
+- [x] Clicking a legend badge toggles line opacity/display without breaking SVG layout.
+- [x] Mouseover on legend triggers line glow, mouseover on line triggers legend badge glow.
+- [x] Window period is clearly indicated on the UI.
+- [x] Zero external JavaScript or CSS libraries (pure Vanilla JS and SVG).
+

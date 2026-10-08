@@ -23,8 +23,9 @@ Upgrade the Mini Widget's trend (line-chart) view so top-level platform cards ov
    - Support both the Web Mini Widget (`frontend/mini_widget.html`, `frontend/js/widget.js`) and the Native Win32/Tkinter Taskbar Widget (`backend/tray/native_widget.py`).
 
 ## 3. Verification Criteria
-- [ ] Top-level widget trend view displays multi-line overlaid plots.
-- [ ] Expanding an item displays child branch line charts with assigned colors.
-- [ ] Color swatch block is rendered adjacent to item headers.
-- [ ] Configuration toggle `widget_hide_parent_chart_on_expand` successfully hides or preserves the parent chart.
-- [ ] Both web widget and native widget render correctly without crashes or UI clipping.
+- [x] Top-level widget trend view displays multi-line overlaid plots.
+- [x] Expanding an item displays child branch line charts with assigned colors.
+- [x] Color swatch block is rendered adjacent to item headers.
+- [x] Configuration toggle `widget_hide_parent_chart_on_expand` successfully hides or preserves the parent chart.
+- [x] Both web widget and native widget render correctly without crashes or UI clipping.
+

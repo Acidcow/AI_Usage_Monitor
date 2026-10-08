@@ -8,6 +8,12 @@ window.App = {
   currentQuoteIdx: 0,
   currentScope: 'individual',
   dashboardViewMode: 'balances',
+  trendWindow: '24h',
+  hierarchyGroupMode: 'all', // 'all' | 'platforms' | 'groups' | 'filtered'
+  filteredItemIds: new Set(['claude', 'gemini', 'chatgpt', 'ollama', 'copilot', 'group-production', 'group-development', 'group-research']),
+  hiddenChartSeries: {},
+  showAxisLabels: true,
+  cachedHierarchicalTrends: {},
   expandedHierarchy: {},
   lastCompData: null,
   lastProvidersData: null,
@@ -254,285 +260,466 @@ window.App = {
       copilot: "M365 Copilot"
     };
 
+    const provColors = {
+      claude: "#f59e0b",
+      gemini: "#38bdf8",
+      chatgpt: "#10b981",
+      ollama: "#a855f7",
+      copilot: "#06b6d4"
+    };
+
+    const hiddenPlatforms = (this.appSettings?.estate_visibility?.hidden_platforms || []).map(p => p.toLowerCase());
+    
+    const predefinedGroups = [
+      { id: "group-production", name: "Production AI (Claude + Gemini)", tag: "Production", icon: "🚀", providers: ["claude", "gemini"] },
+      { id: "group-development", name: "Development & Testing (Ollama + Gemini)", tag: "Development", icon: "🧪", providers: ["ollama", "gemini"] },
+      { id: "group-research", name: "Research & Labs (Claude + Ollama)", tag: "Research", icon: "🔬", providers: ["claude", "ollama"] }
+    ];
+
+    let itemsToRender = [];
+    if (this.hierarchyGroupMode === "platforms") {
+      itemsToRender = allKeys.map(k => ({ type: "platform", key: k }));
+    } else if (this.hierarchyGroupMode === "groups") {
+      itemsToRender = predefinedGroups.map(g => ({ type: "group", key: g.id, group: g }));
+    } else if (this.hierarchyGroupMode === "filtered") {
+      allKeys.forEach(k => {
+        if (this.filteredItemIds.has(k)) itemsToRender.push({ type: "platform", key: k });
+      });
+      predefinedGroups.forEach(g => {
+        if (this.filteredItemIds.has(g.id)) itemsToRender.push({ type: "group", key: g.id, group: g });
+      });
+    } else {
+      itemsToRender = allKeys.map(k => ({ type: "platform", key: k }))
+        .concat(predefinedGroups.map(g => ({ type: "group", key: g.id, group: g })));
+    }
+
     const provMap = comp.providers || {};
     let html = "";
 
-    allKeys.forEach(key => {
-      const item = provMap[key] || {
-        tokens_today: 0,
-        share_percentage: 0,
-        session_balance_remaining_pct: 100,
-        weekly_balance_remaining_pct: 100,
-        cost_today_usd: 0,
-        daily_allowance: 500000,
-        weekly_allowance: 3500000
-      };
-      const provInfo = providers[key] || {};
-      const isOnline = provInfo.status === "ACTIVE";
-      const dotClass = isOnline ? "dot-green" : (provInfo.status === "ERROR" ? "dot-red" : "dot-gray");
-      const statusText = isOnline ? "Active" : (provInfo.status || "Ready");
+    itemsToRender.forEach(itemEntry => {
+      if (itemEntry.type === "platform") {
+        const key = itemEntry.key;
+        if (this.hierarchyGroupMode !== "filtered" && hiddenPlatforms.includes(key)) {
+          return;
+        }
+        const item = provMap[key] || {
+          tokens_today: 0,
+          share_percentage: 0,
+          session_balance_remaining_pct: 100,
+          weekly_balance_remaining_pct: 100,
+          cost_today_usd: 0,
+          daily_allowance: 500000,
+          weekly_allowance: 3500000
+        };
+        const provInfo = providers[key] || {};
+        const isOnline = provInfo.status === "ACTIVE";
+        const dotClass = isOnline ? "dot-green" : (provInfo.status === "ERROR" ? "dot-red" : "dot-gray");
+        const statusText = isOnline ? "Active" : (provInfo.status || "Ready");
 
-      const sessionPct = item.session_balance_remaining_pct ?? 100;
-      const weeklyPct = item.weekly_balance_remaining_pct ?? 100;
-      const costDisplay = key === "ollama" ? `<span style="color: #34d399; font-weight: 700;">$0.000 (Free)</span>` : `$${Number(item.cost_today_usd || 0).toFixed(3)}`;
+        const sessionPct = item.session_balance_remaining_pct ?? 100;
+        const weeklyPct = item.weekly_balance_remaining_pct ?? 100;
+        const costDisplay = key === "ollama" ? `<span style="color: #34d399; font-weight: 700;">$0.000 (Free)</span>` : `$${Number(item.cost_today_usd || 0).toFixed(3)}`;
 
-      const isExpanded = !!this.expandedHierarchy[key];
-      const hasHierarchy = !!item.hierarchy || (key === 'ollama');
+        const isExpanded = !!this.expandedHierarchy[key];
+        const hasHierarchy = !!item.hierarchy || (key === 'ollama') || (key === 'gemini');
 
-      const sourceDesc = item.source_description || "Standard API";
-      const isCalibrated = !!item.is_calibrated;
-      const sourceBadge = isCalibrated
-        ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.65rem;" title="Calibrated with web quota from claude.ai/settings/usage">🟡 Calibrated Web Quota</span>`
-        : `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.65rem;" title="${this.escapeHtml(sourceDesc)}">🟢 Live Real-World API</span>`;
+        const sourceDesc = item.source_description || "Standard API";
+        const isCalibrated = !!item.is_calibrated;
+        const sourceBadge = isCalibrated
+          ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.65rem;" title="Calibrated with web quota from claude.ai/settings/usage">🟡 Calibrated Web Quota</span>`
+          : `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.65rem;" title="${this.escapeHtml(sourceDesc)}">🟢 Live Real-World API</span>`;
 
-      const syncAge = item.last_sync_age_seconds !== undefined ? `${item.last_sync_age_seconds}s ago` : 'just now';
+        const syncAge = item.last_sync_age_seconds !== undefined ? `${item.last_sync_age_seconds}s ago` : 'just now';
+        const childSeries = this._getProviderChildSeries(key, item);
 
-      let sessionCellContent = "";
-      let weeklyCellContent = "";
+        let sessionCellContent = "";
+        let weeklyCellContent = "";
 
-      if (this.dashboardViewMode === 'trends') {
-        const strokeColor = key === 'claude' ? '#f59e0b' : (key === 'gemini' ? '#3b82f6' : (key === 'ollama' ? '#8b5cf6' : '#10b981'));
-        const sparklinePts = [
-          Math.max(5, Math.round(item.tokens_today * 0.12)),
-          Math.max(8, Math.round(item.tokens_today * 0.28)),
-          Math.max(6, Math.round(item.tokens_today * 0.18)),
-          Math.max(15, Math.round(item.tokens_today * 0.54)),
-          Math.max(12, Math.round(item.tokens_today * 0.42)),
-          Math.max(22, Math.round(item.tokens_today * 0.82)),
-          Math.max(18, Math.round(item.tokens_today * 0.68)),
-          Math.max(25, Math.round(item.tokens_today * 0.95))
-        ];
-        const sparkSvg = this.generateInlineSparkline(sparklinePts, strokeColor);
-        sessionCellContent = `
-          <div style="display: flex; align-items: center; gap: 8px;">
-            ${sparkSvg}
-            <span style="font-family: var(--font-mono); font-size: 0.75rem; color: #38bdf8; font-weight: 700;">
-              ${Number(item.tokens_today > 0 ? Math.round(item.tokens_today / 24) : 0).toLocaleString()} t/h
-            </span>
-          </div>
-        `;
-        weeklyCellContent = `
-          <div style="display: flex; align-items: center; justify-content: space-between;">
-            <span style="font-size: 0.74rem; color: var(--text-muted); font-family: var(--font-mono);">Allowance Left:</span>
-            <span style="font-family: var(--font-mono); font-size: 0.8rem; color: #34d399; font-weight: 700;">${weeklyPct}%</span>
-          </div>
-        `;
-      } else {
-        sessionCellContent = `
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
-              <div class="progress-bar-fill" style="width: ${Math.max(4, sessionPct)}%; background: ${sessionPct < 20 ? 'var(--accent-rose)' : 'linear-gradient(90deg, #10b981, #06b6d4)'};"></div>
+        if (this.dashboardViewMode === 'trends') {
+          const multiSparkSvg = this.generateMultiInlineSparkline(childSeries, 120, 26);
+          sessionCellContent = `
+            <div style="display: flex; align-items: center; gap: 8px;">
+              ${multiSparkSvg}
+              <span style="font-family: var(--font-mono); font-size: 0.75rem; color: #38bdf8; font-weight: 700;">
+                ${Number(item.tokens_today > 0 ? Math.round(item.tokens_today / 24) : 0).toLocaleString()} t/h
+              </span>
             </div>
-            <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${sessionPct}%</span>
-          </div>
-        `;
-        weeklyCellContent = `
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
-              <div class="progress-bar-fill" style="width: ${Math.max(4, weeklyPct)}%; background: ${weeklyPct < 20 ? 'var(--accent-amber)' : 'linear-gradient(90deg, #8b5cf6, #3b82f6)'};"></div>
+          `;
+          weeklyCellContent = `
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 0.74rem; color: var(--text-muted); font-family: var(--font-mono);">Allowance Left:</span>
+              <span style="font-family: var(--font-mono); font-size: 0.8rem; color: #34d399; font-weight: 700;">${weeklyPct}%</span>
             </div>
-            <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${weeklyPct}%</span>
-          </div>
-        `;
-      }
-
-      html += `
-        <tr>
-          <td>
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span class="dot ${dotClass}"></span>
-                <strong style="color: #fff; font-size: 0.9rem;">${displayNames[key]}</strong>
+          `;
+        } else {
+          sessionCellContent = `
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
+                <div class="progress-bar-fill" style="width: ${Math.max(4, sessionPct)}%; background: ${sessionPct < 20 ? 'var(--accent-rose)' : 'linear-gradient(90deg, #10b981, #06b6d4)'};"></div>
               </div>
-              ${hasHierarchy ? `
-                <button class="btn btn-sm" onclick="window.App.toggleHierarchy('${key}')" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-size: 0.68rem; padding: 2px 7px; border-radius: 4px; cursor: pointer;" title="Toggle multi-level hierarchy drill-down">
-                  ${isExpanded ? '▲ Hide' : '▼ Drill-Down'}
-                </button>
-              ` : ''}
+              <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${sessionPct}%</span>
             </div>
-          </td>
-          <td>
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <span class="badge badge-${key}" style="font-size: 0.7rem;">${provInfo.plan_type || 'Active'}</span>
-              <span style="font-size: 0.72rem; color: var(--text-dim);">${statusText}</span>
+          `;
+          weeklyCellContent = `
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
+                <div class="progress-bar-fill" style="width: ${Math.max(4, weeklyPct)}%; background: ${weeklyPct < 20 ? 'var(--accent-amber)' : 'linear-gradient(90deg, #8b5cf6, #3b82f6)'};"></div>
+              </div>
+              <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${weeklyPct}%</span>
             </div>
-            <div style="font-size: 0.68rem; color: #94a3b8; font-family: var(--font-mono); margin-top: 3px; display: flex; align-items: center; gap: 4px;">
-              <span>🕒 ${syncAge}</span> • ${sourceBadge}
-            </div>
-          </td>
-          <td style="font-family: var(--font-mono); font-weight: 700; color: var(--text-main);">
-            ${Number(item.tokens_today).toLocaleString()}
-          </td>
-          <td style="font-family: var(--font-mono); color: var(--accent-cyan); font-weight: 600;">
-            ${item.share_percentage}%
-          </td>
-          <td>
-            ${sessionCellContent}
-          </td>
-          <td>
-            ${weeklyCellContent}
-          </td>
-          <td style="font-family: var(--font-mono); font-size: 0.82rem;">
-            ${costDisplay}
-          </td>
-        </tr>
-      `;
-
-      if (hasHierarchy && isExpanded) {
-        const h = item.hierarchy || {};
-        const ind = h.individual || {};
-        const team = h.team || {};
-        const dept = h.department || {};
-        const ent = h.enterprise || {};
+          `;
+        }
 
         html += `
-          <tr class="hierarchy-detail-row" style="background: rgba(15, 23, 42, 0.75); border-left: 3px solid #38bdf8;">
-            <td colspan="7" style="padding: 14px 18px;">
-              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
-                <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: #94a3b8;">
-                  Hierarchical Telemetry Drill-Down (${displayNames[key]}):
-                </span>
-                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">
-                  ${key === 'ollama' ? 'LOCAL HARDWARE INFERENCE' : ('Active View: ' + (comp.active_scope || 'individual').toUpperCase())}
-                </span>
+          <tr>
+            <td>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="dot ${dotClass}"></span>
+                  <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: ${provColors[key] || '#38bdf8'}; flex-shrink: 0;" title="${displayNames[key]} Color Swatch"></span>
+                  <strong style="color: #fff; font-size: 0.9rem;">${displayNames[key]}</strong>
+                </div>
+                ${hasHierarchy ? `
+                  <button class="btn btn-sm" onclick="window.App.toggleHierarchy('${key}')" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-size: 0.68rem; padding: 2px 7px; border-radius: 4px; cursor: pointer;" title="Toggle multi-level hierarchy drill-down">
+                    ${isExpanded ? '▲ Hide' : '▼ Drill-Down'}
+                  </button>
+                ` : ''}
               </div>
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                ${key === 'ollama' ? `
-                  <!-- Ollama Model-Level Telemetry Cards -->
-                  <div style="grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px;">
-                    ${(item.models && item.models.length > 0 ? item.models : [
-                      { name: "llama3:latest", parameter_size: "8B", status: "READY (DISK)", tokens_today: 24500, total_tokens: 82000, size: "4.7 GB" },
-                      { name: "deepseek-r1:14b", parameter_size: "14B", status: "RUNNING (VRAM)", tokens_today: 68200, total_tokens: 145000, size: "9.0 GB", vram_size_gb: 8.5 },
-                      { name: "mistral:latest", parameter_size: "7B", status: "READY (DISK)", tokens_today: 12100, total_tokens: 49000, size: "4.1 GB" }
-                    ]).map(m => `
-                      <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                          <strong style="color: #c084fc; font-size: 0.85rem;">🦙 ${this.escapeHtml(m.name || m.model)}</strong>
-                          <span class="badge" style="font-size: 0.65rem; background: ${m.status && m.status.includes('RUNNING') ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)'}; color: ${m.status && m.status.includes('RUNNING') ? '#34d399' : '#94a3b8'};">
-                            ${this.escapeHtml(m.status || 'READY')}
-                          </span>
-                        </div>
-                        <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 6px;">
-                          Params: <strong style="color: #e2e8f0;">${m.parameter_size || 'Unknown'}</strong> • Disk: ${m.size || 'N/A'} ${m.vram_size_gb ? ' • VRAM: ' + m.vram_size_gb + ' GB' : ''}
-                        </div>
-                        <div style="font-size: 0.78rem; color: #e2e8f0; margin-bottom: 2px;">
-                          <strong>Today:</strong> <span style="color: var(--accent-cyan); font-weight: 700; font-family: var(--font-mono);">${Number(m.tokens_today || 0).toLocaleString()} tok</span>
-                        </div>
-                        <div style="font-size: 0.74rem; color: var(--text-muted);">
-                          All-time: <span style="font-family: var(--font-mono);">${Number(m.total_tokens || 0).toLocaleString()} tok</span>
-                        </div>
-                      </div>
-                    `).join("")}
-                  </div>
-                ` : (key === 'gemini' && h.tokens && h.tokens.length > 0 ? `
-                  <!-- Gemini Account Umbrella (acidcow@gmail.com) -->
-                  <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                      <strong style="color: #60a5fa; font-size: 0.82rem;">🌐 Google Account Umbrella</strong>
-                      <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'acidcow@gmail.com'}</span>
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Account Session:</strong> <span style="color: #60a5fa; font-weight: 700;">${ind.session_remaining_pct}% remaining</span>
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Account Weekly:</strong> <span style="color: #60a5fa; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span>
-                    </div>
-                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                      Includes ${h.tokens.length} Child Tokens
-                    </div>
-                  </div>
-
-                  <!-- Gemini Child Named Tokens -->
-                  ${h.tokens.map(t => `
-                    <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px 12px;">
-                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <strong style="color: #38bdf8; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(t.name)}">🔑 ${this.escapeHtml(t.name)}</strong>
-                      </div>
-                      <div style="font-size: 0.68rem; color: var(--text-dim); margin-bottom: 6px;">${this.escapeHtml(t.masked_key)} • ${this.escapeHtml(t.description || 'API Token')}</div>
-                      <div style="font-size: 0.75rem; color: #e2e8f0; margin-bottom: 2px;">
-                        <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${t.session_balance_remaining_pct}% rem</span>
-                      </div>
-                      <div style="font-size: 0.75rem; color: #e2e8f0; margin-bottom: 4px;">
-                        <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${t.weekly_balance_remaining_pct}% rem</span>
-                      </div>
-                      <div style="font-size: 0.69rem; color: var(--accent-emerald);">
-                        Today: ${Number(t.tokens_today || 0).toLocaleString()} tokens
-                      </div>
-                    </div>
-                  `).join("")}
-                ` : `
-                  <!-- 1. Individual Member (You) -->
-                  <div style="background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 10px 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                      <strong style="color: #38bdf8; font-size: 0.82rem;">👤 Individual Member (You)</strong>
-                      <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'James Eckhardt'}</span>
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.session_remaining_pct}% remaining</span> (${ind.session_used_pct}% used)
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span> (${ind.weekly_used_pct}% used)
-                    </div>
-                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                      Resets: ${ind.weekly_reset_str || 'Mon 3:00 AM'}
-                    </div>
-                  </div>
-
-                  <!-- 2. Team Workspace Pool -->
-                  <div style="background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px; padding: 10px 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                      <strong style="color: #c084fc; font-size: 0.82rem;">👥 Team Workspace Pool</strong>
-                      <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Synthesis2'}</span>
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Team Session:</strong> <span style="color: #c084fc; font-weight: 700;">${team.session_remaining_pct}% remaining</span> (${team.session_used_pct}% used)
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Team Weekly:</strong> <span style="color: #c084fc; font-weight: 700;">${team.weekly_remaining_pct}% remaining</span> (${team.weekly_used_pct}% used)
-                    </div>
-                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                      Resets: ${team.weekly_reset_str || 'Mon 3:00 AM'}
-                    </div>
-                  </div>
-
-                  <!-- 3. Department Division -->
-                  <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                      <strong style="color: #34d399; font-size: 0.82rem;">🏢 Department / Division</strong>
-                      <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Division:</strong> ${dept.dept_name || 'Technology & AI'}
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Monthly Volume:</strong> ${Number(dept.monthly_tokens || 0).toLocaleString()} tok
-                    </div>
-                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                      Dept Budget: $${Number(dept.budget_limit_usd || 1500).toFixed(2)}
-                    </div>
-                  </div>
-
-                  <!-- 4. Enterprise Organization -->
-                  <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 10px 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                      <strong style="color: #fbbf24; font-size: 0.82rem;">🌐 Organization / Enterprise</strong>
-                      <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Org Name:</strong> ${ent.org_name || 'Enterprise Workspace'}
-                    </div>
-                    <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                      <strong>Pool Sync:</strong> <span style="color: #34d399; font-weight: 600;">Active & Synced</span>
-                    </div>
-                    <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                      Centralized Token Telemetry
-                    </div>
-                  </div>
-                `)}
+            </td>
+            <td>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="badge badge-${key}" style="font-size: 0.7rem;">${provInfo.plan_type || 'Active'}</span>
+                <span style="font-size: 0.72rem; color: var(--text-dim);">${statusText}</span>
               </div>
+              <div style="font-size: 0.68rem; color: #94a3b8; font-family: var(--font-mono); margin-top: 3px; display: flex; align-items: center; gap: 4px;">
+                <span>🕒 ${syncAge}</span> • ${sourceBadge}
+              </div>
+            </td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: var(--text-main);">
+              ${Number(item.tokens_today).toLocaleString()}
+            </td>
+            <td style="font-family: var(--font-mono); color: var(--accent-cyan); font-weight: 600;">
+              ${item.share_percentage}%
+            </td>
+            <td>
+              ${sessionCellContent}
+            </td>
+            <td>
+              ${weeklyCellContent}
+            </td>
+            <td style="font-family: var(--font-mono); font-size: 0.82rem;">
+              ${costDisplay}
             </td>
           </tr>
         `;
+
+        if (hasHierarchy && isExpanded) {
+          const h = item.hierarchy || {};
+          const ind = h.individual || {};
+          const team = h.team || {};
+          const dept = h.department || {};
+          const ent = h.enterprise || {};
+
+          html += `
+            <tr class="hierarchy-detail-row" style="background: rgba(15, 23, 42, 0.75); border-left: 3px solid #38bdf8;">
+              <td colspan="7" style="padding: 14px 18px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: #94a3b8;">
+                      Hierarchical Telemetry Drill-Down (${displayNames[key]}):
+                    </span>
+                    <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">
+                      ${key === 'ollama' ? 'LOCAL HARDWARE INFERENCE' : ('Active View: ' + (comp.active_scope || 'individual').toUpperCase())}
+                    </span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #94a3b8; font-family: var(--font-mono);">
+                    <span>Window: <strong style="color: #38bdf8;">${this.trendWindow.toUpperCase()}</strong></span>
+                  </div>
+                </div>
+
+                <!-- Composite Multi-Series Overlaid Trend Line Chart Container -->
+                <div id="trend-chart-box-${key}" style="margin-bottom: 14px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px;">
+                  <div id="trend-chart-svg-${key}" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 0.75rem;">
+                    Generating overlaid composite trend chart...
+                  </div>
+                </div>
+
+                <!-- Child Branch Cards with Color Swatches & Telemetry -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px;">
+                  ${key === 'ollama' ? `
+                    ${(item.models && item.models.length > 0 ? item.models : [
+                      { name: "llama3:latest", parameter_size: "8B", status: "READY (DISK)", tokens_today: 24500, total_tokens: 82000, size: "4.7 GB", color: "#c084fc" },
+                      { name: "deepseek-r1:14b", parameter_size: "14B", status: "RUNNING (VRAM)", tokens_today: 68200, total_tokens: 145000, size: "9.0 GB", vram_size_gb: 8.5, color: "#34d399" },
+                      { name: "mistral:latest", parameter_size: "7B", status: "READY (DISK)", tokens_today: 12100, total_tokens: 49000, size: "4.1 GB", color: "#38bdf8" }
+                    ]).map((m, mIdx) => {
+                      const mCol = m.color || ["#c084fc", "#34d399", "#38bdf8", "#f59e0b"][mIdx % 4];
+                      const mSeed = m.tokens_today || 15000;
+                      const mPts = [0.2, 0.35, 0.3, 0.55, 0.45, 0.8, 0.7, 0.95].map(f => Math.round(mSeed * f));
+                      const spk = this.generateInlineSparkline(mPts, mCol);
+                      return `
+                        <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
+                          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="display: flex; align-items: center; gap: 5px;">
+                              <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: ${mCol}; flex-shrink: 0;"></span>
+                              <strong style="color: #c084fc; font-size: 0.85rem;">🦙 ${this.escapeHtml(m.name || m.model)}</strong>
+                            </span>
+                            <span class="badge" style="font-size: 0.65rem; background: ${m.status && m.status.includes('RUNNING') ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)'}; color: ${m.status && m.status.includes('RUNNING') ? '#34d399' : '#94a3b8'};">
+                              ${this.escapeHtml(m.status || 'READY')}
+                            </span>
+                          </div>
+                          <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 6px;">
+                            Params: <strong style="color: #e2e8f0;">${m.parameter_size || 'Unknown'}</strong> • Disk: ${m.size || 'N/A'} ${m.vram_size_gb ? ' • VRAM: ' + m.vram_size_gb + ' GB' : ''}
+                          </div>
+                          <div style="margin-bottom: 6px;">${spk}</div>
+                          <div style="font-size: 0.78rem; color: #e2e8f0; margin-bottom: 2px;">
+                            <strong>Today:</strong> <span style="color: var(--accent-cyan); font-weight: 700; font-family: var(--font-mono);">${Number(m.tokens_today || 0).toLocaleString()} tok</span>
+                          </div>
+                          <div style="font-size: 0.74rem; color: var(--text-muted);">
+                            All-time: <span style="font-family: var(--font-mono);">${Number(m.total_tokens || 0).toLocaleString()} tok</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  ` : (key === 'gemini' && h.tokens && h.tokens.length > 0 ? `
+                    <!-- Gemini Account Umbrella -->
+                    <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="display: flex; align-items: center; gap: 5px;">
+                          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #60a5fa; flex-shrink: 0;"></span>
+                          <strong style="color: #60a5fa; font-size: 0.82rem;">🌐 Google Account Umbrella</strong>
+                        </span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'acidcow@gmail.com'}</span>
+                      </div>
+                      <div style="margin-bottom: 6px;">
+                        ${this.generateInlineSparkline([0.2, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#60a5fa')}
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Account Session:</strong> <span style="color: #60a5fa; font-weight: 700;">${ind.session_remaining_pct}% remaining</span>
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Account Weekly:</strong> <span style="color: #60a5fa; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span>
+                      </div>
+                      <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                        Includes ${h.tokens.length} Child Tokens
+                      </div>
+                    </div>
+
+                    <!-- Gemini Child Named Tokens -->
+                    ${h.tokens.map((t, tIdx) => {
+                      const tCol = ["#34d399", "#f472b6", "#fbbf24", "#38bdf8"][tIdx % 4];
+                      const tSeed = t.tokens_today || 1200;
+                      const tPts = [0.1, 0.25, 0.2, 0.4, 0.35, 0.6, 0.5, 0.8].map(f => Math.round(tSeed * f));
+                      return `
+                        <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px 12px;">
+                          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="display: flex; align-items: center; gap: 5px;">
+                              <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: ${tCol}; flex-shrink: 0;"></span>
+                              <strong style="color: #38bdf8; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(t.name)}">🔑 ${this.escapeHtml(t.name)}</strong>
+                            </span>
+                          </div>
+                          <div style="font-size: 0.68rem; color: var(--text-dim); margin-bottom: 6px;">${this.escapeHtml(t.masked_key)} • ${this.escapeHtml(t.description || 'API Token')}</div>
+                          <div style="margin-bottom: 6px;">${this.generateInlineSparkline(tPts, tCol)}</div>
+                          <div style="font-size: 0.75rem; color: #e2e8f0; margin-bottom: 2px;">
+                            <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${t.session_balance_remaining_pct}% rem</span>
+                          </div>
+                          <div style="font-size: 0.75rem; color: #e2e8f0; margin-bottom: 4px;">
+                            <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${t.weekly_balance_remaining_pct}% rem</span>
+                          </div>
+                          <div style="font-size: 0.69rem; color: var(--accent-emerald);">
+                            Today: ${Number(t.tokens_today || 0).toLocaleString()} tokens
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  ` : `
+                    <!-- 1. Individual Member (You) -->
+                    <div style="background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 10px 12px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="display: flex; align-items: center; gap: 5px;">
+                          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #38bdf8; flex-shrink: 0;"></span>
+                          <strong style="color: #38bdf8; font-size: 0.82rem;">👤 Individual Member (You)</strong>
+                        </span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'James Eckhardt'}</span>
+                      </div>
+                      <div style="margin-bottom: 6px;">
+                        ${this.generateInlineSparkline([0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#38bdf8')}
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.session_remaining_pct}% remaining</span> (${ind.session_used_pct}% used)
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span> (${ind.weekly_used_pct}% used)
+                      </div>
+                      <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                        Resets: ${ind.weekly_reset_str || 'Mon 3:00 AM'}
+                      </div>
+                    </div>
+
+                    <!-- 2. Team Workspace Pool -->
+                    <div style="background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px; padding: 10px 12px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="display: flex; align-items: center; gap: 5px;">
+                          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #c084fc; flex-shrink: 0;"></span>
+                          <strong style="color: #c084fc; font-size: 0.82rem;">👥 Team Workspace Pool</strong>
+                        </span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Synthesis2'}</span>
+                      </div>
+                      <div style="margin-bottom: 6px;">
+                        ${this.generateInlineSparkline([0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#c084fc')}
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Team Session:</strong> <span style="color: #c084fc; font-weight: 700;">${team.session_remaining_pct}% remaining</span> (${team.session_used_pct}% used)
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Team Weekly:</strong> <span style="color: #c084fc; font-weight: 700;">${team.weekly_remaining_pct}% remaining</span> (${team.weekly_used_pct}% used)
+                      </div>
+                      <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                        Resets: ${team.weekly_reset_str || 'Mon 3:00 AM'}
+                      </div>
+                    </div>
+
+                    <!-- 3. Department Division -->
+                    <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="display: flex; align-items: center; gap: 5px;">
+                          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #34d399; flex-shrink: 0;"></span>
+                          <strong style="color: #34d399; font-size: 0.82rem;">🏢 Department / Division</strong>
+                        </span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
+                      </div>
+                      <div style="margin-bottom: 6px;">
+                        ${this.generateInlineSparkline([0.15, 0.3, 0.25, 0.45, 0.4, 0.65, 0.55, 0.75].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#34d399')}
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Division:</strong> ${dept.dept_name || 'Technology & AI'}
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Monthly Volume:</strong> ${Number(dept.monthly_tokens || 0).toLocaleString()} tok
+                      </div>
+                      <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                        Dept Budget: $${Number(dept.budget_limit_usd || 1500).toFixed(2)}
+                      </div>
+                    </div>
+
+                    <!-- 4. Enterprise Organization -->
+                    <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 10px 12px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="display: flex; align-items: center; gap: 5px;">
+                          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #fbbf24; flex-shrink: 0;"></span>
+                          <strong style="color: #fbbf24; font-size: 0.82rem;">🌐 Organization / Enterprise</strong>
+                        </span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
+                      </div>
+                      <div style="margin-bottom: 6px;">
+                        ${this.generateInlineSparkline([0.3, 0.45, 0.4, 0.65, 0.6, 0.85, 0.8, 1.0].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#fbbf24')}
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Org Name:</strong> ${ent.org_name || 'Enterprise Workspace'}
+                      </div>
+                      <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
+                        <strong>Pool Sync:</strong> <span style="color: #34d399; font-weight: 600;">Active & Synced</span>
+                      </div>
+                      <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
+                        Centralized Token Telemetry
+                      </div>
+                    </div>
+                  `)}
+                </div>
+              </td>
+            </tr>
+          `;
+
+          setTimeout(() => {
+            this.loadAndRenderHierarchicalTrendChart(`trend-chart-svg-${key}`, key);
+          }, 20);
+        }
+      } else if (itemEntry.type === "group") {
+        const grp = itemEntry.group;
+        const gKey = grp.id;
+        const isExpanded = !!this.expandedHierarchy[gKey];
+        let grpTokens = 0;
+        let grpCost = 0;
+        grp.providers.forEach(p => {
+          const pItem = provMap[p] || {};
+          grpTokens += (pItem.tokens_today || 0);
+          grpCost += (pItem.cost_today_usd || 0);
+        });
+
+        const grpSeries = grp.providers.map(p => {
+          const pItem = provMap[p] || {};
+          const pPts = [0.15, 0.3, 0.25, 0.5, 0.45, 0.75, 0.65, 0.95].map(f => Math.round(Math.max(100, pItem.tokens_today || 1000) * f));
+          return { key: p, label: displayNames[p] || p, color: provColors[p] || "#38bdf8", points: pPts };
+        });
+
+        html += `
+          <tr style="background: rgba(14, 165, 233, 0.04); border-left: 2px solid #06b6d4;">
+            <td>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 1rem;">${grp.icon}</span>
+                  <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #06b6d4; flex-shrink: 0;"></span>
+                  <strong style="color: #38bdf8; font-size: 0.88rem;">${grp.name}</strong>
+                </div>
+                <button class="btn btn-sm" onclick="window.App.toggleHierarchy('${gKey}')" style="background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.35); color: #06b6d4; font-size: 0.68rem; padding: 2px 7px; border-radius: 4px; cursor: pointer;">
+                  ${isExpanded ? '▲ Hide' : '▼ Drill-Down'}
+                </button>
+              </div>
+            </td>
+            <td>
+              <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4; font-size: 0.7rem;">🏷️ Tag: ${grp.tag}</span>
+            </td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: #fff;">
+              ${Number(grpTokens).toLocaleString()}
+            </td>
+            <td style="font-family: var(--font-mono); color: var(--accent-cyan); font-weight: 600;">
+              ${comp.providers ? Math.round((grpTokens / Math.max(1, (comp.summary?.total_tokens_today || 10000))) * 100) : 0}%
+            </td>
+            <td>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                ${this.generateMultiInlineSparkline(grpSeries, 120, 26)}
+                <span style="font-family: var(--font-mono); font-size: 0.74rem; color: #38bdf8;">${grp.providers.length} platforms</span>
+              </div>
+            </td>
+            <td>
+              <span style="font-family: var(--font-mono); font-size: 0.78rem; color: #34d399;">Group Aggregated</span>
+            </td>
+            <td style="font-family: var(--font-mono); font-size: 0.82rem;">
+              $${grpCost.toFixed(3)}
+            </td>
+          </tr>
+        `;
+
+        if (isExpanded) {
+          html += `
+            <tr class="hierarchy-detail-row" style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid #06b6d4;">
+              <td colspan="7" style="padding: 12px 18px;">
+                <div style="font-size: 0.78rem; font-weight: 700; color: #06b6d4; margin-bottom: 8px;">
+                  Group Members Telemetry (${grp.name}):
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px;">
+                  ${grp.providers.map(p => {
+                    const pItem = provMap[p] || {};
+                    const pCol = provColors[p] || "#38bdf8";
+                    return `
+                      <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                          <span style="display: flex; align-items: center; gap: 5px;">
+                            <span style="display: inline-block; width: 7px; height: 7px; border-radius: 2px; background: ${pCol};"></span>
+                            <strong style="color: #fff; font-size: 0.82rem;">${displayNames[p]}</strong>
+                          </span>
+                          <span style="color: ${pCol}; font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700;">${Number(pItem.tokens_today || 0).toLocaleString()} tok</span>
+                        </div>
+                        <div style="margin-top: 4px;">
+                          ${this.generateInlineSparkline([0.15, 0.3, 0.25, 0.5, 0.45, 0.75, 0.65, 0.95].map(f => Math.round(Math.max(100, pItem.tokens_today || 1000) * f)), pCol)}
+                        </div>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </td>
+            </tr>
+          `;
+        }
       }
     });
 
@@ -790,9 +977,458 @@ window.App = {
             const match = d.getAttribute("data-series") === plat;
             d.style.opacity = match ? "1" : "0.1";
           });
+  _getProviderChildSeries(key, item) {
+    const tSeed = Math.max(100, item.tokens_today || 1500);
+    const h = item.hierarchy || {};
+    if (key === "claude") {
+      return [
+        { key: "org", label: "Enterprise Org", color: "#fbbf24", points: [0.3, 0.45, 0.4, 0.65, 0.6, 0.85, 0.8, 1.0].map(f => Math.round(tSeed * f)) },
+        { key: "dept", label: "AI Department", color: "#34d399", points: [0.15, 0.3, 0.25, 0.45, 0.4, 0.65, 0.55, 0.75].map(f => Math.round(tSeed * f)) },
+        { key: "team", label: "Synthesis2 (Team)", color: "#c084fc", points: [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(tSeed * f)) },
+        { key: "ind", label: "James (Individual)", color: "#38bdf8", points: [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(tSeed * f)) }
+      ];
+    } else if (key === "gemini") {
+      return [
+        { key: "acct", label: "Google Umbrella", color: "#60a5fa", points: [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(tSeed * f)) },
+        { key: "key1", label: "Dev-Key-01", color: "#34d399", points: [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55].map(f => Math.round(tSeed * f)) },
+        { key: "key2", label: "Workspace-Prod", color: "#f472b6", points: [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32].map(f => Math.round(tSeed * f)) }
+      ];
+    } else if (key === "ollama") {
+      return [
+        { key: "llama3", label: "llama3:latest", color: "#c084fc", points: [0.3, 0.2, 0.4, 0.35, 0.6, 0.5, 0.7, 0.8].map(f => Math.round(tSeed * f)) },
+        { key: "deepseek", label: "deepseek-r1:14b", color: "#34d399", points: [0.25, 0.35, 0.45, 0.6, 0.55, 0.75, 0.8, 0.9].map(f => Math.round(tSeed * f)) },
+        { key: "mistral", label: "mistral:latest", color: "#38bdf8", points: [0.1, 0.15, 0.12, 0.2, 0.18, 0.25, 0.22, 0.3].map(f => Math.round(tSeed * f)) }
+      ];
+    } else if (key === "chatgpt") {
+      return [
+        { key: "org", label: "Main Organization", color: "#10a37f", points: [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6].map(f => Math.round(tSeed * f)) },
+        { key: "proj", label: "Default Project", color: "#6ee7b7", points: [0.1, 0.18, 0.14, 0.22, 0.2, 0.28, 0.24, 0.32].map(f => Math.round(tSeed * f)) }
+      ];
+    } else {
+      return [
+        { key: "ent", label: "Enterprise E5", color: "#0284c7", points: [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4].map(f => Math.round(tSeed * f)) },
+        { key: "pool", label: "Copilot Studio Pool", color: "#38bdf8", points: [0.08, 0.12, 0.15, 0.18, 0.22, 0.25, 0.28, 0.35].map(f => Math.round(tSeed * f)) }
+      ];
+    }
+  },
+
+  generateMultiInlineSparkline(seriesList, w = 110, h = 26) {
+    if (!seriesList || seriesList.length === 0) return "";
+    let allPoints = [];
+    seriesList.forEach(s => { allPoints = allPoints.concat(s.points || []); });
+    const min = Math.min(...allPoints, 0);
+    const max = Math.max(...allPoints, 100);
+    const range = Math.max(1, max - min);
+    const pad = 3;
+    const n = Math.max(...seriesList.map(s => (s.points || []).length));
+    const step = n > 1 ? (w - pad * 2) / (n - 1) : (w - pad * 2);
+
+    const polylines = seriesList.map(s => {
+      const pts = (s.points || []).map((p, idx) => {
+        const x = pad + (idx * step);
+        const y = h - pad - ((p - min) / range) * (h - pad * 2);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(" ");
+      const lastVal = s.points ? s.points[s.points.length - 1] : 0;
+      const lastX = (pad + (s.points.length - 1) * step).toFixed(1);
+      const lastY = (h - pad - ((lastVal - min) / range) * (h - pad * 2)).toFixed(1);
+      return `
+        <polyline fill="none" stroke="${s.color}" stroke-width="2" points="${pts}" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="${lastX}" cy="${lastY}" r="2" fill="${s.color}" stroke="#ffffff" stroke-width="0.6"/>
+      `;
+    }).join("");
+
+    return `
+      <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.3); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); overflow: visible;">
+        ${polylines}
+      </svg>
+    `;
+  },
+
+  async loadAndRenderHierarchicalTrendChart(containerId, providerKey) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const windowPeriod = this.trendWindow || '24h';
+    const scope = this.currentScope || 'individual';
+    const cacheKey = `${providerKey}_${windowPeriod}_${scope}`;
+
+    let data = this.cachedHierarchicalTrends[cacheKey];
+    if (!data) {
+      try {
+        const res = await fetch(`/api/usage/trends/hierarchy?provider=${providerKey}&window=${windowPeriod}&scope=${scope}`);
+        if (res.ok) {
+          data = await res.json();
+          this.cachedHierarchicalTrends[cacheKey] = data;
         }
+      } catch (e) {
+        console.warn("Failed fetching hierarchical trends:", e);
+      }
+    }
+
+    if (!data || !data.series || data.series.length === 0) {
+      data = this._buildSyntheticHierarchicalTrends(providerKey, windowPeriod);
+    }
+
+    this.renderMultiSeriesTrendChart(containerId, data, providerKey);
+  },
+
+  _buildSyntheticHierarchicalTrends(providerKey, windowPeriod) {
+    const childSeries = this._getProviderChildSeries(providerKey, { tokens_today: 15000 });
+    const n = 12;
+    const labels = Array.from({ length: n }, (_, i) => `${i * 2}:00`);
+    const series = childSeries.map(cs => {
+      const step = (cs.points[cs.points.length - 1] - cs.points[0]) / (n - 1);
+      const pts = Array.from({ length: n }, (_, idx) => Math.round(cs.points[0] + idx * step * (0.8 + (idx % 3) * 0.15)));
+      return {
+        key: cs.key,
+        label: cs.label,
+        color: cs.color,
+        points: pts
       };
     });
+    return {
+      provider: providerKey,
+      window: windowPeriod,
+      scope: this.currentScope,
+      labels: labels,
+      series: series
+    };
+  },
+
+  renderMultiSeriesTrendChart(containerId, trendsData, providerKey) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!this.hiddenChartSeries[providerKey]) {
+      this.hiddenChartSeries[providerKey] = new Set();
+    }
+    const hiddenSet = this.hiddenChartSeries[providerKey];
+
+    const seriesList = trendsData.series || [];
+    const labels = trendsData.labels || [];
+    const n = labels.length || (seriesList[0]?.points?.length || 8);
+
+    let allPoints = [];
+    seriesList.forEach(s => {
+      if (!hiddenSet.has(s.key)) {
+        allPoints = allPoints.concat(s.points || []);
+      }
+    });
+    const maxVal = Math.max(...allPoints, 50);
+
+    const width = 860;
+    const height = 180;
+    const padL = this.showAxisLabels ? 60 : 35;
+    const padR = 25;
+    const padT = 20;
+    const padB = this.showAxisLabels ? 30 : 15;
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
+    const step = n > 1 ? plotW / (n - 1) : plotW;
+
+    // Gridlines (3 levels)
+    let gridHtml = "";
+    [0, 0.5, 1.0].forEach(ratio => {
+      const y = padT + (plotH * (1.0 - ratio));
+      const val = Math.round(maxVal * ratio);
+      gridHtml += `
+        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4,4"/>
+        <text x="${padL - 6}" y="${y + 3}" fill="#64748b" font-size="9" text-anchor="end" font-family="monospace">${val >= 1000 ? (val/1000).toFixed(0)+'k' : val}</text>
+      `;
+    });
+
+    // Time axis labels
+    let axisHtml = "";
+    labels.forEach((lbl, idx) => {
+      if (idx % Math.ceil(n / 6) === 0 || idx === n - 1) {
+        const x = padL + (idx * step);
+        axisHtml += `
+          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 3}" stroke="rgba(255,255,255,0.15)"/>
+          <text x="${x}" y="${padT + plotH + 14}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${lbl}</text>
+        `;
+      }
+    });
+
+    // Axis titles if enabled
+    let axisTitlesHtml = "";
+    if (this.showAxisLabels) {
+      axisTitlesHtml = `
+        <text x="${padL}" y="12" fill="#94a3b8" font-size="9" font-family="monospace" font-weight="600">Tokens / Bucket</text>
+        <text x="${width / 2}" y="${height - 2}" fill="#64748b" font-size="9" text-anchor="middle" font-family="monospace">Timeline (${trendsData.window || this.trendWindow})</text>
+      `;
+    }
+
+    // Paths
+    let pathsHtml = "";
+    let dotsHtml = "";
+
+    seriesList.forEach(s => {
+      const isHidden = hiddenSet.has(s.key);
+      const pts = (s.points || []).map((val, idx) => {
+        const x = padL + (idx * step);
+        const y = padT + plotH - ((val / maxVal) * plotH);
+        return { x, y, val };
+      });
+
+      if (pts.length < 2) return;
+
+      const pathData = pts.map((p, idx) => (idx === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(" ");
+      const lastPt = pts[pts.length - 1];
+
+      pathsHtml += `
+        <path class="trend-chart-line" 
+              data-provider="${providerKey}" 
+              data-series="${s.key}" 
+              d="${pathData}" 
+              fill="none" 
+              stroke="${s.color}" 
+              stroke-width="2.5" 
+              opacity="${isHidden ? '0' : '0.9'}" 
+              stroke-linecap="round" 
+              stroke-linejoin="round" 
+              style="transition: all 0.2s ease; cursor: pointer; pointer-events: ${isHidden ? 'none' : 'stroke'};"
+              onmouseenter="window.App.highlightSeries('${providerKey}', '${s.key}')"
+              onmouseleave="window.App.unhighlightSeries('${providerKey}')">
+          <title>${s.label}: ${lastPt.val.toLocaleString()} tok</title>
+        </path>
+      `;
+
+      if (!isHidden) {
+        dotsHtml += `
+          <circle cx="${lastPt.x}" cy="${lastPt.y}" r="3.5" fill="${s.color}" stroke="#ffffff" stroke-width="1"
+                  class="trend-chart-dot" data-provider="${providerKey}" data-series="${s.key}">
+            <title>${s.label}: ${lastPt.val.toLocaleString()} tokens</title>
+          </circle>
+        `;
+      }
+    });
+
+    // Interactive Legend Pills
+    const legendPillsHtml = seriesList.map(s => {
+      const isHidden = hiddenSet.has(s.key);
+      const lastVal = s.points ? s.points[s.points.length - 1] : 0;
+      return `
+        <div class="trend-legend-pill" 
+             data-provider="${providerKey}" 
+             data-series="${s.key}"
+             onclick="window.App.toggleSeriesVisibility('${providerKey}', '${s.key}', '${containerId}')"
+             onmouseenter="window.App.highlightSeries('${providerKey}', '${s.key}')"
+             onmouseleave="window.App.unhighlightSeries('${providerKey}')"
+             style="display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 4px; background: rgba(0,0,0,0.4); border: 1px solid ${isHidden ? 'rgba(255,255,255,0.06)' : s.color + '40'}; cursor: pointer; transition: all 0.2s ease; opacity: ${isHidden ? '0.35' : '1'};">
+          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: ${s.color};"></span>
+          <span style="font-size: 0.72rem; color: #cbd5e1; font-weight: 600; text-decoration: ${isHidden ? 'line-through' : 'none'};">${s.label}</span>
+          <span style="font-size: 0.70rem; color: ${s.color}; font-family: var(--font-mono); font-weight: 700;">${lastVal.toLocaleString()} t</span>
+          <span style="font-size: 0.65rem; color: var(--text-dim);">${isHidden ? '👁️‍🗨️' : '👁️'}</span>
+        </div>
+      `;
+    }).join("");
+
+    container.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <!-- Legend Strip with Visibility Toggles & Glow on Mouse-Over -->
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;">
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+            ${legendPillsHtml}
+          </div>
+          <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem; font-family: var(--font-mono);">
+            Window: ${trendsData.window || this.trendWindow}
+          </span>
+        </div>
+
+        <!-- SVG Multi-Series Plot with Glow Filter -->
+        <div style="width: 100%; height: 180px; position: relative;">
+          <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="overflow: visible;">
+            <defs>
+              <filter id="glow-${providerKey}" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3.5" result="coloredBlur"/>
+                <feMerge>
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+            <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.15)"/>
+            ${gridHtml}
+            ${axisHtml}
+            ${axisTitlesHtml}
+            ${pathsHtml}
+            ${dotsHtml}
+          </svg>
+        </div>
+      </div>
+    `;
+  },
+
+  highlightSeries(providerKey, seriesKey) {
+    const box = document.getElementById(`trend-chart-box-${providerKey}`);
+    if (!box) return;
+    const paths = box.querySelectorAll(".trend-chart-line");
+    const dots = box.querySelectorAll(".trend-chart-dot");
+    const legendPills = box.querySelectorAll(".trend-legend-pill");
+
+    paths.forEach(p => {
+      const match = p.getAttribute("data-series") === seriesKey;
+      if (match) {
+        p.style.opacity = "1";
+        p.style.strokeWidth = "4";
+        p.setAttribute("filter", `url(#glow-${providerKey})`);
+      } else {
+        p.style.opacity = "0.15";
+        p.style.strokeWidth = "1.5";
+        p.removeAttribute("filter");
+      }
+    });
+
+    dots.forEach(d => {
+      const match = d.getAttribute("data-series") === seriesKey;
+      d.style.opacity = match ? "1" : "0.1";
+      d.setAttribute("r", match ? "5" : "2.5");
+    });
+
+    legendPills.forEach(pill => {
+      const match = pill.getAttribute("data-series") === seriesKey;
+      if (match) {
+        pill.style.boxShadow = "0 0 12px rgba(56, 189, 248, 0.6), inset 0 0 6px rgba(56, 189, 248, 0.4)";
+        pill.style.borderColor = "#38bdf8";
+        pill.style.transform = "scale(1.04)";
+      } else {
+        pill.style.boxShadow = "none";
+        pill.style.opacity = "0.4";
+        pill.style.transform = "scale(1.0)";
+      }
+    });
+  },
+
+  unhighlightSeries(providerKey) {
+    const box = document.getElementById(`trend-chart-box-${providerKey}`);
+    if (!box) return;
+    const hiddenSet = this.hiddenChartSeries[providerKey] || new Set();
+    const paths = box.querySelectorAll(".trend-chart-line");
+    const dots = box.querySelectorAll(".trend-chart-dot");
+    const legendPills = box.querySelectorAll(".trend-legend-pill");
+
+    paths.forEach(p => {
+      const sKey = p.getAttribute("data-series");
+      p.style.opacity = hiddenSet.has(sKey) ? "0" : "0.9";
+      p.style.strokeWidth = "2.5";
+      p.removeAttribute("filter");
+    });
+
+    dots.forEach(d => {
+      d.style.opacity = "1";
+      d.setAttribute("r", "3.5");
+    });
+
+    legendPills.forEach(pill => {
+      const sKey = pill.getAttribute("data-series");
+      const isHidden = hiddenSet.has(sKey);
+      pill.style.boxShadow = "none";
+      pill.style.opacity = isHidden ? "0.35" : "1";
+      pill.style.transform = "scale(1.0)";
+      pill.style.borderColor = "";
+    });
+  },
+
+  toggleSeriesVisibility(providerKey, seriesKey, containerId) {
+    if (!this.hiddenChartSeries[providerKey]) {
+      this.hiddenChartSeries[providerKey] = new Set();
+    }
+    const set = this.hiddenChartSeries[providerKey];
+    if (set.has(seriesKey)) {
+      set.delete(seriesKey);
+    } else {
+      set.add(seriesKey);
+    }
+    const cachedData = this.cachedHierarchicalTrends[`${providerKey}_${this.trendWindow}_${this.currentScope}`]
+      || this._buildSyntheticHierarchicalTrends(providerKey, this.trendWindow);
+    this.renderMultiSeriesTrendChart(containerId, cachedData, providerKey);
+  },
+
+  changeTrendWindow(windowPeriod) {
+    this.trendWindow = windowPeriod;
+    this.cachedHierarchicalTrends = {};
+    const sel = document.getElementById("trend-window-select");
+    if (sel) sel.value = windowPeriod;
+    if (this.lastCompData && window._lastProviders) {
+      this.renderComparison(this.lastCompData, window._lastProviders);
+    }
+  },
+
+  switchHierarchyGroupMode(mode) {
+    this.hierarchyGroupMode = mode;
+    ["all", "platforms", "groups", "filter"].forEach(m => {
+      const btn = document.getElementById(`group-mode-btn-${m}`);
+      if (btn) {
+        btn.className = (m === mode || (m === "filter" && mode === "filtered"))
+          ? "btn btn-sm btn-primary"
+          : "btn btn-sm btn-secondary";
+      }
+    });
+    if (mode === "filtered") {
+      this.openMultiSelectFilterModal();
+    } else {
+      if (this.lastCompData && window._lastProviders) {
+        this.renderComparison(this.lastCompData, window._lastProviders);
+      }
+    }
+  },
+
+  openMultiSelectFilterModal() {
+    const modal = document.getElementById("hierarchy-filter-modal");
+    const container = document.getElementById("filter-modal-items-container");
+    if (!modal || !container) return;
+
+    const items = [
+      { id: "claude", label: "Claude (Anthropic)", group: "Platform", icon: "🟠" },
+      { id: "gemini", label: "Google Gemini", group: "Platform", icon: "💎" },
+      { id: "chatgpt", label: "ChatGPT / OpenAI", group: "Platform", icon: "🟢" },
+      { id: "ollama", label: "Ollama (Local Engine)", group: "Platform", icon: "🦙" },
+      { id: "copilot", label: "M365 Copilot", group: "Platform", icon: "🔵" },
+      { id: "group-production", label: "🏷️ Tag: Production AI", group: "Tag / Group", icon: "🚀" },
+      { id: "group-development", label: "🏷️ Tag: Development & Testing", group: "Tag / Group", icon: "🧪" },
+      { id: "group-research", label: "🏷️ Tag: Research Labs", group: "Tag / Group", icon: "🔬" }
+    ];
+
+    container.innerHTML = items.map(it => `
+      <label style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 4px; cursor: pointer; font-size: 0.76rem;">
+        <span style="display: flex; align-items: center; gap: 8px;">
+          <span>${it.icon}</span>
+          <span style="color: #f1f5f9; font-weight: 600;">${it.label}</span>
+          <span style="font-size: 0.65rem; color: var(--text-dim);">(${it.group})</span>
+        </span>
+        <input type="checkbox" class="filter-modal-chk" value="${it.id}" ${this.filteredItemIds.has(it.id) ? 'checked' : ''} style="cursor: pointer; accent-color: #38bdf8;">
+      </label>
+    `).join("");
+
+    modal.style.display = "flex";
+  },
+
+  closeMultiSelectFilterModal() {
+    const modal = document.getElementById("hierarchy-filter-modal");
+    if (modal) modal.style.display = "none";
+  },
+
+  selectAllFilterItems(checked) {
+    document.querySelectorAll(".filter-modal-chk").forEach(c => c.checked = checked);
+  },
+
+  applyHierarchyFilter() {
+    const checked = [];
+    document.querySelectorAll(".filter-modal-chk:checked").forEach(c => checked.push(c.value));
+    if (checked.length === 0) {
+      alert("Please select at least one platform or tag group to display.");
+      return;
+    }
+    this.filteredItemIds = new Set(checked);
+    this.hierarchyGroupMode = "filtered";
+    ["all", "platforms", "groups", "filter"].forEach(m => {
+      const btn = document.getElementById(`group-mode-btn-${m}`);
+      if (btn) btn.className = (m === "filter") ? "btn btn-sm btn-primary" : "btn btn-sm btn-secondary";
+    });
+    this.closeMultiSelectFilterModal();
+    if (this.lastCompData && window._lastProviders) {
+      this.renderComparison(this.lastCompData, window._lastProviders);
+    }
   },
 
   renderSessions(sessions) {
@@ -1713,8 +2349,10 @@ window.App = {
     this.dashboardViewMode = mode;
     const btnBal = document.getElementById("view-mode-btn-balances");
     const btnTrd = document.getElementById("view-mode-btn-trends");
+    const trendWinCtrl = document.getElementById("trend-window-control");
     if (btnBal) btnBal.className = mode === 'balances' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
     if (btnTrd) btnTrd.className = mode === 'trends' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
+    if (trendWinCtrl) trendWinCtrl.style.display = mode === 'trends' ? 'flex' : 'none';
     if (this.lastCompData && window._lastProviders) {
       this.renderComparison(this.lastCompData, window._lastProviders);
     }
@@ -1739,6 +2377,8 @@ window.App = {
 
       const autoResize = document.getElementById("cfg-widget-auto-resize");
       const fadeUnpinned = document.getElementById("cfg-widget-fade-unpinned");
+      const hideParentExpand = document.getElementById("cfg-widget-hide-parent-on-expand");
+      const showAxisLabels = document.getElementById("cfg-show-axis-labels");
       const themeSelect = document.getElementById("cfg-widget-theme");
       const pollCadence = document.getElementById("cfg-poll-cadence");
       const ollamaSync = document.getElementById("cfg-ollama-sync");
@@ -1746,6 +2386,11 @@ window.App = {
 
       if (autoResize && st.widget_auto_resize !== undefined) autoResize.checked = !!st.widget_auto_resize;
       if (fadeUnpinned && st.widget_fade_unpinned !== undefined) fadeUnpinned.checked = !!st.widget_fade_unpinned;
+      if (hideParentExpand && st.widget_hide_parent_chart_on_expand !== undefined) hideParentExpand.checked = !!st.widget_hide_parent_chart_on_expand;
+      if (showAxisLabels && st.show_axis_labels !== undefined) {
+        showAxisLabels.checked = !!st.show_axis_labels;
+        this.showAxisLabels = !!st.show_axis_labels;
+      }
       if (themeSelect && st.widget_theme) themeSelect.value = st.widget_theme;
       if (pollCadence && st.poll_cadence_seconds) pollCadence.value = st.poll_cadence_seconds;
       if (ollamaSync && st.ollama_sync_interval) ollamaSync.value = st.ollama_sync_interval;
@@ -1760,6 +2405,13 @@ window.App = {
       document.querySelectorAll(".cfg-pin-check").forEach(chk => {
         chk.checked = pinnedList.includes(chk.value);
       });
+
+      // Platform Visibility Toggles (AIUM-613)
+      const hiddenPlatforms = (st.estate_visibility?.hidden_platforms || []).map(p => p.toLowerCase());
+      ["claude", "gemini", "chatgpt", "ollama", "copilot"].forEach(p => {
+        const chk = document.getElementById(`vis-chk-${p}`);
+        if (chk) chk.checked = !hiddenPlatforms.includes(p);
+      });
     } catch (e) {
       console.warn("Error loading settings:", e);
     }
@@ -1768,6 +2420,8 @@ window.App = {
   async saveSettings() {
     const autoResize = document.getElementById("cfg-widget-auto-resize");
     const fadeUnpinned = document.getElementById("cfg-widget-fade-unpinned");
+    const hideParentExpand = document.getElementById("cfg-widget-hide-parent-on-expand");
+    const showAxisLabels = document.getElementById("cfg-show-axis-labels");
     const themeSelect = document.getElementById("cfg-widget-theme");
     const pollCadence = document.getElementById("cfg-poll-cadence");
     const ollamaSync = document.getElementById("cfg-ollama-sync");
@@ -1777,16 +2431,33 @@ window.App = {
     const pinned = [];
     document.querySelectorAll(".cfg-pin-check:checked").forEach(c => pinned.push(c.value));
 
+    const hiddenPlatforms = [];
+    ["claude", "gemini", "chatgpt", "ollama", "copilot"].forEach(p => {
+      const chk = document.getElementById(`vis-chk-${p}`);
+      if (chk && !chk.checked) hiddenPlatforms.push(p);
+    });
+
     const payload = {
       widget_auto_resize: autoResize ? autoResize.checked : true,
       widget_fade_unpinned: fadeUnpinned ? fadeUnpinned.checked : false,
+      widget_hide_parent_chart_on_expand: hideParentExpand ? hideParentExpand.checked : false,
+      show_axis_labels: showAxisLabels ? showAxisLabels.checked : true,
       widget_theme: themeSelect ? themeSelect.value : "obsidian_neon",
       widget_font_size: checkedFont ? checkedFont.value : "standard",
       poll_cadence_seconds: pollCadence ? parseInt(pollCadence.value, 10) || 4 : 4,
       ollama_sync_interval: ollamaSync ? parseInt(ollamaSync.value, 10) || 15 : 15,
       widget_view_mode: viewModeSelect ? viewModeSelect.value : "balances",
-      pinned_items: pinned
+      pinned_items: pinned,
+      estate_visibility: {
+        hidden_platforms: hiddenPlatforms,
+        hidden_accounts: [],
+        hidden_tags: []
+      }
     };
+
+    if (showAxisLabels) {
+      this.showAxisLabels = showAxisLabels.checked;
+    }
 
     try {
       const res = await fetch("/api/settings", {
@@ -1797,7 +2468,16 @@ window.App = {
       if (res.ok) {
         const data = await res.json();
         this.appSettings = data.settings || payload;
+        // Also persist to visibility endpoint
+        fetch("/api/settings/visibility", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload.estate_visibility)
+        }).catch(() => {});
         alert("✅ Configuration successfully saved and encrypted into Windows DPAPI storage!");
+        if (this.lastCompData && window._lastProviders) {
+          this.renderComparison(this.lastCompData, window._lastProviders);
+        }
       }
     } catch (e) {
       alert("❌ Error saving settings: " + e.message);

@@ -58,6 +58,30 @@
       </div>
 
       <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="cfg-widget-hide-parent-on-expand" style="width: 18px; height: 18px; accent-color: var(--accent-cyan);">
+          <div>
+            <strong style="color: #f1f5f9; font-size: 0.88rem;">Hide Parent Chart on Child Expand</strong>
+            <p style="font-size: 0.76rem; color: var(--text-muted); margin: 2px 0 0 0;">
+              When expanding child branches in the widget trend view, hide top-level parent chart to conserve vertical screen space.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="cfg-show-axis-labels" checked style="width: 18px; height: 18px; accent-color: var(--accent-cyan);">
+          <div>
+            <strong style="color: #f1f5f9; font-size: 0.88rem;">Display X & Y Axis Labels on Charts</strong>
+            <p style="font-size: 0.76rem; color: var(--text-muted); margin: 2px 0 0 0;">
+              Show timestamps along the X-axis and token rates along the Y-axis on expanded trend line charts.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
         <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">
           Widget Color Palette & Theme
         </label>
@@ -225,6 +249,61 @@
           </tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Section 4: Platform & Account Visibility Configuration (AIUM-613) -->
+  <div class="glass-card" style="margin-bottom: 24px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">👁️</span>
+          <h4 style="font-size: 1.05rem; font-weight: 700; color: #fff;">Platform, Account & Group Visibility Settings</h4>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 3px;">
+          Configure which platforms and accounts are visible by default in both the Dashboard and Mini Widget. Unconfigured services (e.g. ChatGPT, M365 Copilot) or unneeded platforms can be hidden from view.
+        </p>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; background: rgba(0,0,0,0.2); padding: 16px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06);">
+      <div>
+        <label style="font-size: 0.76rem; color: #94a3b8; font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 8px;">Visible AI Platforms:</label>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #f1f5f9; cursor: pointer;">
+            <input type="checkbox" value="claude" class="cfg-visibility-prov-check" checked style="accent-color: var(--accent-cyan); width: 16px; height: 16px;">
+            <span>Claude (Anthropic)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #f1f5f9; cursor: pointer;">
+            <input type="checkbox" value="gemini" class="cfg-visibility-prov-check" checked style="accent-color: var(--accent-cyan); width: 16px; height: 16px;">
+            <span>Google Gemini</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #f1f5f9; cursor: pointer;">
+            <input type="checkbox" value="chatgpt" class="cfg-visibility-prov-check" style="accent-color: var(--accent-cyan); width: 16px; height: 16px;">
+            <span>ChatGPT / OpenAI</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #f1f5f9; cursor: pointer;">
+            <input type="checkbox" value="ollama" class="cfg-visibility-prov-check" checked style="accent-color: var(--accent-cyan); width: 16px; height: 16px;">
+            <span>Ollama (Local Hardware Engine)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #f1f5f9; cursor: pointer;">
+            <input type="checkbox" value="copilot" class="cfg-visibility-prov-check" style="accent-color: var(--accent-cyan); width: 16px; height: 16px;">
+            <span>M365 Copilot</span>
+          </label>
+        </div>
+      </div>
+      <div>
+        <label style="font-size: 0.76rem; color: #94a3b8; font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 8px;">Default Time Window:</label>
+        <select id="cfg-default-trend-window" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 12px;">
+          <option value="1h">Last 1 Hour</option>
+          <option value="24h" selected>Last 24 Hours (Default)</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="30d">Last 30 Days</option>
+        </select>
+        <p style="font-size: 0.74rem; color: var(--text-dim); margin: 0;">
+          All visibility preferences and exclusion masks are stored securely via SQLite and Windows DPAPI.
+        </p>
+      </div>
     </div>
   </div>
 

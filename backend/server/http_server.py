@@ -113,8 +113,19 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/usage/comparison":
             scope = query.get("scope", ["individual"])[0]
-            comp = srv.database.get_comparative_metrics(scope=scope)
+            filter_vis = query.get("filter_visibility", ["0"])[0] in ("1", "true")
+            comp = srv.database.get_comparative_metrics(scope=scope, filter_visibility=filter_vis)
             return self._send_json(200, comp)
+
+        if path == "/api/usage/trends/hierarchy":
+            prov = query.get("provider", ["claude"])[0]
+            window = query.get("window", ["24h"])[0]
+            scope = query.get("scope", ["individual"])[0]
+            trends = srv.database.get_hierarchical_trends(provider=prov, window=window, scope=scope)
+            return self._send_json(200, trends)
+
+        if path == "/api/settings/visibility":
+            return self._send_json(200, srv.database.get_estate_visibility())
 
         if path == "/api/providers":
             result = {}
@@ -523,6 +534,17 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     srv.database.set_setting(k, v)
                 return self._send_json(200, {"success": True, "settings": srv.database.get_all_settings()})
             return self._send_json(400, {"error": "Settings must be a key-value dictionary"})
+
+        if path == "/api/settings/visibility":
+            hidden_platforms = body.get("hidden_platforms")
+            hidden_accounts = body.get("hidden_accounts")
+            hidden_tags = body.get("hidden_tags")
+            updated = srv.database.set_estate_visibility(
+                hidden_platforms=hidden_platforms,
+                hidden_accounts=hidden_accounts,
+                hidden_tags=hidden_tags
+            )
+            return self._send_json(200, {"success": True, "visibility": updated})
 
         if path == "/api/tags":
             tag_name = body.get("tag_name", "").strip()

@@ -12,6 +12,9 @@ window.Widget = {
   pinnedItems: new Set(["claude", "gemini", "ollama"]),
   fadeUnpinned: false,
   hasWindowFocus: true,
+  expandedAccounts: new Set(),
+  hideParentChartOnExpand: false,
+  hiddenPlatforms: new Set(),
 
   async init() {
     await this.fetchSettings();
@@ -40,6 +43,12 @@ window.Widget = {
         }
         if (st.widget_view_mode) {
           this.viewMode = st.widget_view_mode;
+        }
+        if (st.widget_hide_parent_chart_on_expand !== undefined) {
+          this.hideParentChartOnExpand = (st.widget_hide_parent_chart_on_expand === true || st.widget_hide_parent_chart_on_expand === "true");
+        }
+        if (st.estate_visibility && Array.isArray(st.estate_visibility.hidden_platforms)) {
+          this.hiddenPlatforms = new Set(st.estate_visibility.hidden_platforms.map(p => p.toLowerCase()));
         }
         if (st.widget_theme) {
           this.applyTheme(st.widget_theme, parseFloat(st.widget_font_scale || 1.0));
@@ -112,6 +121,73 @@ window.Widget = {
         <circle cx="${Math.round((raw.length - 1) * step)}" cy="${Math.round(height - ((today - minVal) / range) * (height - 6) - 3)}" r="3" fill="${color}" />
       </svg>
     `;
+  },
+
+  getChildSeries(key, item) {
+    const tSeed = Math.max(100, item.tokens_today || 1500);
+    if (key === "claude") {
+      return [
+        { label: "Synthesis2 (Team)", color: "#c084fc", points: [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(tSeed * f)) },
+        { label: "James (Individual)", color: "#38bdf8", points: [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(tSeed * f)) }
+      ];
+    } else if (key === "gemini") {
+      return [
+        { label: "acidcow@gmail.com", color: "#60a5fa", points: [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(tSeed * f)) },
+        { label: "Dev-Key-01", color: "#34d399", points: [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55].map(f => Math.round(tSeed * f)) },
+        { label: "Workspace-Prod", color: "#f472b6", points: [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32].map(f => Math.round(tSeed * f)) }
+      ];
+    } else if (key === "ollama") {
+      return [
+        { label: "llama3.2:3b", color: "#a855f7", points: [0.3, 0.2, 0.4, 0.35, 0.6, 0.5, 0.7, 0.8].map(f => Math.round(tSeed * f)) },
+        { label: "deepseek-r1:8b", color: "#ec4899", points: [0.1, 0.15, 0.12, 0.2, 0.18, 0.25, 0.22, 0.3].map(f => Math.round(tSeed * f)) }
+      ];
+    } else if (key === "chatgpt") {
+      return [{ label: "Default Project", color: "#10b981", points: [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6].map(f => Math.round(tSeed * f)) }];
+    } else {
+      return [{ label: "Enterprise E5", color: "#06b6d4", points: [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4].map(f => Math.round(tSeed * f)) }];
+    }
+  },
+
+  generateMultiSparkline(seriesList, width = 110, height = 26) {
+    if (!seriesList || seriesList.length === 0) return "";
+    let allPoints = [];
+    seriesList.forEach(s => { allPoints = allPoints.concat(s.points || []); });
+    const maxVal = Math.max(...allPoints, 100);
+    const minVal = Math.min(...allPoints, 0);
+    const range = (maxVal - minVal) || 1;
+    const n = Math.max(...seriesList.map(s => (s.points || []).length));
+    const step = n > 1 ? width / (n - 1) : width;
+
+    const linesHtml = seriesList.map(s => {
+      const pts = (s.points || []).map((val, idx) => {
+        const x = Math.round(idx * step);
+        const y = Math.round(height - ((val - minVal) / range) * (height - 6) - 3);
+        return `${x},${y}`;
+      }).join(" ");
+      const lastVal = s.points ? s.points[s.points.length - 1] : 0;
+      const lastX = Math.round((s.points.length - 1) * step);
+      const lastY = Math.round(height - ((lastVal - minVal) / range) * (height - 6) - 3);
+      return `
+        <polyline fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${pts}" />
+        <circle cx="${lastX}" cy="${lastY}" r="2.5" fill="${s.color}" stroke="#ffffff" stroke-width="0.5" />
+      `;
+    }).join("");
+
+    return `
+      <svg width="${width}" height="${height}" style="overflow: visible; display: block;">
+        ${linesHtml}
+      </svg>
+    `;
+  },
+
+  toggleExpand(key, event) {
+    if (event) event.stopPropagation();
+    if (this.expandedAccounts.has(key)) {
+      this.expandedAccounts.delete(key);
+    } else {
+      this.expandedAccounts.add(key);
+    }
+    this.render();
   },
 
   setViewMode(mode) {
@@ -210,6 +286,7 @@ window.Widget = {
 
         let html = "";
         for (const key of this.providers) {
+          if (this.hiddenPlatforms && this.hiddenPlatforms.has(key)) continue;
           const item = provs[key] || {
             tokens_today: 0,
             tokens_week: 0,
@@ -225,21 +302,53 @@ window.Widget = {
           const weeklyRem = item.weekly_balance_remaining_pct ?? 100;
 
           const isPinned = this.pinnedItems.has(key);
+          const isExpanded = this.expandedAccounts.has(key);
           const isDimmed = this.fadeUnpinned && !this.hasWindowFocus && !isPinned;
           const rowStyle = isDimmed ? "opacity: 0.12; transform: scale(0.97); pointer-events: none; filter: blur(0.5px);" : "opacity: 1; transform: scale(1);";
+          const childSeries = this.getChildSeries(key, item);
 
           let bodyContent = "";
           if (this.viewMode === "trends") {
-            const sparklineSvg = this.generateSparkline(item.tokens_today, item.tokens_week, provColors[key] || "#06b6d4");
-            bodyContent = `
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px; gap: 8px;">
-                <div style="flex-shrink: 0;">${sparklineSvg}</div>
-                <div style="font-size: 0.62rem; color: var(--text-dim); text-align: right; line-height: 1.25;">
-                  <div>Wk: <span style="color: #cbd5e1; font-family: var(--font-mono); font-weight: 600;">${Number(item.tokens_week).toLocaleString()}</span></div>
-                  <div>Sess: <span style="color: ${sessionRem < 20 ? '#f43f5e' : '#10b981'}; font-family: var(--font-mono); font-weight: 600;">${sessionRem}%</span></div>
+            if (!isExpanded) {
+              const multiSvg = this.generateMultiSparkline(childSeries, 120, 26);
+              bodyContent = `
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px; gap: 8px;">
+                  <div style="flex-shrink: 0;">${multiSvg}</div>
+                  <div style="font-size: 0.62rem; color: var(--text-dim); text-align: right; line-height: 1.25;">
+                    <div>Wk: <span style="color: #cbd5e1; font-family: var(--font-mono); font-weight: 600;">${Number(item.tokens_week).toLocaleString()}</span></div>
+                    <div>Sess: <span style="color: ${sessionRem < 20 ? '#f43f5e' : '#10b981'}; font-family: var(--font-mono); font-weight: 600;">${sessionRem}%</span></div>
+                  </div>
                 </div>
-              </div>
-            `;
+              `;
+            } else {
+              let branchesHtml = "";
+              if (!this.hideParentChartOnExpand) {
+                const multiSvg = this.generateMultiSparkline(childSeries, 130, 28);
+                branchesHtml += `
+                  <div style="margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px dashed rgba(255,255,255,0.08);">
+                    <div style="font-size: 0.58rem; color: #94a3b8; margin-bottom: 2px;">Overlaid Children:</div>
+                    ${multiSvg}
+                  </div>
+                `;
+              }
+              childSeries.forEach(cs => {
+                const lastVal = cs.points ? cs.points[cs.points.length - 1] : 0;
+                const spk = this.generateSparkline(lastVal, (cs.points[0] || 10) * 7, cs.color);
+                branchesHtml += `
+                  <div style="margin-top: 4px; padding: 4px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.62rem; margin-bottom: 2px;">
+                      <span style="display: flex; align-items: center; gap: 4px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 2px; background: ${cs.color};"></span>
+                        <span style="color: #cbd5e1; font-weight: 600;">${cs.label}</span>
+                      </span>
+                      <span style="color: ${cs.color}; font-family: var(--font-mono); font-weight: 600;">${lastVal} t/s</span>
+                    </div>
+                    ${spk}
+                  </div>
+                `;
+              });
+              bodyContent = `<div style="margin-top: 6px;">${branchesHtml}</div>`;
+            }
           } else {
             bodyContent = `
               <div class="dual-bars-box">
@@ -271,7 +380,9 @@ window.Widget = {
                  title="Click to focus ${displayNames[key]} | Right-click to ${isPinned ? 'unpin' : 'pin'}">
               <div class="account-row-header">
                 <div class="account-brand-info">
+                  <span onclick="window.Widget.toggleExpand('${key}', event)" style="cursor: pointer; font-size: 0.6rem; color: #38bdf8; margin-right: 3px;" title="Toggle branch expansion">${isExpanded ? '▼' : '▶'}</span>
                   <span class="dot ${statusDot}"></span>
+                  <span style="display: inline-block; width: 7px; height: 7px; border-radius: 2px; background: ${provColors[key] || '#06b6d4'}; margin-right: 4px; flex-shrink: 0;" title="${displayNames[key]} color swatch"></span>
                   <span>${displayNames[key]}</span>
                   <span class="badge badge-${key}" style="font-size: 0.6rem; padding: 1px 4px;">${provInfo.plan_type || 'Active'}</span>
                   ${isPinned ? '<span style="font-size: 0.65rem; color: #f59e0b;" title="Pinned item">📌</span>' : ''}

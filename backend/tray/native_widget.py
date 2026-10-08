@@ -79,6 +79,14 @@ THEMES = {
     }
 }
 
+PROVIDER_COLORS = {
+    "claude": "#f59e0b",
+    "gemini": "#38bdf8",
+    "chatgpt": "#10b981",
+    "ollama": "#a855f7",
+    "copilot": "#06b6d4"
+}
+
 class NativeTaskbarWidget:
     """
     Chromeless, always-on-top, dark-mode desktop widget docked right above the Windows taskbar.
@@ -106,6 +114,8 @@ class NativeTaskbarWidget:
         self.fade_unpinned = False
         self.view_mode = "balances" # "balances" or "trends"
         self.pinned_items = set(["claude", "gemini", "ollama"])
+        self.hide_parent_chart_on_expand = False
+        self.hidden_platforms = set()
         self.has_focus = True
         self._hit_boxes = []
         self._pin_hit_boxes = []
@@ -194,8 +204,14 @@ class NativeTaskbarWidget:
             self.fade_unpinned = bool(st["widget_fade_unpinned"])
         if "widget_view_mode" in st:
             self.view_mode = st["widget_view_mode"]
+        if "widget_hide_parent_chart_on_expand" in st:
+            self.hide_parent_chart_on_expand = bool(st["widget_hide_parent_chart_on_expand"])
         if "pinned_items" in st and isinstance(st["pinned_items"], list):
             self.pinned_items = set(st["pinned_items"])
+        if "estate_visibility" in st:
+            ev = st["estate_visibility"]
+            if isinstance(ev, dict) and "hidden_platforms" in ev:
+                self.hidden_platforms = set(p.lower() for p in ev["hidden_platforms"])
 
     def _save_settings_async(self, payload: dict):
         def _post():
@@ -536,6 +552,78 @@ class NativeTaskbarWidget:
             self.canvas.create_text(x + 8, y + 8, text=label, anchor="w", fill=self.theme["subtext"], font=self._get_font(7))
         self.canvas.create_text(x + w - 8, y + 8, text=f"{points[-1]} t/s", anchor="e", fill=self.theme["accent"], font=self._get_font(7, "bold"))
 
+    def _draw_multi_sparkline(self, x, y, w, h, series_list, label=""):
+        """Draws an overlaid multi-series line chart on the Tkinter canvas."""
+        self.canvas.create_rectangle(x, y, x + w, y + h, fill="#0b121e", outline="#1e293b", width=1)
+        if not series_list:
+            return
+
+        all_points = []
+        for pts, _, _ in series_list:
+            all_points.extend(pts)
+        if not all_points:
+            all_points = [10, 20, 15, 30]
+
+        min_v = min(all_points)
+        max_v = max(all_points)
+        rng = max(1.0, float(max_v - min_v))
+
+        pad_x = 8
+        pad_y = 6
+        plot_w = w - (pad_x * 2)
+        plot_h = h - (pad_y * 2)
+
+        for points, color, name in series_list:
+            if not points or len(points) < 2:
+                continue
+            n = len(points)
+            coords = []
+            for i, pt in enumerate(points):
+                px = x + pad_x + int((i / (n - 1)) * plot_w)
+                py = y + h - pad_y - int(((pt - min_v) / rng) * plot_h)
+                coords.extend([px, py])
+            if len(coords) >= 4:
+                self.canvas.create_line(*coords, fill=color, width=2, smooth=True)
+                last_x, last_y = coords[-2], coords[-1]
+                self.canvas.create_oval(last_x - 2, last_y - 2, last_x + 2, last_y + 2, fill=color, outline="#ffffff")
+
+        if label:
+            self.canvas.create_text(x + 8, y + 8, text=label, anchor="w", fill=self.theme["subtext"], font=self._get_font(7))
+
+    def _get_provider_child_series(self, p_key: str, item: dict) -> list:
+        """Returns a list of tuples (points, color, label) for each child in the provider hierarchy."""
+        t_seed = max(100, item.get("tokens_today", 1500))
+        h = item.get("hierarchy", {})
+        if p_key == "claude":
+            team_pts = [int(t_seed * f) for f in [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95]]
+            ind_pts = [int(t_seed * f) for f in [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65]]
+            return [
+                (team_pts, "#c084fc", "Synthesis2 (Team)"),
+                (ind_pts, "#38bdf8", "James Eckhardt (Individual)")
+            ]
+        elif p_key == "gemini":
+            acct_pts = [int(t_seed * f) for f in [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9]]
+            k1_pts = [int(t_seed * f) for f in [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55]]
+            k2_pts = [int(t_seed * f) for f in [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32]]
+            return [
+                (acct_pts, "#60a5fa", "acidcow@gmail.com (Account)"),
+                (k1_pts, "#34d399", "Dev-Key-01"),
+                (k2_pts, "#f472b6", "Workspace-Prod")
+            ]
+        elif p_key == "ollama":
+            m1_pts = [int(t_seed * f) for f in [0.3, 0.2, 0.4, 0.35, 0.6, 0.5, 0.7, 0.8]]
+            m2_pts = [int(t_seed * f) for f in [0.1, 0.15, 0.12, 0.2, 0.18, 0.25, 0.22, 0.3]]
+            return [
+                (m1_pts, "#a855f7", "llama3.2:3b"),
+                (m2_pts, "#ec4899", "deepseek-r1:8b")
+            ]
+        elif p_key == "chatgpt":
+            org_pts = [int(t_seed * f) for f in [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6]]
+            return [(org_pts, "#10b981", "Default Project")]
+        else:
+            co_pts = [int(t_seed * f) for f in [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4]]
+            return [(co_pts, "#06b6d4", "Enterprise E5")]
+
     def render_canvas(self):
         """Draws the accounts cards with click-to-expand multi-level bars, sparklines, and pin badges."""
         if not self.canvas:
@@ -547,13 +635,13 @@ class NativeTaskbarWidget:
             self.expanded_accounts = {"claude": False, "gemini": False}
 
         all_providers = ["claude", "gemini", "chatgpt", "ollama", "copilot"]
-        # Fade unpinned if focus lost and fade_unpinned enabled
+        # Fade unpinned if focus lost and fade_unpinned enabled; filter out hidden platforms
         if self.fade_unpinned and not self.has_focus:
-            providers_order = [p for p in all_providers if p in self.pinned_items]
+            providers_order = [p for p in all_providers if p in self.pinned_items and p not in self.hidden_platforms]
             if not providers_order:
-                providers_order = all_providers[:2]
+                providers_order = [p for p in all_providers if p not in self.hidden_platforms][:2]
         else:
-            providers_order = all_providers
+            providers_order = [p for p in all_providers if p not in self.hidden_platforms]
 
         display_names = {
             "claude": "Claude",
@@ -593,9 +681,19 @@ class NativeTaskbarWidget:
             elif p_key == "gemini":
                 account_label = h.get("account_name") or "acidcow@gmail.com"
 
+            child_series = self._get_provider_child_series(p_key, item)
+
             # Determine card height based on expanded state and view mode
             if self.view_mode == "trends":
-                card_h = 72
+                if not is_expanded:
+                    card_h = 74
+                else:
+                    child_count = len(child_series)
+                    child_height = child_count * 44
+                    if self.hide_parent_chart_on_expand:
+                        card_h = 32 + child_height
+                    else:
+                        card_h = 76 + child_height
             else:
                 if not is_expanded:
                     card_h = 58
@@ -615,7 +713,7 @@ class NativeTaskbarWidget:
             )
             self._hit_boxes.append((4, card_y, card_w, card_y + card_h, p_key, True, item, p_stat))
 
-            # Header Line: Expand Toggle Icon + Status Dot + Pin + Name + Account Badge + Tokens
+            # Header Line: Expand Toggle Icon + Status Dot + Pin + Swatch + Name + Account Badge + Tokens
             toggle_icon = "▼" if is_expanded else "▶"
             self.canvas.create_text(
                 12, card_y + 13,
@@ -640,9 +738,13 @@ class NativeTaskbarWidget:
             # Status Dot
             self.canvas.create_oval(34, card_y + 10, 40, card_y + 16, fill=dot_color, outline="")
 
+            # Provider Color Swatch Block to left of name
+            prov_color = PROVIDER_COLORS.get(p_key, th["accent"])
+            self.canvas.create_rectangle(44, card_y + 9, 52, card_y + 17, fill=prov_color, outline="")
+
             # Provider Name
             self.canvas.create_text(
-                46, card_y + 13,
+                56, card_y + 13,
                 text=display_names[p_key],
                 anchor="w",
                 fill=th["text"],
@@ -654,11 +756,11 @@ class NativeTaskbarWidget:
                 badge_bg = "#1e293b" if p_key == "claude" else "#172554"
                 badge_fg = "#fbbf24" if p_key == "claude" else "#93c5fd"
                 self.canvas.create_rectangle(
-                    122, card_y + 5, 122 + min(120, len(account_label) * 6 + 12), card_y + 20,
+                    132, card_y + 5, 132 + min(110, len(account_label) * 6 + 12), card_y + 20,
                     fill=badge_bg, outline=""
                 )
                 self.canvas.create_text(
-                    128, card_y + 12,
+                    138, card_y + 12,
                     text=account_label[:18],
                     anchor="w",
                     fill=badge_fg,
@@ -677,14 +779,20 @@ class NativeTaskbarWidget:
 
             # --- CARD BODY ---
             if self.view_mode == "trends":
-                # Render Sparkline Trend Line
-                t_seed = item.get("tokens_today", 1500)
-                sim_pts = [
-                    int(t_seed * 0.1), int(t_seed * 0.25), int(t_seed * 0.18),
-                    int(t_seed * 0.45), int(t_seed * 0.38), int(t_seed * 0.72),
-                    int(t_seed * 0.60), int(t_seed * 0.95)
-                ]
-                self._draw_sparkline(10, card_y + 26, card_w - 16, 38, sim_pts, th["accent"], "Usage Rate:")
+                if not is_expanded:
+                    # Overlaid line plots corresponding to each child
+                    self._draw_multi_sparkline(10, card_y + 26, card_w - 16, 40, child_series, "All Children Overlaid:")
+                else:
+                    cur_y = card_y + 26
+                    if not self.hide_parent_chart_on_expand:
+                        self._draw_multi_sparkline(10, cur_y, card_w - 16, 40, child_series, "All Children Overlaid:")
+                        cur_y += 44
+                    for c_pts, c_col, c_name in child_series:
+                        # Swatch block for child
+                        self.canvas.create_rectangle(12, cur_y + 4, 18, cur_y + 10, fill=c_col, outline="")
+                        self.canvas.create_text(22, cur_y + 7, text=c_name, fill=c_col, anchor="w", font=self._get_font(7, "bold"))
+                        self._draw_sparkline(10, cur_y + 14, card_w - 16, 26, c_pts, c_col, "")
+                        cur_y += 44
             else:
                 if not is_expanded:
                     # Collapsed Dual Bars
