@@ -106,6 +106,26 @@ class UsageDatabase:
             ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_acct_profiles_prov ON account_profiles(provider)')
 
+            # Model benchmarking & evaluations table (AIUM-609)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS model_evaluations (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    suite_name TEXT NOT NULL,
+                    score_pct REAL NOT NULL DEFAULT 0.0,
+                    ttft_ms REAL NOT NULL DEFAULT 0.0,
+                    tokens_per_sec REAL NOT NULL DEFAULT 0.0,
+                    pass_count INTEGER NOT NULL DEFAULT 0,
+                    fail_count INTEGER NOT NULL DEFAULT 0,
+                    details_json TEXT,
+                    recorded_at TEXT NOT NULL
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_evals_model ON model_evaluations(model_name)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_evals_prov ON model_evaluations(provider)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_evals_recorded_at ON model_evaluations(recorded_at)')
+
             # Migration for existing DBs
             for col in [
                 "session_remaining_pct REAL",
@@ -1257,4 +1277,141 @@ class UsageDatabase:
             conn.close()
         return deleted
 
+    # -------------------------------------------------------------
+    # Model Benchmarking & Quality Evaluations (AIUM-609)
+    # -------------------------------------------------------------
+    def save_model_evaluation(
+        self,
+        provider: str,
+        model_name: str,
+        suite_name: str = "full_suite",
+        score_pct: float = 0.0,
+        ttft_ms: float = 0.0,
+        tokens_per_sec: float = 0.0,
+        pass_count: int = 0,
+        fail_count: int = 0,
+        details: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Saves a model benchmark evaluation run."""
+        eval_id = f"eval_{uuid.uuid4().hex[:10]}"
+        now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        details_str = json.dumps(details) if details else "{}"
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO model_evaluations (
+                    id, provider, model_name, suite_name,
+                    score_pct, ttft_ms, tokens_per_sec,
+                    pass_count, fail_count, details_json, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                eval_id, provider.lower().strip(), model_name.strip(), suite_name,
+                float(score_pct), float(ttft_ms), float(tokens_per_sec),
+                int(pass_count), int(fail_count), details_str, now_utc
+            ))
+            conn.commit()
+            conn.close()
+        return eval_id
+
+    def get_model_evaluations(
+        self,
+        provider: Optional[str] = None,
+        model_name: Optional[str] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Returns historical model benchmark runs."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            query = "SELECT * FROM model_evaluations"
+            params = []
+            conditions = []
+            if provider:
+                conditions.append("provider = ?")
+                params.append(provider.lower().strip())
+            if model_name:
+                conditions.append("model_name = ?")
+                params.append(model_name.strip())
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            query += " ORDER BY recorded_at DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(query, params)
+            rows = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        for r in rows:
+            if r.get("details_json"):
+                try:
+                    r["details"] = json.loads(r["details_json"])
+                except Exception:
+                    r["details"] = {}
+        return rows
+
+    def get_model_leaderboard(self) -> List[Dict[str, Any]]:
+        """
+        Aggregates benchmark evaluations into a comparative leaderboard.
+        Ranks models across Quality Score, Speed (TTFT), Throughput (TPS), and Security.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    provider,
+                    model_name,
+                    AVG(score_pct) as avg_score,
+                    AVG(ttft_ms) as avg_ttft,
+                    AVG(tokens_per_sec) as avg_tps,
+                    SUM(pass_count) as total_passes,
+                    SUM(fail_count) as total_fails,
+                    COUNT(id) as total_runs,
+                    MAX(recorded_at) as last_benchmarked
+                FROM model_evaluations
+                GROUP BY provider, model_name
+                ORDER BY avg_score DESC, avg_ttft ASC
+            ''')
+            rows = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        leaderboard = []
+        for r in rows:
+            score = round(float(r.get("avg_score") or 0.0), 1)
+            ttft = round(float(r.get("avg_ttft") or 0.0), 1)
+            tps = round(float(r.get("avg_tps") or 0.0), 1)
+            prov = r.get("provider", "").lower()
+
+            # Assign Letter Rating
+            if score >= 95.0:
+                rating = "A+"
+            elif score >= 90.0:
+                rating = "A"
+            elif score >= 80.0:
+                rating = "B+"
+            elif score >= 70.0:
+                rating = "B"
+            else:
+                rating = "C"
+
+            cost_tier = "Zero-Cost Local" if prov == "ollama" else ("Low Cost" if "flash" in r.get("model_name", "").lower() else "Standard Cloud")
+
+            leaderboard.append({
+                "provider": prov,
+                "model_name": r.get("model_name"),
+                "avg_score": score,
+                "avg_ttft_ms": ttft,
+                "avg_tps": tps,
+                "total_passes": r.get("total_passes", 0),
+                "total_fails": r.get("total_fails", 0),
+                "total_runs": r.get("total_runs", 0),
+                "overall_rating": rating,
+                "cost_tier": cost_tier,
+                "last_benchmarked": r.get("last_benchmarked")
+            })
+        return leaderboard
+
 DatabaseEngine = UsageDatabase
+

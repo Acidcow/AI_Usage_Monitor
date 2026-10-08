@@ -31,6 +31,7 @@ window.App = {
       this.loadComponent("container-usage-gauges", "/components/usage_gauge_card.html"),
       this.loadComponent("container-session-timeline", "/components/session_timeline.html"),
       this.loadComponent("container-capacity-analytics", "/components/capacity_analytics.html"),
+      this.loadComponent("container-benchmark-scorecard", "/components/benchmark_scorecard.html"),
       this.loadComponent("container-provider-hub", "/components/provider_hub.html"),
       this.loadComponent("container-reports-panel", "/components/reports_panel.html"),
       this.loadComponent("container-troubleshooter", "/components/troubleshooter_panel.html"),
@@ -1939,6 +1940,9 @@ window.App = {
     if (target === "capacity") {
       this.loadCapacityAnalytics();
     }
+    if (target === "benchmarks") {
+      this.loadBenchmarkScorecard();
+    }
   },
 
   async loadCapacityAnalytics() {
@@ -2307,6 +2311,229 @@ window.App = {
     } catch (e) {
       console.error("Error deleting account profile:", e);
       alert("Error deleting account profile");
+    }
+  },
+
+  // -------------------------------------------------------------
+  // Model Benchmarks, Quality Evals & Security Suite (AIUM-609)
+  // -------------------------------------------------------------
+  handleBenchmarkProviderChange() {
+    const provSel = document.getElementById("bench-select-provider");
+    const modelInp = document.getElementById("bench-input-model");
+    if (!provSel || !modelInp) return;
+    const prov = provSel.value;
+    const defaults = {
+      claude: "claude-3-7-sonnet",
+      gemini: "gemini-2.0-flash",
+      ollama: "llama3:8b",
+      chatgpt: "gpt-4o",
+      copilot: "m365-copilot-chat"
+    };
+    modelInp.value = defaults[prov] || "default-model";
+  },
+
+  async loadBenchmarkScorecard() {
+    try {
+      const [lbRes, resRes] = await Promise.all([
+        fetch('/api/benchmarks/leaderboard'),
+        fetch('/api/benchmarks/results?limit=25')
+      ]);
+
+      if (lbRes.ok) {
+        const lbData = await lbRes.json();
+        this.renderBenchmarkLeaderboard(lbData.leaderboard || []);
+      }
+      if (resRes.ok) {
+        const resData = await resRes.json();
+        this.renderBenchmarkResults(resData.evaluations || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load benchmark scorecard:", e);
+    }
+  },
+
+  renderBenchmarkLeaderboard(leaderboard) {
+    const tbody = document.getElementById("benchmark-leaderboard-body");
+    if (!tbody) return;
+
+    if (!leaderboard || leaderboard.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="padding: 24px; text-align: center; color: var(--text-dim);">
+            No benchmark runs recorded yet. Click "Run Benchmark Suite Now" above to evaluate your first model!
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const ratingColors = {
+      "A+": "#34d399",
+      "A": "#10b981",
+      "B+": "#38bdf8",
+      "B": "#fbbf24",
+      "C": "#f87171"
+    };
+
+    const provIcons = {
+      claude: "🟠",
+      gemini: "💎",
+      chatgpt: "🟢",
+      ollama: "🦙",
+      copilot: "🔵"
+    };
+
+    tbody.innerHTML = leaderboard.map(m => {
+      const col = ratingColors[m.overall_rating] || "#94a3b8";
+      const icon = provIcons[m.provider] || "⚙️";
+      return `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+          <td style="padding: 12px 14px;">
+            <span class="badge" style="background: ${col}20; color: ${col}; font-weight: 800; font-size: 0.8rem; border: 1px solid ${col}40;">
+              ${m.overall_rating}
+            </span>
+          </td>
+          <td style="padding: 12px 14px;">
+            <div style="font-weight: 700; color: #fff;">${icon} ${this.escapeHtml(m.model_name)}</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">${this.escapeHtml(m.provider)}</div>
+          </td>
+          <td style="padding: 12px 14px;">
+            <div style="font-family: var(--font-mono); font-size: 0.95rem; font-weight: 700; color: ${m.avg_score >= 90 ? '#34d399' : '#38bdf8'};">
+              ${m.avg_score}%
+            </div>
+            <div style="font-size: 0.7rem; color: var(--text-dim);">${m.total_passes} pass / ${m.total_fails} fail</div>
+          </td>
+          <td style="padding: 12px 14px; font-family: var(--font-mono); font-size: 0.85rem; color: #e2e8f0;">
+            ${m.avg_ttft_ms} ms
+          </td>
+          <td style="padding: 12px 14px; font-family: var(--font-mono); font-size: 0.85rem; color: #38bdf8;">
+            ${m.avg_tps} tok/s
+          </td>
+          <td style="padding: 12px 14px;">
+            <span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 0.72rem;">
+              ${this.escapeHtml(m.cost_tier)}
+            </span>
+          </td>
+          <td style="padding: 12px 14px; font-size: 0.78rem; color: var(--text-dim);">
+            ${m.total_runs} run(s)
+          </td>
+          <td style="padding: 12px 14px;">
+            <button class="btn btn-secondary btn-sm" onclick="window.App.rerunBenchmark('${m.provider}', '${this.escapeHtml(m.model_name)}')" style="font-size: 0.7rem; padding: 3px 8px;">
+              ⚡ Run Again
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  },
+
+  renderBenchmarkResults(evaluations) {
+    const tbody = document.getElementById("benchmark-results-body");
+    if (!tbody) return;
+
+    if (!evaluations || evaluations.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" style="padding: 20px; text-align: center; color: var(--text-dim);">
+            No evaluation runs recorded yet.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = evaluations.map(e => `
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+        <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.76rem; color: #a5b4fc;">
+          ${this.escapeHtml(e.id)}
+        </td>
+        <td style="padding: 10px 14px; font-weight: 600; color: #f8fafc;">
+          ${this.escapeHtml(e.model_name)}
+        </td>
+        <td style="padding: 10px 14px; font-size: 0.74rem; color: var(--text-dim);">
+          ${this.escapeHtml(e.suite_name || 'full')}
+        </td>
+        <td style="padding: 10px 14px; font-size: 0.76rem;">
+          <span style="color: #34d399; font-weight: 600;">${e.pass_count} P</span> / <span style="color: #f87171;">${e.fail_count} F</span>
+        </td>
+        <td style="padding: 10px 14px; font-family: var(--font-mono); font-weight: 700; color: ${e.score_pct >= 90 ? '#34d399' : '#38bdf8'};">
+          ${e.score_pct}%
+        </td>
+        <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.78rem; color: #cbd5e1;">
+          ${e.ttft_ms} ms
+        </td>
+        <td style="padding: 10px 14px; font-size: 0.72rem; color: var(--text-dim);">
+          ${e.recorded_at ? e.recorded_at.substring(0, 19).replace('T', ' ') : 'N/A'}
+        </td>
+      </tr>
+    `).join("");
+  },
+
+  rerunBenchmark(provider, modelName) {
+    const provSel = document.getElementById("bench-select-provider");
+    const modelInp = document.getElementById("bench-input-model");
+    if (provSel) provSel.value = provider;
+    if (modelInp) modelInp.value = modelName;
+    this.triggerBenchmarkRun();
+  },
+
+  async triggerBenchmarkRun() {
+    const provSel = document.getElementById("bench-select-provider");
+    const modelInp = document.getElementById("bench-input-model");
+    const btn = document.getElementById("btn-run-benchmark");
+    const indicator = document.getElementById("bench-status-indicator");
+
+    const provider = provSel ? provSel.value : 'claude';
+    const model_name = modelInp ? modelInp.value.trim() : 'claude-3-7-sonnet';
+
+    const suites = [];
+    if (document.getElementById("suite-chk-coding")?.checked) suites.push("coding");
+    if (document.getElementById("suite-chk-json")?.checked) suites.push("json_schema");
+    if (document.getElementById("suite-chk-security")?.checked) suites.push("security");
+    if (document.getElementById("suite-chk-retrieval")?.checked) suites.push("retrieval");
+
+    if (suites.length === 0) {
+      alert("Please select at least one evaluation suite.");
+      return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = "⏳ Evaluating Model...";
+    }
+    if (indicator) {
+      indicator.innerText = `Running ${suites.length} suites against ${model_name}...`;
+      indicator.style.color = "#fbbf24";
+    }
+
+    try {
+      const res = await fetch('/api/benchmarks/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, model_name, suites })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (indicator) {
+          indicator.innerText = `✓ Benchmark finished! Score: ${data.run.score_pct}% (${data.run.duration_ms}ms)`;
+          indicator.style.color = "#34d399";
+        }
+        await this.loadBenchmarkScorecard();
+      } else {
+        alert(data.error || "Benchmark evaluation failed");
+        if (indicator) {
+          indicator.innerText = "❌ Benchmark run failed";
+          indicator.style.color = "#f87171";
+        }
+      }
+    } catch (e) {
+      console.error("Error executing benchmark:", e);
+      alert("Error executing model benchmark");
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerText = "🚀 Run Benchmark Suite Now";
+      }
     }
   },
 

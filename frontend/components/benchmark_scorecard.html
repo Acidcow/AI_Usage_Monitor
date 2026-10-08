@@ -1,0 +1,133 @@
+<!-- Canonical Component: Model Benchmarking, Quality Evals & Security Suite (AIUM-609) -->
+<div class="glass-card" style="margin-bottom: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 1.3rem;">🔬</span>
+        <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff;">Model Benchmarks, Quality Evals & Security Suite</h3>
+        <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 0.7rem;">
+          Automated Eval Harness
+        </span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+        Empirically measure AST code syntax validity, strict JSON schema adherence, TTFT latency, output tokens/sec, and prompt injection defense across local and cloud models.
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <button class="btn btn-primary btn-sm" onclick="window.App.loadBenchmarkScorecard()">
+        ↻ Refresh Leaderboard
+      </button>
+    </div>
+  </div>
+
+  <!-- Benchmark Execution Trigger Strip -->
+  <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+      <span style="font-size: 0.84rem; font-weight: 700; color: #38bdf8;">⚡ Execute Model Benchmark Run</span>
+      <span style="font-size: 0.74rem; color: var(--text-dim);" id="bench-status-indicator">Ready to evaluate</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px;">
+      <div>
+        <label for="bench-select-provider" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Target Provider</label>
+        <select id="bench-select-provider" onchange="window.App.handleBenchmarkProviderChange()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 8px; border-radius: 6px; font-size: 0.78rem;">
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="ollama">Ollama (Local Engine)</option>
+          <option value="chatgpt">ChatGPT / OpenAI</option>
+          <option value="copilot">M365 Copilot</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="bench-input-model" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Model Identifier</label>
+        <input type="text" id="bench-input-model" value="claude-3-7-sonnet" placeholder="e.g. claude-3-7-sonnet, llama3:8b, gpt-4o" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 8px; border-radius: 6px; font-size: 0.78rem;">
+      </div>
+
+      <div style="grid-column: span 2; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-top: 14px;">
+        <span style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600;">Active Suites:</span>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; cursor: pointer;">
+          <input type="checkbox" id="suite-chk-coding" checked style="accent-color: var(--accent-purple);">
+          💻 Coding AST Syntax
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; cursor: pointer;">
+          <input type="checkbox" id="suite-chk-json" checked style="accent-color: var(--accent-purple);">
+          📋 JSON Schema
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; cursor: pointer;">
+          <input type="checkbox" id="suite-chk-security" checked style="accent-color: var(--accent-purple);">
+          🛡️ Prompt Injection Defense
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; cursor: pointer;">
+          <input type="checkbox" id="suite-chk-retrieval" checked style="accent-color: var(--accent-purple);">
+          🔍 Context Recall
+        </label>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end;">
+      <button class="btn btn-primary btn-sm" id="btn-run-benchmark" onclick="window.App.triggerBenchmarkRun()">
+        🚀 Run Benchmark Suite Now
+      </button>
+    </div>
+  </div>
+
+  <!-- Comparative Model Leaderboard Table -->
+  <div style="margin-bottom: 24px;">
+    <h4 style="font-size: 0.95rem; font-weight: 700; color: #fff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+      <span>🏆</span> Estate Model Quality & Speed Leaderboard
+    </h4>
+    <div style="overflow-x: auto; background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm);">
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+        <thead>
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.2); color: var(--text-dim); text-transform: uppercase; font-size: 0.7rem;">
+            <th style="padding: 10px 14px;">Rating</th>
+            <th style="padding: 10px 14px;">Model & Provider</th>
+            <th style="padding: 10px 14px;">Quality Score</th>
+            <th style="padding: 10px 14px;">Time-To-First-Token</th>
+            <th style="padding: 10px 14px;">Output Speed</th>
+            <th style="padding: 10px 14px;">Cost Tier</th>
+            <th style="padding: 10px 14px;">Evals Run</th>
+            <th style="padding: 10px 14px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="benchmark-leaderboard-body">
+          <tr>
+            <td colspan="8" style="padding: 24px; text-align: center; color: var(--text-dim);">
+              No benchmark runs recorded yet. Click "Run Benchmark Suite Now" above to evaluate your first model!
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Historical Evaluation Runs Table -->
+  <div>
+    <h4 style="font-size: 0.95rem; font-weight: 700; color: #fff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+      <span>📋</span> Recent Evaluation Runs & Test Inspections
+    </h4>
+    <div style="overflow-x: auto; background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm);">
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+        <thead>
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.2); color: var(--text-dim); text-transform: uppercase; font-size: 0.7rem;">
+            <th style="padding: 10px 14px;">Eval ID</th>
+            <th style="padding: 10px 14px;">Model</th>
+            <th style="padding: 10px 14px;">Suites Evaluated</th>
+            <th style="padding: 10px 14px;">Pass / Fail</th>
+            <th style="padding: 10px 14px;">Score %</th>
+            <th style="padding: 10px 14px;">TTFT</th>
+            <th style="padding: 10px 14px;">Recorded At</th>
+          </tr>
+        </thead>
+        <tbody id="benchmark-results-body">
+          <tr>
+            <td colspan="7" style="padding: 20px; text-align: center; color: var(--text-dim);">
+              Evaluation run history will populate as tests complete.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

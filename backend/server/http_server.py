@@ -263,6 +263,18 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             recs = engine.generate_estate_recommendations()
             return self._send_json(200, {"recommendations": recs})
 
+        # Model Benchmarking & Evaluations Endpoints (AIUM-609)
+        if path == "/api/benchmarks/results":
+            prov = query.get("provider", [None])[0]
+            model = query.get("model", [None])[0]
+            limit = int(query.get("limit", [50])[0])
+            evals = srv.database.get_model_evaluations(provider=prov, model_name=model, limit=limit)
+            return self._send_json(200, {"success": True, "evaluations": evals})
+
+        if path == "/api/benchmarks/leaderboard":
+            lb = srv.database.get_model_leaderboard()
+            return self._send_json(200, {"success": True, "leaderboard": lb})
+
         self._send_json(404, {"error": "API route not found"})
 
     def _handle_api_post(self, path: str, body: Dict[str, Any]):
@@ -551,6 +563,16 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 session_id=session_id
             )
             return self._send_json(200, {"success": True, "event_id": evt_id, "model": model})
+
+        # Model Benchmarking Runner (AIUM-609)
+        if path == "/api/benchmarks/run":
+            from backend.analytics.benchmark_engine import BenchmarkEngine
+            engine = BenchmarkEngine(database=srv.database)
+            prov = body.get("provider", "claude")
+            model = body.get("model_name", "claude-3-7-sonnet")
+            suites = body.get("suites", ["coding", "json_schema", "security", "retrieval"])
+            res = engine.run_benchmark_suite(provider=prov, model_name=model, suites=suites)
+            return self._send_json(200, {"success": True, "run": res})
 
         self._send_json(404, {"error": "API route not found"})
 
