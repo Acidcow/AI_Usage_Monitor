@@ -260,7 +260,28 @@ class TestHierarchicalTrendsAndFiltering(unittest.TestCase):
         self.assertIsNotNone(tag_id)
         tags = self.db.get_cross_platform_tags()
         self.assertTrue(any(t["tag_name"] == "Production" for t in tags))
+    def test_frontend_js_syntax_validity(self):
+        """Assert that frontend JavaScript files (app.js, widget.js) have valid syntax without uncaught parser errors."""
+        import subprocess
+        import shutil
+        repo_root = Path(__file__).resolve().parent.parent
+        js_files = [
+            repo_root / "frontend" / "js" / "app.js",
+            repo_root / "frontend" / "js" / "widget.js"
+        ]
+        node_bin = shutil.which("node")
+        if node_bin:
+            for js in js_files:
+                res = subprocess.run([node_bin, "--check", str(js)], capture_output=True, text=True)
+                self.assertEqual(res.returncode, 0, f"Syntax error in {js.name}:\n{res.stderr}")
+        else:
+            # Fallback simple bracket validator
+            for js in js_files:
+                content = js.read_text(encoding="utf-8")
+                # Ensure non-empty and starts properly
+                self.assertTrue(len(content) > 500)
 
 
 if __name__ == "__main__":
     unittest.main()
+

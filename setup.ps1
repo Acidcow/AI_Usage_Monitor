@@ -50,4 +50,4 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
 
-python run_monitor.py --open-browser --demo
+python run_monitor.py --open-browser --demo --widget

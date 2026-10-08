@@ -977,6 +977,11 @@ window.App = {
             const match = d.getAttribute("data-series") === plat;
             d.style.opacity = match ? "1" : "0.1";
           });
+        }
+      };
+    });
+  },
+
   _getProviderChildSeries(key, item) {
     const tSeed = Math.max(100, item.tokens_today || 1500);
     const h = item.hierarchy || {};
