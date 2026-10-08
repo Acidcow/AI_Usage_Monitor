@@ -1,0 +1,95 @@
+<!-- Canonical Component: Estate Throughput, Burst Performance & Capacity Analytics -->
+<div class="glass-card" style="margin-bottom: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 1.3rem;">⚡</span>
+        <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff;">Estate Throughput, Burst Performance & Capacity Forecast</h3>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+        Mathematical velocity tracking, sliding-window burst factors, predictive Time-To-Exhaustion (TTE) modeling, and proactive workload recommendations.
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <button class="btn btn-secondary btn-sm" onclick="window.App.loadCapacityAnalytics()" style="border-color: rgba(6, 182, 212, 0.4); color: var(--accent-cyan);" title="Refresh velocity and capacity projections">
+        ↻ Refresh Projections
+      </button>
+    </div>
+  </div>
+
+  <!-- Operational Metric Strips -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px;">
+    <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 14px;">
+      <div style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">Estate Token Velocity</div>
+      <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 800; color: var(--accent-cyan); margin-top: 4px;" id="cap-velocity-val">0 <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted);">tok/min</span></div>
+      <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">Rolling 15-minute average</div>
+    </div>
+
+    <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 14px;">
+      <div style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">Peak 5m Burst Factor</div>
+      <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 800; color: #fbbf24; margin-top: 4px;" id="cap-burst-val">1.0x</div>
+      <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;" id="cap-burst-sub">Baseline sustained</div>
+    </div>
+
+    <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 14px;">
+      <div style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">24-Hour Rolling Volume</div>
+      <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 800; color: #c084fc; margin-top: 4px;" id="cap-rolling24-val">0 <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted);">tok</span></div>
+      <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">Cross-provider estate sum</div>
+    </div>
+
+    <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 14px;">
+      <div style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">Local Offload Potential</div>
+      <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 800; color: #34d399; margin-top: 4px;" id="cap-savings-val">$0.00</div>
+      <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">Estimated daily savings</div>
+    </div>
+  </div>
+
+  <!-- Predictive Quota Exhaustion (TTE) Forecast Table -->
+  <div style="margin-bottom: 24px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <div style="font-size: 0.85rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px;">
+        <span>⏳</span> Predictive Quota Depletion & Time-To-Exhaustion (TTE)
+      </div>
+      <span style="font-size: 0.72rem; color: var(--text-dim);">Projects window exhaustion based on active token velocity</span>
+    </div>
+
+    <div class="table-container" style="overflow-x: auto;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+        <thead>
+          <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: var(--text-dim);">
+            <th style="padding: 10px 8px;">Provider / Account</th>
+            <th style="padding: 10px 8px;">Session Balance</th>
+            <th style="padding: 10px 8px;">Weekly Pool</th>
+            <th style="padding: 10px 8px;">Velocity</th>
+            <th style="padding: 10px 8px;">Est. Time-To-Exhaustion</th>
+            <th style="padding: 10px 8px;">Depletion Status</th>
+          </tr>
+        </thead>
+        <tbody id="cap-forecast-tbody">
+          <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">
+              Loading capacity forecast models...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Proactive Estate Recommendations -->
+  <div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <div style="font-size: 0.85rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px;">
+        <span>💡</span> Proactive Estate Optimization & Allocation Advisor
+      </div>
+      <span style="font-size: 0.72rem; color: var(--text-dim);">Heuristic rules for load balancing, rate limit protection & local model delegation</span>
+    </div>
+
+    <div id="cap-recommendations-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px;">
+      <!-- Populated dynamically -->
+      <div style="text-align: center; color: var(--text-dim); padding: 20px;">
+        Analyzing estate allocation heuristics...
+      </div>
+    </div>
+  </div>
+</div>

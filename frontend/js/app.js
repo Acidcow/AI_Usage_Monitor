@@ -30,6 +30,7 @@ window.App = {
       this.loadComponent("container-header-status", "/components/header_status.html"),
       this.loadComponent("container-usage-gauges", "/components/usage_gauge_card.html"),
       this.loadComponent("container-session-timeline", "/components/session_timeline.html"),
+      this.loadComponent("container-capacity-analytics", "/components/capacity_analytics.html"),
       this.loadComponent("container-provider-hub", "/components/provider_hub.html"),
       this.loadComponent("container-reports-panel", "/components/reports_panel.html"),
       this.loadComponent("container-troubleshooter", "/components/troubleshooter_panel.html"),
@@ -70,12 +71,8 @@ window.App = {
   setupEventListeners() {
     document.querySelectorAll(".nav-tab").forEach(tab => {
       tab.addEventListener("click", () => {
-        document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
-        document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-        tab.classList.add("active");
         const target = tab.getAttribute("data-tab");
-        const content = document.getElementById(`tab-${target}`);
-        if (content) content.classList.add("active");
+        this.switchTab(target);
       });
     });
 
@@ -1912,6 +1909,155 @@ window.App = {
       }
     } catch (e) {
       alert("❌ Error removing tag: " + e.message);
+    }
+  },
+
+  switchTab(target) {
+    document.querySelectorAll(".nav-tab").forEach(t => {
+      if (t.getAttribute("data-tab") === target) {
+        t.classList.add("active");
+      } else {
+        t.classList.remove("active");
+      }
+    });
+    document.querySelectorAll(".tab-content").forEach(c => {
+      if (c.id === `tab-${target}`) {
+        c.classList.add("active");
+      } else {
+        c.classList.remove("active");
+      }
+    });
+    if (target === "capacity") {
+      this.loadCapacityAnalytics();
+    }
+  },
+
+  async loadCapacityAnalytics() {
+    try {
+      const [tRes, fRes, rRes] = await Promise.all([
+        fetch("/api/analytics/throughput"),
+        fetch("/api/analytics/forecast"),
+        fetch("/api/analytics/recommendations")
+      ]);
+
+      if (tRes.ok) {
+        const tData = await tRes.json();
+        const m = tData.throughput || {};
+        const velEl = document.getElementById("cap-velocity-val");
+        if (velEl) velEl.innerHTML = `${Number(m.tokens_per_minute || 0).toLocaleString()} <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted);">tok/min</span>`;
+        
+        const burstEl = document.getElementById("cap-burst-val");
+        if (burstEl) {
+          const factor = Number(m.burst_factor || 1.0).toFixed(1);
+          burstEl.innerText = `${factor}x`;
+          if (m.is_bursting) {
+            burstEl.style.color = "#f43f5e";
+          } else {
+            burstEl.style.color = "#fbbf24";
+          }
+        }
+        const burstSub = document.getElementById("cap-burst-sub");
+        if (burstSub) {
+          burstSub.innerText = m.is_bursting ? "⚡ Spike Detected (>2.0x)" : "Baseline sustained";
+        }
+
+        const r24El = document.getElementById("cap-rolling24-val");
+        if (r24El) r24El.innerHTML = `${Number(m.rolling_24h_tokens || 0).toLocaleString()} <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted);">tok</span>`;
+      }
+
+      if (fRes.ok) {
+        const fData = await fRes.json();
+        const provs = fData.providers || {};
+        const tbody = document.getElementById("cap-forecast-tbody");
+        if (tbody) {
+          const displayNames = {
+            claude: "Claude (Anthropic)",
+            gemini: "Google Gemini",
+            chatgpt: "ChatGPT",
+            ollama: "Ollama (Local Engine)",
+            copilot: "M365 Copilot"
+          };
+          let html = "";
+          for (const [key, item] of Object.entries(provs)) {
+            const sev = item.severity || "HEALTHY";
+            const sevBadge = sev === "CRITICAL"
+              ? '<span class="badge" style="background: rgba(244,63,94,0.2); color: #f43f5e; border: 1px solid rgba(244,63,94,0.4);">CRITICAL</span>'
+              : (sev === "WARNING"
+                ? '<span class="badge" style="background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid rgba(245,158,11,0.4);">WARNING</span>'
+                : '<span class="badge" style="background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.4);">SUSTAINABLE</span>');
+
+            const tteStr = item.time_to_exhaustion_minutes > 1440
+              ? "> 24 Hours"
+              : (item.time_to_exhaustion_minutes > 60
+                ? `${item.time_to_exhaustion_hours} Hours`
+                : `${Math.round(item.time_to_exhaustion_minutes)} Minutes`);
+
+            html += `
+              <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                <td style="padding: 10px 8px; font-weight: 600; color: #fff;">
+                  ${displayNames[key] || key}
+                </td>
+                <td style="padding: 10px 8px; font-family: var(--font-mono); color: ${item.session_remaining_pct < 20 ? '#f43f5e' : '#38bdf8'}; font-weight: bold;">
+                  ${item.session_remaining_pct}% rem
+                </td>
+                <td style="padding: 10px 8px; font-family: var(--font-mono); color: #c084fc;">
+                  ${item.weekly_remaining_pct}% rem
+                </td>
+                <td style="padding: 10px 8px; font-family: var(--font-mono); color: var(--accent-cyan);">
+                  ${Number(item.tokens_per_minute).toLocaleString()} tok/min
+                </td>
+                <td style="padding: 10px 8px; font-family: var(--font-mono); color: ${sev === 'CRITICAL' ? '#f43f5e' : (sev === 'WARNING' ? '#fbbf24' : '#cbd5e1')}; font-weight: 600;">
+                  ${tteStr}
+                </td>
+                <td style="padding: 10px 8px;">
+                  ${sevBadge}
+                  <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px;">${item.alert_message || ''}</div>
+                </td>
+              </tr>
+            `;
+          }
+          tbody.innerHTML = html;
+        }
+      }
+
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        const recs = rData.recommendations || [];
+        const container = document.getElementById("cap-recommendations-container");
+        if (container) {
+          let html = "";
+          let totalSav = 0;
+          for (const rec of recs) {
+            totalSav += (rec.potential_savings_usd || 0);
+            const prioColor = rec.priority === "HIGH" ? "#f43f5e" : (rec.priority === "MEDIUM" ? "#fbbf24" : "#38bdf8");
+            html += `
+              <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); border-left: 3px solid ${prioColor}; border-radius: 8px; padding: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                  <strong style="font-size: 0.85rem; color: #fff;">${rec.title}</strong>
+                  <span class="badge" style="font-size: 0.65rem; border-color: ${prioColor}; color: ${prioColor};">${rec.priority}</span>
+                </div>
+                <p style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 10px;">
+                  ${rec.description}
+                </p>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  ${rec.potential_savings_usd > 0 ? `<span style="font-size: 0.72rem; color: #34d399; font-weight: 600;">💰 Potential ROI: +$${rec.potential_savings_usd.toFixed(2)}/day</span>` : '<span></span>'}
+                  <button class="btn btn-secondary btn-sm" onclick="window.App.switchTab('providers')" style="font-size: 0.7rem; padding: 3px 8px;">
+                    ${rec.action_label} ↗
+                  </button>
+                </div>
+              </div>
+            `;
+          }
+          container.innerHTML = html;
+
+          const savValEl = document.getElementById("cap-savings-val");
+          if (savValEl) {
+            savValEl.innerText = `$${totalSav.toFixed(2)}`;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Error loading capacity analytics:", e);
     }
   },
 

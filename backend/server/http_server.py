@@ -236,6 +236,26 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             )
             return self._send_json(200, res)
 
+        # Capacity & Throughput Analytics Endpoints
+        if path == "/api/analytics/throughput":
+            from backend.analytics.throughput_engine import ThroughputAnalyticsEngine
+            engine = ThroughputAnalyticsEngine(srv.database)
+            prov = query.get("provider", [None])[0]
+            metrics = engine.compute_throughput_metrics(provider=prov)
+            return self._send_json(200, {"throughput": metrics})
+
+        if path == "/api/analytics/forecast":
+            from backend.analytics.throughput_engine import ThroughputAnalyticsEngine
+            engine = ThroughputAnalyticsEngine(srv.database)
+            fc = engine.compute_capacity_forecast()
+            return self._send_json(200, fc)
+
+        if path == "/api/analytics/recommendations":
+            from backend.analytics.throughput_engine import ThroughputAnalyticsEngine
+            engine = ThroughputAnalyticsEngine(srv.database)
+            recs = engine.generate_estate_recommendations()
+            return self._send_json(200, {"recommendations": recs})
+
         self._send_json(404, {"error": "API route not found"})
 
     def _handle_api_post(self, path: str, body: Dict[str, Any]):
