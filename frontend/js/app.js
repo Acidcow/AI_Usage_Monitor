@@ -447,14 +447,9 @@ window.App = {
                 <!-- Child Branch Cards with Color Swatches & Telemetry -->
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px;">
                   ${key === 'ollama' ? `
-                    ${(item.models && item.models.length > 0 ? item.models : [
-                      { name: "llama3:latest", parameter_size: "8B", status: "READY (DISK)", tokens_today: 24500, total_tokens: 82000, size: "4.7 GB", color: "#c084fc" },
-                      { name: "deepseek-r1:14b", parameter_size: "14B", status: "RUNNING (VRAM)", tokens_today: 68200, total_tokens: 145000, size: "9.0 GB", vram_size_gb: 8.5, color: "#34d399" },
-                      { name: "mistral:latest", parameter_size: "7B", status: "READY (DISK)", tokens_today: 12100, total_tokens: 49000, size: "4.1 GB", color: "#38bdf8" }
-                    ]).map((m, mIdx) => {
+                    ${(item.models && item.models.length > 0 ? item.models : []).map((m, mIdx) => {
                       const mCol = m.color || ["#c084fc", "#34d399", "#38bdf8", "#f59e0b"][mIdx % 4];
-                      const mSeed = Number(m.tokens_today) || 0;
-                      const mPts = mSeed > 0 ? [0.2, 0.35, 0.3, 0.55, 0.45, 0.8, 0.7, 0.95].map(f => Math.round(mSeed * f)) : [0, 0, 0, 0, 0, 0, 0, 0];
+                      const mPts = this.getChildRealPoints('ollama', m.name || m.model);
                       const spk = this.generateInlineSparkline(mPts, mCol);
                       return `
                         <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
@@ -491,7 +486,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'acidcow@gmail.com'}</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.2, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#60a5fa')}
+                        ${this.generateInlineSparkline(this.getChildRealPoints('gemini', 'gemini_account'), '#60a5fa')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Account Session:</strong> <span style="color: #60a5fa; font-weight: 700;">${ind.session_remaining_pct}% remaining</span>
@@ -507,8 +502,7 @@ window.App = {
                     <!-- Gemini Child Named Tokens -->
                     ${h.tokens.map((t, tIdx) => {
                       const tCol = ["#34d399", "#f472b6", "#fbbf24", "#38bdf8"][tIdx % 4];
-                      const tSeed = Number(t.tokens_today) || 0;
-                      const tPts = tSeed > 0 ? [0.1, 0.25, 0.2, 0.4, 0.35, 0.6, 0.5, 0.8].map(f => Math.round(tSeed * f)) : [0, 0, 0, 0, 0, 0, 0, 0];
+                      const tPts = this.getChildRealPoints('gemini', t.id);
                       return `
                         <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px 12px;">
                           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -542,7 +536,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'James Eckhardt'}</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#38bdf8')}
+                        ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_individual'), '#38bdf8')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.session_remaining_pct}% remaining</span> (${ind.session_used_pct}% used)
@@ -565,7 +559,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Synthesis2'}</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#c084fc')}
+                        ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_team'), '#c084fc')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Team Session:</strong> <span style="color: #c084fc; font-weight: 700;">${team.session_remaining_pct}% remaining</span> (${team.session_used_pct}% used)
@@ -588,7 +582,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.15, 0.3, 0.25, 0.45, 0.4, 0.65, 0.55, 0.75].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#34d399')}
+                        ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_department'), '#34d399')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Division:</strong> ${dept.dept_name || 'Technology & AI'}
@@ -611,7 +605,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.3, 0.45, 0.4, 0.65, 0.6, 0.85, 0.8, 1.0].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#fbbf24')}
+                        ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_enterprise'), '#fbbf24')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Org Name:</strong> ${ent.org_name || 'Enterprise Workspace'}
@@ -710,7 +704,7 @@ window.App = {
                           <span style="color: ${pCol}; font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700;">${Number(pItem.tokens_today || 0).toLocaleString()} tok</span>
                         </div>
                         <div style="margin-top: 4px;">
-                          ${this.generateInlineSparkline((Number(pItem.tokens_today) || 0) > 0 ? [0.15, 0.3, 0.25, 0.5, 0.45, 0.75, 0.65, 0.95].map(f => Math.round(pItem.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], pCol)}
+                          ${this.generateInlineSparkline(this.getChildRealPoints(p, p + '_total'), pCol)}
                         </div>
                       </div>
                     `;
@@ -982,13 +976,30 @@ window.App = {
     });
   },
 
+  getChildRealPoints(provKey, childId) {
+    const zeroes = [0, 0, 0, 0, 0, 0, 0, 0];
+    const cacheKey = `${provKey}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
+    const cached = (this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey]) ||
+                   (this.trendsCache && this.trendsCache[provKey]);
+    if (cached && cached.series && cached.series.length > 0) {
+      const match = cached.series.find(s => {
+        const sid = s.id || s.key || '';
+        return sid === childId || sid.includes(childId) || (childId && childId.includes(sid));
+      });
+      if (match && match.points && match.points.length > 0) {
+        return match.points;
+      }
+    }
+    return zeroes;
+  },
+
   _getProviderChildSeries(key, item) {
-    const tToday = Number(item.tokens_today) || 0;
     const zeroes = [0, 0, 0, 0, 0, 0, 0, 0];
 
     // Check if we have real cached hierarchical trend series from backend
     const cacheKey = `${key}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
-    const cached = this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey];
+    const cached = (this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey]) ||
+                   (this.trendsCache && this.trendsCache[key]);
     if (cached && cached.series && cached.series.length > 0) {
       return cached.series.map(s => ({
         key: s.key || s.id,
@@ -1000,58 +1011,25 @@ window.App = {
       }));
     }
 
-    if (tToday === 0) {
-      if (key === "claude") {
-        return [
-          { key: "claude_total", id: "claude_total", label: "Claude Total", name: "Claude Total", color: "#38bdf8", points: zeroes },
-          { key: "claude_individual", id: "claude_individual", label: "Individual Member", name: "Individual Member", color: "#60a5fa", points: zeroes },
-          { key: "claude_team", id: "claude_team", label: "Team Workspace", name: "Team Workspace", color: "#c084fc", points: zeroes }
-        ];
-      } else if (key === "gemini") {
-        return [
-          { key: "gemini_account", id: "gemini_account", label: "Google Umbrella", name: "Google Umbrella", color: "#60a5fa", points: zeroes },
-          { key: "tok_gem_flash", id: "tok_gem_flash", label: "Dev Key", name: "Dev Key", color: "#34d399", points: zeroes }
-        ];
-      } else if (key === "ollama") {
-        return [
-          { key: "ollama_total", id: "ollama_total", label: "Local Hardware", name: "Local Hardware", color: "#a855f7", points: zeroes }
-        ];
-      }
-      return [
-        { key: `${key}_total`, id: `${key}_total`, label: `${key} Active`, name: `${key} Active`, color: "#38bdf8", points: zeroes }
-      ];
-    }
-
     if (key === "claude") {
       return [
-        { key: "org", id: "org", label: "Enterprise Org", name: "Enterprise Org", color: "#fbbf24", points: [0.3, 0.45, 0.4, 0.65, 0.6, 0.85, 0.8, 1.0].map(f => Math.round(tToday * f)) },
-        { key: "dept", id: "dept", label: "AI Department", name: "AI Department", color: "#34d399", points: [0.15, 0.3, 0.25, 0.45, 0.4, 0.65, 0.55, 0.75].map(f => Math.round(tToday * f)) },
-        { key: "team", id: "team", label: "Synthesis2 (Team)", name: "Synthesis2 (Team)", color: "#c084fc", points: [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(tToday * f)) },
-        { key: "ind", id: "ind", label: "James (Individual)", name: "James (Individual)", color: "#38bdf8", points: [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(tToday * f)) }
+        { key: "claude_total", id: "claude_total", label: "Claude Total", name: "Claude Total", color: "#38bdf8", points: zeroes },
+        { key: "claude_individual", id: "claude_individual", label: "Individual Member", name: "Individual Member", color: "#60a5fa", points: zeroes },
+        { key: "claude_team", id: "claude_team", label: "Team Workspace", name: "Team Workspace", color: "#c084fc", points: zeroes }
       ];
     } else if (key === "gemini") {
       return [
-        { key: "acct", id: "acct", label: "Google Umbrella", name: "Google Umbrella", color: "#60a5fa", points: [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(tToday * f)) },
-        { key: "key1", id: "key1", label: "Dev-Key-01", name: "Dev-Key-01", color: "#34d399", points: [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55].map(f => Math.round(tToday * f)) },
-        { key: "key2", id: "key2", label: "Workspace-Prod", name: "Workspace-Prod", color: "#f472b6", points: [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32].map(f => Math.round(tToday * f)) }
+        { key: "gemini_account", id: "gemini_account", label: "Google Umbrella", name: "Google Umbrella", color: "#60a5fa", points: zeroes },
+        { key: "tok_gem_flash", id: "tok_gem_flash", label: "Dev Key", name: "Dev Key", color: "#34d399", points: zeroes }
       ];
     } else if (key === "ollama") {
       return [
-        { key: "llama3", id: "llama3", label: "llama3:latest", name: "llama3:latest", color: "#c084fc", points: [0.3, 0.2, 0.4, 0.35, 0.6, 0.5, 0.7, 0.8].map(f => Math.round(tToday * f)) },
-        { key: "deepseek", id: "deepseek", label: "deepseek-r1:14b", name: "deepseek-r1:14b", color: "#34d399", points: [0.25, 0.35, 0.45, 0.6, 0.55, 0.75, 0.8, 0.9].map(f => Math.round(tToday * f)) },
-        { key: "mistral", id: "mistral", label: "mistral:latest", name: "mistral:latest", color: "#38bdf8", points: [0.1, 0.15, 0.12, 0.2, 0.18, 0.25, 0.22, 0.3].map(f => Math.round(tToday * f)) }
-      ];
-    } else if (key === "chatgpt") {
-      return [
-        { key: "org", id: "org", label: "Main Organization", name: "Main Organization", color: "#10a37f", points: [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6].map(f => Math.round(tToday * f)) },
-        { key: "proj", id: "proj", label: "Default Project", name: "Default Project", color: "#6ee7b7", points: [0.1, 0.18, 0.14, 0.22, 0.2, 0.28, 0.24, 0.32].map(f => Math.round(tToday * f)) }
-      ];
-    } else {
-      return [
-        { key: "ent", id: "ent", label: "Enterprise E5", name: "Enterprise E5", color: "#0284c7", points: [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4].map(f => Math.round(tToday * f)) },
-        { key: "pool", id: "pool", label: "Copilot Studio Pool", name: "Copilot Studio Pool", color: "#38bdf8", points: [0.08, 0.12, 0.15, 0.18, 0.22, 0.25, 0.28, 0.35].map(f => Math.round(tToday * f)) }
+        { key: "ollama_total", id: "ollama_total", label: "Local Hardware", name: "Local Hardware", color: "#a855f7", points: zeroes }
       ];
     }
+    return [
+      { key: `${key}_total`, id: `${key}_total`, label: `${key} Active`, name: `${key} Active`, color: "#38bdf8", points: zeroes }
+    ];
   },
 
   generateMultiInlineSparkline(seriesList, w = 110, h = 26) {

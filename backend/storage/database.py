@@ -661,20 +661,34 @@ class UsageDatabase:
                             "name": "Gemini 2.0 Flash Dev (AI Studio)",
                             "description": "High-velocity development key for fast iteration",
                             "masked_key": "AIzaSyDa...7f2b",
-                            "session_balance_remaining_pct": 84.5,
-                            "weekly_balance_remaining_pct": 76.0,
-                            "tokens_today": 42350
+                            "session_balance_remaining_pct": 100.0,
+                            "weekly_balance_remaining_pct": 100.0,
+                            "tokens_today": 0
                         },
                         {
                             "id": "tok_gem_pro",
                             "name": "Gemini 1.5 Pro CLI Workstation",
                             "description": "Terminal proxy agent and deep reasoning sessions",
                             "masked_key": "AIzaSyBx...9a1c",
-                            "session_balance_remaining_pct": 91.0,
-                            "weekly_balance_remaining_pct": 88.5,
-                            "tokens_today": 16900
+                            "session_balance_remaining_pct": 100.0,
+                            "weekly_balance_remaining_pct": 100.0,
+                            "tokens_today": 0
                         }
                     ]
+
+                # Update each token's tokens_today dynamically from real SQLite usage events
+                conn = self._get_connection()
+                c = conn.cursor()
+                for tk in hierarchy["tokens"]:
+                    c.execute("SELECT SUM(input_tokens + output_tokens) FROM usage_events WHERE provider = 'gemini' AND token_id = ? AND date(recorded_at) = date('now')", (tk.get("id"),))
+                    row = c.fetchone()
+                    real_toks = row[0] if (row and row[0] is not None) else 0
+                    tk["tokens_today"] = real_toks
+                    if real_toks == 0:
+                        tk["session_balance_remaining_pct"] = 100.0
+                        tk["weekly_balance_remaining_pct"] = 100.0
+                conn.close()
+
                 hierarchy["account_id"] = snap.get("account_id") or "acidcow@gmail.com"
                 hierarchy["account_name"] = snap.get("account_id") or "acidcow@gmail.com"
 
@@ -988,22 +1002,40 @@ class UsageDatabase:
                 "total_tokens": sum(total_points)
             })
 
-            token_palette = {
-                "tok_gem_flash": ("Gemini 2.5 Flash API Key", "#34d399"),
-                "tok_gem_pro": ("Gemini 2.5 Pro Work Key", "#a855f7"),
-                "tok_gem_ultra": ("Gemini Ultra Experimental Key", "#f59e0b")
-            }
+            # Retrieve registered named tokens dynamically from vault
+            named_tokens = []
+            try:
+                from backend.security.dpapi_vault import DPAPIVault
+                v = DPAPIVault()
+                raw_toks = v.get_credential("google", "named_tokens")
+                if raw_toks:
+                    named_tokens = json.loads(raw_toks)
+            except Exception:
+                pass
 
-            found_tokens = list(child_buckets.keys())
-            if not found_tokens:
-                found_tokens = ["tok_gem_flash", "tok_gem_pro"]
+            palette_colors = ["#34d399", "#f472b6", "#fbbf24", "#38bdf8", "#c084fc"]
+            token_map = {}
+            for idx, nt in enumerate(named_tokens):
+                t_id = nt.get("id")
+                if t_id:
+                    token_map[t_id] = (nt.get("name") or t_id, palette_colors[idx % len(palette_colors)])
 
-            for tk_id in found_tokens:
-                info = token_palette.get(tk_id, (tk_id, "#38bdf8"))
+            if not token_map:
+                token_map = {
+                    "tok_gem_flash": ("Gemini 2.0 Flash Dev (AI Studio)", "#34d399"),
+                    "tok_gem_pro": ("Gemini 1.5 Pro CLI Workstation", "#f472b6")
+                }
+
+            all_token_ids = list(token_map.keys())
+            for tk_id in child_buckets.keys():
+                if tk_id not in all_token_ids:
+                    all_token_ids.append(tk_id)
+
+            for idx, tk_id in enumerate(all_token_ids):
+                info = token_map.get(tk_id, (tk_id, palette_colors[idx % len(palette_colors)]))
                 pts = child_buckets.get(tk_id)
                 if not pts or sum(pts) == 0:
-                    fraction = 0.55 if "flash" in tk_id else 0.45
-                    pts = [int(p * fraction) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+                    pts = [0] * num_bins
                 series.append({
                     "id": tk_id,
                     "key": tk_id,

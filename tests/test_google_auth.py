@@ -57,6 +57,9 @@ class TestGoogleAuthManager(unittest.TestCase):
         tok = res.get("token")
         self.assertEqual(tok["name"], "Gemini 2.0 Flash CLI")
         self.assertTrue(tok["masked_key"].startswith("AIzaSy..."))
+        self.assertEqual(tok["tokens_today"], 0)
+        self.assertEqual(tok["session_balance_remaining_pct"], 100.0)
+        self.assertEqual(tok["weekly_balance_remaining_pct"], 100.0)
 
         # Check in status
         status = self.auth_mgr.get_auth_status()

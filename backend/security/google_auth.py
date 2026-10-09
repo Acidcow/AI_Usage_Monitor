@@ -318,9 +318,9 @@ class GoogleAuthManager:
             "description": description or f"Gemini API Key ({name})",
             "masked_key": masked,
             "created_at": time.time(),
-            "session_balance_remaining_pct": 92.0,
-            "weekly_balance_remaining_pct": 88.0,
-            "tokens_today": 18400
+            "session_balance_remaining_pct": 100.0,
+            "weekly_balance_remaining_pct": 100.0,
+            "tokens_today": 0
         }
         tokens.append(new_entry)
 
@@ -350,9 +350,9 @@ class GoogleAuthManager:
                     "description": "High-velocity development key for fast iteration",
                     "masked_key": "AIzaSyDa...7f2b",
                     "created_at": time.time() - 86400 * 5,
-                    "session_balance_remaining_pct": 84.5,
-                    "weekly_balance_remaining_pct": 76.0,
-                    "tokens_today": 42350
+                    "session_balance_remaining_pct": 100.0,
+                    "weekly_balance_remaining_pct": 100.0,
+                    "tokens_today": 0
                 },
                 {
                     "id": "tok_gem_pro",
@@ -360,9 +360,9 @@ class GoogleAuthManager:
                     "description": "Terminal proxy agent and deep reasoning sessions",
                     "masked_key": "AIzaSyBx...9a1c",
                     "created_at": time.time() - 86400 * 12,
-                    "session_balance_remaining_pct": 91.0,
-                    "weekly_balance_remaining_pct": 88.5,
-                    "tokens_today": 16900
+                    "session_balance_remaining_pct": 100.0,
+                    "weekly_balance_remaining_pct": 100.0,
+                    "tokens_today": 0
                 }
             ]
             self.vault.set_credential("google", "named_tokens", json.dumps(default_tokens))
