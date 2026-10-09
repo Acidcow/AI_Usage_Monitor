@@ -186,7 +186,16 @@ window.App = {
 
     const breakdownEl = document.getElementById("val-tokens-breakdown");
     if (breakdownEl) {
-      breakdownEl.innerText = `In: ${Number(summary.input_tokens_today).toLocaleString()} | Out: ${Number(summary.output_tokens_today).toLocaleString()}`;
+      const inT = Number(summary.input_tokens_today || 0);
+      const outT = Number(summary.output_tokens_today || 0);
+      const ccT = Number(summary.cache_creation_tokens_today || 0);
+      const crT = Number(summary.cache_read_tokens_today || 0);
+      if (ccT > 0 || crT > 0) {
+        breakdownEl.innerText = `In: ${inT.toLocaleString()} | Out: ${outT.toLocaleString()} | Cache R/W: ${(crT + ccT).toLocaleString()}`;
+        breakdownEl.title = `Prompt In: ${inT.toLocaleString()} | Out: ${outT.toLocaleString()} | Cache Write: ${ccT.toLocaleString()} | Cache Read: ${crT.toLocaleString()}`;
+      } else {
+        breakdownEl.innerText = `In: ${inT.toLocaleString()} | Out: ${outT.toLocaleString()}`;
+      }
     }
 
     const costEl = document.getElementById("val-total-cost");
@@ -790,6 +799,7 @@ window.App = {
   renderSvgChart(hourly) {
     const svg = document.getElementById("token-velocity-chart");
     const peakInfo = document.getElementById("chart-peak-info");
+    const singleProvNotice = document.getElementById("chart-single-provider-notice");
     if (!svg) return;
 
     const platforms = ["claude", "gemini", "chatgpt", "ollama", "copilot"];
@@ -817,12 +827,28 @@ window.App = {
         </text>
       `;
       if (peakInfo) peakInfo.innerText = "Peak: 0 tokens/hr";
+      if (singleProvNotice) singleProvNotice.style.display = "none";
+      platforms.concat(["total"]).forEach(p => {
+        const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
+        if (pill) {
+          let b = pill.querySelector(".legend-token-badge");
+          if (!b) {
+            b = document.createElement("span");
+            b.className = "legend-token-badge";
+            pill.appendChild(b);
+          }
+          b.innerText = "0 t (idle)";
+          b.style.cssText = "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 600; background: rgba(255,255,255,0.05); color: #64748b;";
+        }
+      });
       return;
     }
 
-    // Build timeline of distinct hour keys
+    // Build timeline of distinct hour keys and 24h totals per platform
     const hourMap = {};
     const allHoursSet = new Set();
+    const totals24h = { total: 0 };
+    platforms.forEach(p => totals24h[p] = 0);
     let maxTokens = 50;
 
     hourly.forEach(item => {
@@ -837,12 +863,50 @@ window.App = {
       const tok = Number(item.tokens || 0);
       hourMap[h][prov] = (hourMap[h][prov] || 0) + tok;
       hourMap[h].total += tok;
+      totals24h[prov] = (totals24h[prov] || 0) + tok;
+      totals24h.total += tok;
 
       if (hourMap[h].total > maxTokens) maxTokens = hourMap[h].total;
     });
 
     const sortedHours = Array.from(allHoursSet).sort();
     if (peakInfo) peakInfo.innerText = `Peak: ${maxTokens.toLocaleString()} tokens/hr`;
+
+    // Update legend pill badges with exact 24h token numbers
+    platforms.concat(["total"]).forEach(p => {
+      const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
+      if (pill) {
+        let b = pill.querySelector(".legend-token-badge");
+        if (!b) {
+          b = document.createElement("span");
+          b.className = "legend-token-badge";
+          pill.appendChild(b);
+        }
+        const pTok = totals24h[p] || 0;
+        if (pTok > 0) {
+          b.innerText = pTok >= 1000 ? `${(pTok / 1000).toFixed(1)}k` : `${pTok} t`;
+          b.style.cssText = p === "total"
+            ? "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(6, 182, 212, 0.25); color: #06b6d4;"
+            : "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(255, 255, 255, 0.15); color: #f8fafc;";
+        } else {
+          b.innerText = "0 t (idle)";
+          b.style.cssText = "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 600; background: rgba(255, 255, 255, 0.05); color: #64748b;";
+        }
+      }
+    });
+
+    // Check single active platform dominance and inform user
+    const activePlatforms = platforms.filter(p => totals24h[p] > 0);
+    if (singleProvNotice) {
+      if (activePlatforms.length === 1 && totals24h.total > 0) {
+        const soleProv = activePlatforms[0];
+        const soleName = platformNames[soleProv];
+        singleProvNotice.style.display = "inline-flex";
+        singleProvNotice.innerHTML = `ℹ️ <strong>${soleName}</strong> accounts for 100% of activity (${totals24h[soleProv].toLocaleString()} tokens). Total Combined envelope mirrors ${soleName}. Other platforms idle at 0 baseline.`;
+      } else {
+        singleProvNotice.style.display = "none";
+      }
+    }
 
     // SVG ViewBox dimensions: 900 x 200
     const width = 900;
@@ -873,7 +937,6 @@ window.App = {
     sortedHours.forEach((hourStr, idx) => {
       const x = padL + (idx * step);
       const label = hourStr.substring(11, 13) + ":00";
-      // Show every label if <= 12 hours, otherwise every 2nd or 3rd
       const showLabel = numPoints <= 12 || idx % Math.ceil(numPoints / 8) === 0 || idx === numPoints - 1;
       if (showLabel) {
         axisHtml += `
@@ -885,6 +948,15 @@ window.App = {
 
     // Generate Path Data for each platform & total
     const seriesToRender = [...platforms, "total"];
+    let defsHtml = `
+      <defs>
+        <linearGradient id="velocity-total-area-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.22"/>
+          <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>
+    `;
+    let areaHtml = "";
     let linesHtml = "";
     let dotsHtml = "";
 
@@ -900,18 +972,35 @@ window.App = {
         points.push({ x, y, tok, hour: hourStr.substring(11, 13) + ":00" });
       });
 
-      // Only draw if there's non-zero data or if it's total
       const hasData = points.some(p => p.tok > 0);
-      if (!hasData && !isTotal) return;
+
+      if (!hasData && !isTotal) {
+        // Option A clean zero baseline for idle platforms
+        const yZero = padT + plotH;
+        linesHtml += `
+          <path class="chart-line-path chart-idle-baseline" data-series="${seriesKey}" d="M ${padL} ${yZero} L ${width - padR} ${yZero}" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.25" style="transition: all 0.2s ease;">
+            <title>${platformNames[seriesKey]}: Idle (0 tokens across 24h)</title>
+          </path>
+        `;
+        return;
+      }
 
       let d = "";
       points.forEach((pt, idx) => {
         d += (idx === 0 ? `M ${pt.x} ${pt.y}` : ` L ${pt.x} ${pt.y}`);
       });
 
+      if (isTotal && hasData) {
+        // Translucent area fill underneath Total curve
+        const areaD = `${d} L ${points[points.length - 1].x} ${padT + plotH} L ${points[0].x} ${padT + plotH} Z`;
+        areaHtml += `
+          <path class="chart-total-area" data-series="total" d="${areaD}" fill="url(#velocity-total-area-grad)" opacity="0.9" pointer-events="none"></path>
+        `;
+      }
+
       const strokeDash = isTotal ? 'stroke-dasharray="6,4"' : '';
       const strokeWidth = isTotal ? '2' : '2.5';
-      const opacity = isTotal ? '0.6' : '0.9';
+      const opacity = isTotal ? '0.75' : '0.9';
 
       linesHtml += `
         <path class="chart-line-path" data-series="${seriesKey}" d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" ${strokeDash} opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round" style="transition: all 0.2s ease;">
@@ -931,17 +1020,104 @@ window.App = {
       });
     });
 
+    // Crosshair line for hover inspection
+    const crosshairHtml = `
+      <line id="chart-crosshair-line" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" stroke="rgba(56, 189, 248, 0.6)" stroke-width="1.5" stroke-dasharray="3,3" opacity="0" pointer-events="none"></line>
+    `;
+
     svg.innerHTML = `
+      ${defsHtml}
       <!-- Base Axes -->
       <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
       ${gridHtml}
       ${axisHtml}
+      ${areaHtml}
       ${linesHtml}
       ${dotsHtml}
+      ${crosshairHtml}
     `;
 
-    // Setup interactive legend click filtering
+    // Setup interactive legend click filtering & hover flyout
     this._setupChartLegendInteractivity();
+    this._setupChartHoverCrosshair(sortedHours, hourMap, padL, plotW, step, platforms, platformNames, platformColors);
+  },
+
+  _setupChartHoverCrosshair(sortedHours, hourMap, padL, plotW, step, platforms, platformNames, platformColors) {
+    const container = document.getElementById("svg-chart-container");
+    const svg = document.getElementById("token-velocity-chart");
+    const crosshair = document.getElementById("chart-crosshair-line");
+    const tooltip = document.getElementById("chart-flyout-tooltip");
+    if (!container || !svg || !crosshair || !tooltip || sortedHours.length === 0) return;
+
+    container.onmousemove = (e) => {
+      const rect = svg.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const svgX = (mouseX / rect.width) * 900;
+
+      if (svgX < padL - 10 || svgX > padL + plotW + 10) {
+        crosshair.setAttribute("opacity", "0");
+        tooltip.style.display = "none";
+        return;
+      }
+
+      const numPoints = sortedHours.length;
+      const idx = Math.max(0, Math.min(numPoints - 1, Math.round((svgX - padL) / (numPoints > 1 ? step : 1))));
+      const hKey = sortedHours[idx];
+      const hData = hourMap[hKey];
+      if (!hData) return;
+
+      const ptX = padL + (idx * (numPoints > 1 ? step : 0));
+      crosshair.setAttribute("x1", ptX);
+      crosshair.setAttribute("x2", ptX);
+      crosshair.setAttribute("opacity", "1");
+
+      const label = hKey.substring(11, 13) + ":00 UTC (" + hKey.substring(0, 10) + ")";
+      let rowsHtml = "";
+      platforms.forEach(p => {
+        const tok = hData[p] || 0;
+        const color = platformColors[p];
+        const name = platformNames[p];
+        const pct = hData.total > 0 && tok > 0 ? ` (${Math.round((tok / hData.total) * 100)}%)` : (tok === 0 ? " (idle)" : "");
+        rowsHtml += `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 3px;">
+            <span style="color: ${color}; display: flex; align-items: center; gap: 4px;">
+              <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${color};"></span>
+              ${name}:
+            </span>
+            <span style="font-family: var(--font-mono); font-weight: 600; color: ${tok > 0 ? '#fff' : '#64748b'};">
+              ${tok.toLocaleString()} tok${pct}
+            </span>
+          </div>
+        `;
+      });
+
+      tooltip.innerHTML = `
+        <div style="font-size: 0.76rem; font-weight: 700; color: #fff; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+          <span>⏱️ ${label}</span>
+          <span style="font-family: var(--font-mono); font-size: 0.74rem; color: #06b6d4; font-weight: 800;">${hData.total.toLocaleString()} total</span>
+        </div>
+        <div style="height: 1px; background: rgba(255,255,255,0.1); margin-bottom: 6px;"></div>
+        <div style="font-size: 0.72rem;">
+          ${rowsHtml}
+        </div>
+      `;
+      tooltip.style.display = "block";
+
+      const contRect = container.getBoundingClientRect();
+      let leftPx = e.clientX - contRect.left + 15;
+      let topPx = e.clientY - contRect.top - 20;
+      if (leftPx + 230 > contRect.width) {
+        leftPx = e.clientX - contRect.left - 240;
+      }
+      if (topPx < 10) topPx = 10;
+      tooltip.style.left = `${leftPx}px`;
+      tooltip.style.top = `${topPx}px`;
+    };
+
+    container.onmouseleave = () => {
+      crosshair.setAttribute("opacity", "0");
+      tooltip.style.display = "none";
+    };
   },
 
   _setupChartLegendInteractivity() {
@@ -951,26 +1127,44 @@ window.App = {
         const plat = pill.getAttribute("data-platform");
         const allPaths = document.querySelectorAll(".chart-line-path");
         const allDots = document.querySelectorAll(".chart-dot");
+        const totalArea = document.querySelector(".chart-total-area");
         const isAlreadyIsolated = pill.classList.contains("isolated");
 
         legendPills.forEach(p => p.classList.remove("isolated"));
 
         if (isAlreadyIsolated) {
           // Restore all
-          allPaths.forEach(p => { p.style.opacity = p.getAttribute("data-series") === "total" ? "0.6" : "0.9"; p.style.strokeWidth = "2.5"; });
+          allPaths.forEach(p => {
+            if (p.classList.contains("chart-idle-baseline")) {
+              p.style.opacity = "0.25";
+              p.style.strokeWidth = "1.5";
+            } else {
+              p.style.opacity = p.getAttribute("data-series") === "total" ? "0.75" : "0.9";
+              p.style.strokeWidth = p.getAttribute("data-series") === "total" ? "2" : "2.5";
+            }
+          });
           allDots.forEach(d => d.style.opacity = "1");
+          if (totalArea) totalArea.style.opacity = "0.9";
         } else {
           // Isolate clicked platform
           pill.classList.add("isolated");
           allPaths.forEach(p => {
             const match = p.getAttribute("data-series") === plat;
-            p.style.opacity = match ? "1" : "0.15";
-            p.style.strokeWidth = match ? "4" : "1.5";
+            if (match) {
+              p.style.opacity = "1";
+              p.style.strokeWidth = "3.5";
+            } else {
+              p.style.opacity = "0.08";
+              p.style.strokeWidth = "1";
+            }
           });
           allDots.forEach(d => {
             const match = d.getAttribute("data-series") === plat;
-            d.style.opacity = match ? "1" : "0.1";
+            d.style.opacity = match ? "1" : "0.05";
           });
+          if (totalArea) {
+            totalArea.style.opacity = plat === "total" ? "0.9" : "0.05";
+          }
         }
       };
     });
@@ -2268,18 +2462,25 @@ window.App = {
       const totTokEl = document.getElementById("rep-tot-tokens");
       const totCostEl = document.getElementById("rep-tot-cost");
       const totEvtEl = document.getElementById("rep-tot-events");
-      const totDimEl = document.getElementById("rep-tot-dims");
+      const totDimEl = document.getElementById("rep-tot-records") || document.getElementById("rep-tot-dims");
+      const totCacheEl = document.getElementById("rep-tot-cache");
+      const totCacheSubEl = document.getElementById("rep-tot-cache-sub");
 
+      const totCacheAll = Number((summary.cache_creation_tokens || 0) + (summary.cache_read_tokens || 0));
       if (totTokEl) totTokEl.innerText = Number(summary.total_tokens || 0).toLocaleString();
+      if (totCacheEl) totCacheEl.innerText = totCacheAll.toLocaleString();
+      if (totCacheSubEl) {
+        totCacheSubEl.innerText = `Create: ${Number(summary.cache_creation_tokens || 0).toLocaleString()} | Read: ${Number(summary.cache_read_tokens || 0).toLocaleString()}`;
+      }
       if (totCostEl) totCostEl.innerText = `$${Number(summary.total_estimated_cost || 0).toFixed(4)}`;
       if (totEvtEl) totEvtEl.innerText = Number(summary.total_events || 0).toLocaleString();
-      if (totDimEl) totDimEl.innerText = Number(summary.distinct_dimensions || (data.rows ? data.rows.length : 0)).toLocaleString();
+      if (totDimEl) totDimEl.innerText = `${Number(summary.distinct_dimensions || (data.rows ? data.rows.length : 0))} slices`;
 
       const rows = data.rows || [];
       if (rows.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="9" style="text-align: center; color: var(--text-dim); padding: 24px;">
+            <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 24px;">
               No usage activity found for the selected time slice and filters.
             </td>
           </tr>
@@ -2296,14 +2497,16 @@ window.App = {
           <tr>
             <td style="font-family: var(--font-mono); font-weight: 600; color: #fff;">${this.escapeHtml(r.period)}</td>
             <td><strong style="color: #60a5fa; font-size: 0.8rem;">${this.escapeHtml(r.group_key || r.provider || 'All')}</strong></td>
-            <td style="font-family: var(--font-mono); color: var(--text-muted);">${Number(r.event_count || 0).toLocaleString()}</td>
-            <td style="font-family: var(--font-mono);">${Number(r.input_tokens || 0).toLocaleString()}</td>
-            <td style="font-family: var(--font-mono);">${Number(r.output_tokens || 0).toLocaleString()}</td>
-            <td style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8;">${Number(r.total_tokens || 0).toLocaleString()}</td>
-            <td style="font-family: var(--font-mono); font-weight: 700; color: #34d399;">$${Number(r.estimated_cost || 0).toFixed(4)}</td>
-            <td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem;">$${costPer1k}</td>
-            <td>
-              <div style="background: rgba(255,255,255,0.05); border-radius: 4px; height: 10px; width: 100px; overflow: hidden;">
+            <td style="font-family: var(--font-mono); color: var(--text-muted); text-align: right;">${Number(r.event_count || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono); text-align: right;">${Number(r.input_tokens || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono); text-align: right;">${Number(r.output_tokens || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono); text-align: right; color: #c084fc;">${Number(r.cache_creation_tokens || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono); text-align: right; color: #a78bfa;">${Number(r.cache_read_tokens || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8; text-align: right;">${Number(r.total_tokens || 0).toLocaleString()}</td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: #34d399; text-align: right;">$${Number(r.estimated_cost || 0).toFixed(4)}</td>
+            <td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem; text-align: right;">$${costPer1k}</td>
+            <td style="text-align: center;">
+              <div style="background: rgba(255,255,255,0.05); border-radius: 4px; height: 10px; width: 80px; margin: 0 auto; overflow: hidden;">
                 <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, #3b82f6, #06b6d4); border-radius: 4px;"></div>
               </div>
             </td>

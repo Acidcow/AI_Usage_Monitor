@@ -88,5 +88,48 @@ class TestClaudeScanner(unittest.TestCase):
         summary2 = self.db.get_usage_summary(provider="claude")
         self.assertEqual(summary2["total_tokens_today"], 950)
 
+    def test_scan_with_cache_tokens_and_backfill(self):
+        mock_claude_dir = Path(self.temp_dir.name) / ".claude_cache_test"
+        proj_dir = mock_claude_dir / "projects" / "CacheProject"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+
+        today_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        log_file = proj_dir / "session-cache.jsonl"
+        lines = [
+            {
+                "type": "assistant",
+                "sessionId": "sess-cache-1",
+                "timestamp": today_iso,
+                "message": {
+                    "model": "claude-sonnet-5-5",
+                    "usage": {
+                        "input_tokens": 78,
+                        "output_tokens": 1200,
+                        "cache_creation_input_tokens": 15000,
+                        "cache_read_input_tokens": 85000
+                    }
+                }
+            }
+        ]
+        with open(log_file, "w", encoding="utf-8") as f:
+            for item in lines:
+                f.write(json.dumps(item) + "\n")
+
+        # Scan directory
+        count = self.claude.scan_local_logs(search_dir=str(mock_claude_dir))
+        self.assertEqual(count, 1)
+
+        summary = self.db.get_usage_summary(provider="claude")
+        self.assertEqual(summary["input_tokens_today"], 78)
+        self.assertEqual(summary["output_tokens_today"], 1200)
+        self.assertEqual(summary["cache_creation_tokens_today"], 15000)
+        self.assertEqual(summary["cache_read_tokens_today"], 85000)
+        self.assertEqual(summary["total_tokens_today"], 78 + 1200 + 15000 + 85000)
+
+        # Verify historical report query aggregation
+        rep = self.db.query_historical_report(group_by="day", provider="claude")
+        self.assertEqual(rep["summary"]["cache_creation_tokens"], 15000)
+        self.assertEqual(rep["summary"]["cache_read_tokens"], 85000)
+
 if __name__ == "__main__":
     unittest.main()

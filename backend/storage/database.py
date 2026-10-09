@@ -152,7 +152,9 @@ class UsageDatabase:
                 "team_name TEXT",
                 "user_name TEXT",
                 "token_id TEXT",
-                "project_id TEXT"
+                "project_id TEXT",
+                "cache_creation_tokens INTEGER DEFAULT 0",
+                "cache_read_tokens INTEGER DEFAULT 0"
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE usage_events ADD COLUMN {col}")
@@ -184,19 +186,27 @@ class UsageDatabase:
         team_name: Optional[str] = None,
         user_name: Optional[str] = None,
         token_id: Optional[str] = None,
-        project_id: Optional[str] = None
+        project_id: Optional[str] = None,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0
     ) -> str:
-        """Records a single usage event with dimensional attribution."""
+        """Records a single usage event with dimensional attribution and cache token metrics."""
         event_id = f"evt_{uuid.uuid4().hex[:12]}"
         now_utc = recorded_at or datetime.datetime.now(datetime.timezone.utc).isoformat()
-        total_tokens = input_tokens + output_tokens
+        total_tokens = input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens
 
         # Auto-compute cost if not explicitly provided
         if estimated_cost <= 0.0 and total_tokens > 0:
             if provider.lower() == "ollama":
                 estimated_cost = 0.0
             else:
-                estimated_cost = round((input_tokens * 0.000003) + (output_tokens * 0.000015), 5)
+                estimated_cost = round(
+                    (input_tokens * 0.000003) +
+                    (output_tokens * 0.000015) +
+                    (cache_creation_tokens * 0.00000375) +
+                    (cache_read_tokens * 0.0000003),
+                    5
+                )
 
         # Defaults
         if not user_name:
@@ -218,8 +228,9 @@ class UsageDatabase:
                     id, provider, model, session_id,
                     input_tokens, output_tokens, total_tokens,
                     estimated_cost, request_count, recorded_at,
-                    account_id, team_name, user_name, token_id, project_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    account_id, team_name, user_name, token_id, project_id,
+                    cache_creation_tokens, cache_read_tokens
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 event_id,
                 provider.lower(),
@@ -235,7 +246,9 @@ class UsageDatabase:
                 team_name,
                 user_name,
                 token_id,
-                project_id
+                project_id,
+                cache_creation_tokens,
+                cache_read_tokens
             ))
             conn.commit()
             conn.close()
@@ -360,6 +373,8 @@ class UsageDatabase:
                 SELECT 
                     COALESCE(SUM(input_tokens), 0) as in_tokens,
                     COALESCE(SUM(output_tokens), 0) as out_tokens,
+                    COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
+                    COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
                     COALESCE(SUM(total_tokens), 0) as tot_tokens,
                     COALESCE(SUM(estimated_cost), 0.0) as tot_cost,
                     COUNT(DISTINCT session_id) as sess_count,
@@ -397,6 +412,8 @@ class UsageDatabase:
             "date": today_date,
             "input_tokens_today": row_today["in_tokens"],
             "output_tokens_today": row_today["out_tokens"],
+            "cache_creation_tokens_today": row_today["cache_creation_tokens"],
+            "cache_read_tokens_today": row_today["cache_read_tokens"],
             "total_tokens_today": row_today["tot_tokens"],
             "estimated_cost_today_usd": round(row_today["tot_cost"], 4),
             "total_sessions": row_today["sess_count"],
@@ -1200,6 +1217,8 @@ class UsageDatabase:
                 {select_group},
                 SUM(input_tokens) AS input_tokens,
                 SUM(output_tokens) AS output_tokens,
+                SUM(COALESCE(cache_creation_tokens, 0)) AS cache_creation_tokens,
+                SUM(COALESCE(cache_read_tokens, 0)) AS cache_read_tokens,
                 SUM(total_tokens) AS total_tokens,
                 SUM(estimated_cost) AS total_cost_usd,
                 SUM(request_count) AS request_count,
@@ -1221,6 +1240,10 @@ class UsageDatabase:
 
         records = []
         tot_tok = 0
+        tot_in = 0
+        tot_out = 0
+        tot_cache_create = 0
+        tot_cache_read = 0
         tot_cost = 0.0
         tot_events = 0
 
@@ -1230,13 +1253,25 @@ class UsageDatabase:
             group_key = d.get("dimension_value") or d.get("account_id") or d.get("team_name") or d.get("user_name") or d.get("provider") or "All"
             d["group_key"] = group_key
             d["estimated_cost"] = d["total_cost_usd"]
+            d["input_tokens"] = int(d.get("input_tokens") or 0)
+            d["output_tokens"] = int(d.get("output_tokens") or 0)
+            d["cache_creation_tokens"] = int(d.get("cache_creation_tokens") or 0)
+            d["cache_read_tokens"] = int(d.get("cache_read_tokens") or 0)
             tot_tok += int(d.get("total_tokens") or 0)
+            tot_in += d["input_tokens"]
+            tot_out += d["output_tokens"]
+            tot_cache_create += d["cache_creation_tokens"]
+            tot_cache_read += d["cache_read_tokens"]
             tot_cost += float(d.get("total_cost_usd") or 0.0)
             tot_events += int(d.get("event_count") or 0)
             records.append(d)
 
         summary = {
             "total_tokens": tot_tok,
+            "input_tokens": tot_in,
+            "output_tokens": tot_out,
+            "cache_creation_tokens": tot_cache_create,
+            "cache_read_tokens": tot_cache_read,
             "total_estimated_cost": round(tot_cost, 4),
             "total_cost_usd": round(tot_cost, 4),
             "total_events": tot_events,
@@ -1287,7 +1322,7 @@ class UsageDatabase:
             limit=2000
         )
         lines = [
-            "Period,Provider,Account,Team,User,Model,Input Tokens,Output Tokens,Total Tokens,Total Cost (USD),Sessions,Events"
+            "Period,Provider,Account,Team,User,Model,Input Tokens,Output Tokens,Cache Create Tokens,Cache Read Tokens,Total Tokens,Total Cost (USD),Sessions,Events"
         ]
         for r in report.get("records", []):
             period = r.get("period", "")
@@ -1298,11 +1333,13 @@ class UsageDatabase:
             mdl = r.get("model") or ""
             in_t = r.get("input_tokens", 0)
             out_t = r.get("output_tokens", 0)
+            cc_t = r.get("cache_creation_tokens", 0)
+            cr_t = r.get("cache_read_tokens", 0)
             tot_t = r.get("total_tokens", 0)
             cost = r.get("total_cost_usd", 0.0)
             sess = r.get("session_count", 0)
             evt = r.get("event_count", 0)
-            lines.append(f'"{period}","{prov}","{acct}","{team}","{user}","{mdl}",{in_t},{out_t},{tot_t},{cost:.4f},{sess},{evt}')
+            lines.append(f'"{period}","{prov}","{acct}","{team}","{user}","{mdl}",{in_t},{out_t},{cc_t},{cr_t},{tot_t},{cost:.4f},{sess},{evt}')
 
         return "\r\n".join(lines)
 

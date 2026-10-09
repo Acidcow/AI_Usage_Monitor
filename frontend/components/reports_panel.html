@@ -90,10 +90,15 @@
   </div>
 
   <!-- Summary Metric Strip -->
-  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px;">
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px;">
     <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
       <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Total Tokens (Period)</span>
       <div style="font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: #38bdf8; margin-top: 2px;" id="rep-tot-tokens">0</div>
+    </div>
+    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
+      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Prompt Cache (Read / Write)</span>
+      <div style="font-family: var(--font-mono); font-size: 1.3rem; font-weight: 800; color: #a78bfa; margin-top: 2px;" id="rep-tot-cache">0</div>
+      <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;" id="rep-tot-cache-sub">Create: 0 | Read: 0</div>
     </div>
     <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
       <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Total Estimated Cost</span>
@@ -104,7 +109,7 @@
       <div style="font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: #c084fc; margin-top: 2px;" id="rep-tot-events">0</div>
     </div>
     <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
-      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Active Dimensions</span>
+      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Active Slices</span>
       <div style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 700; color: #cbd5e1; margin-top: 2px;" id="rep-tot-records">0 slices</div>
     </div>
   </div>
@@ -115,19 +120,21 @@
       <thead>
         <tr>
           <th>Period / Date</th>
-          <th>Provider / Platform</th>
-          <th>Account ID</th>
-          <th>Team / Workspace</th>
-          <th>User / Seat</th>
-          <th>Model</th>
+          <th>Dimension / Key</th>
+          <th style="text-align: right;">Events</th>
+          <th style="text-align: right;">Input</th>
+          <th style="text-align: right;">Output</th>
+          <th style="text-align: right;">Cache Create</th>
+          <th style="text-align: right;">Cache Read</th>
           <th style="text-align: right;">Total Tokens</th>
           <th style="text-align: right;">Est. Cost</th>
-          <th style="text-align: right;">Sessions</th>
+          <th style="text-align: right;">Cost / 1k</th>
+          <th style="text-align: center;">Share</th>
         </tr>
       </thead>
       <tbody id="reports-table-body">
         <tr>
-          <td colspan="9" style="text-align: center; color: var(--text-dim); padding: 24px;">
+          <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 24px;">
             Select criteria and click <strong>Run Report</strong> to load historical analytics.
           </td>
         </tr>

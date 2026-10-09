@@ -78,8 +78,30 @@ class TestReportsAnalytics(unittest.TestCase):
     def test_export_historical_csv(self):
         csv_str = self.db.export_historical_csv(group_by="day")
         self.assertIn("Period,Provider,Account,Team,User,Model", csv_str)
+        self.assertIn("Cache Create Tokens,Cache Read Tokens", csv_str)
         lines = csv_str.strip().split("\r\n" if "\r\n" in csv_str else "\n")
         self.assertGreaterEqual(len(lines), 2)
+
+    def test_cache_metrics_in_historical_report(self):
+        # Record event with cache metrics
+        self.db.record_usage_event(
+            provider="claude",
+            model="claude-sonnet-5-5",
+            input_tokens=250,
+            output_tokens=750,
+            cache_creation_tokens=50000,
+            cache_read_tokens=200000,
+            session_id="sess_cache_test"
+        )
+        res = self.db.query_historical_report(group_by="day", provider="claude")
+        self.assertIn("summary", res)
+        self.assertGreaterEqual(res["summary"]["cache_creation_tokens"], 50000)
+        self.assertGreaterEqual(res["summary"]["cache_read_tokens"], 200000)
+
+        # Check today summary
+        summary = self.db.get_usage_summary(provider="claude")
+        self.assertGreaterEqual(summary["cache_creation_tokens_today"], 50000)
+        self.assertGreaterEqual(summary["cache_read_tokens_today"], 200000)
 
 if __name__ == "__main__":
     unittest.main()

@@ -200,16 +200,25 @@ class ClaudeProvider(BaseProvider):
         input_tokens: int,
         output_tokens: int,
         session_id: Optional[str] = None,
-        rate_limit_headers: Optional[Dict[str, str]] = None
+        rate_limit_headers: Optional[Dict[str, str]] = None,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0
     ) -> str:
         """Called by transparent proxy or CLI scanner when a request completes."""
-        # Estimate cost (approx Sonnet 3.5/3.7 rates: $3/M in, $15/M out)
-        cost = (input_tokens * 0.000003) + (output_tokens * 0.000015)
+        # Estimate cost (approx Sonnet rates: $3/M in, $15/M out, $3.75/M cache write, $0.30/M cache read)
+        cost = (
+            (input_tokens * 0.000003) +
+            (output_tokens * 0.000015) +
+            (cache_creation_tokens * 0.00000375) +
+            (cache_read_tokens * 0.0000003)
+        )
         evt_id = self.db.record_usage_event(
             provider="claude",
             model=model or "claude-3-7-sonnet",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
             session_id=session_id or f"proxy_{int(time.time())}",
             estimated_cost=cost
         )
@@ -247,7 +256,7 @@ class ClaudeProvider(BaseProvider):
     def scan_local_logs(self, search_dir: Optional[str] = None) -> int:
         """
         Scans local ~/.claude directory for CLI and Claude Code session logs (*.jsonl).
-        Ingests real token counts, models, and timestamps idempotently.
+        Ingests real token counts, models, and timestamps idempotently, with cache token backfill.
         """
         claude_root = Path(search_dir) if search_dir else (Path.home() / ".claude")
         if not claude_root.exists():
@@ -282,33 +291,63 @@ class ClaudeProvider(BaseProvider):
                         cache_create = int(usage.get("cache_creation_input_tokens", 0))
                         cache_read = int(usage.get("cache_read_input_tokens", 0))
 
-                        tot_in = in_tok + cache_create + cache_read
                         model_name = msg.get("model", "claude-sonnet-5-5")
                         ts = item.get("timestamp") or datetime.datetime.now(datetime.timezone.utc).isoformat()
                         session_id = item.get("sessionId") or file_path.stem
                         unique_sess_key = f"{session_id}_{line_idx}"
 
-                        # Calculate estimated cost
-                        cost = (in_tok * 0.000003) + (out_tok * 0.000015) + (cache_create * 0.00000375) + (cache_read * 0.0000003)
+                        # Calculate accurate estimated cost with prompt caching discounts
+                        cost = (
+                            (in_tok * 0.000003) +
+                            (out_tok * 0.000015) +
+                            (cache_create * 0.00000375) +
+                            (cache_read * 0.0000003)
+                        )
 
-                        # Idempotency check in SQLite
+                        # Idempotency and backfill check in SQLite
                         conn = self.db._get_connection()
                         c = conn.cursor()
-                        c.execute("SELECT 1 FROM usage_events WHERE session_id = ? AND recorded_at = ?", (unique_sess_key, ts))
-                        exists = c.fetchone()
+                        c.execute(
+                            "SELECT id, cache_creation_tokens, cache_read_tokens FROM usage_events WHERE session_id = ? AND recorded_at = ?",
+                            (unique_sess_key, ts)
+                        )
+                        existing_row = c.fetchone()
                         conn.close()
 
-                        if not exists:
+                        if not existing_row:
                             self.db.record_usage_event(
                                 provider="claude",
                                 model=model_name,
-                                input_tokens=tot_in,
+                                input_tokens=in_tok,
                                 output_tokens=out_tok,
+                                cache_creation_tokens=cache_create,
+                                cache_read_tokens=cache_read,
                                 session_id=unique_sess_key,
                                 estimated_cost=cost,
                                 recorded_at=ts
                             )
                             ingested_count += 1
+                        else:
+                            # Backfill if cache tokens weren't recorded previously
+                            evt_db_id = existing_row[0]
+                            prev_cc = existing_row[1] or 0
+                            prev_cr = existing_row[2] or 0
+                            if (cache_create > 0 or cache_read > 0) and (prev_cc == 0 and prev_cr == 0):
+                                tot_toks = in_tok + out_tok + cache_create + cache_read
+                                conn = self.db._get_connection()
+                                c = conn.cursor()
+                                c.execute("""
+                                    UPDATE usage_events
+                                    SET input_tokens = ?,
+                                        cache_creation_tokens = ?,
+                                        cache_read_tokens = ?,
+                                        total_tokens = ?,
+                                        estimated_cost = ?
+                                    WHERE id = ?
+                                """, (in_tok, cache_create, cache_read, tot_toks, cost, evt_db_id))
+                                conn.commit()
+                                conn.close()
+                                ingested_count += 1
 
             except Exception as e:
                 self.diagnostics.record_error(
