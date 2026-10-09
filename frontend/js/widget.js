@@ -246,20 +246,26 @@ window.Widget = {
   },
 
   cycleProvider() {
+    const visible = this.providers.filter(p => !this.hiddenPlatforms || !this.hiddenPlatforms.has(p));
+    if (visible.length === 0) return;
     if (this.viewMode === "multi") {
       this.setViewMode("single");
     } else {
-      this.currentProviderIndex = (this.currentProviderIndex + 1) % this.providers.length;
+      const curKey = this.providers[this.currentProviderIndex];
+      const curIdx = visible.indexOf(curKey);
+      const nextKey = visible[(curIdx + 1) % visible.length];
+      this.currentProviderIndex = this.providers.indexOf(nextKey);
       this.render();
     }
   },
 
   async refresh() {
     try {
+      await this.fetchSettings();
       const [sumRes, provRes, compRes] = await Promise.all([
         fetch("/api/usage/summary"),
         fetch("/api/providers"),
-        fetch("/api/usage/comparison")
+        fetch("/api/usage/comparison?filter_visibility=true")
       ]);
 
       if (sumRes.ok && provRes.ok) {
@@ -302,8 +308,15 @@ window.Widget = {
         const provs = comp.providers || {};
 
         let html = "";
+        let renderedCount = 0;
         for (const key of this.providers) {
           if (this.hiddenPlatforms && this.hiddenPlatforms.has(key)) continue;
+
+          const isPinned = this.pinnedItems.has(key);
+          const isFadedUnpinned = this.fadeUnpinned && !this.hasWindowFocus && !isPinned;
+          if (isFadedUnpinned) continue; // Unpinned item completely fades out / not displayed on loss of focus
+
+          renderedCount++;
           const item = provs[key] || {
             tokens_today: 0,
             tokens_week: 0,
@@ -318,10 +331,8 @@ window.Widget = {
           const sessionRem = item.session_balance_remaining_pct ?? 100;
           const weeklyRem = item.weekly_balance_remaining_pct ?? 100;
 
-          const isPinned = this.pinnedItems.has(key);
           const isExpanded = this.expandedAccounts.has(key);
-          const isDimmed = this.fadeUnpinned && !this.hasWindowFocus && !isPinned;
-          const rowStyle = isDimmed ? "opacity: 0.12; transform: scale(0.97); pointer-events: none; filter: blur(0.5px);" : "opacity: 1; transform: scale(1);";
+          const rowStyle = "opacity: 1; transform: scale(1); transition: opacity 0.25s ease;";
           const childSeries = this.getChildSeries(key, item);
 
           let bodyContent = "";
@@ -412,6 +423,21 @@ window.Widget = {
             </div>
           `;
         }
+        if (renderedCount === 0) {
+          if (this.fadeUnpinned && !this.hasWindowFocus) {
+            html = `
+              <div style="padding: 16px; text-align: center; color: var(--text-dim); font-size: 0.72rem; font-style: italic;">
+                Unpinned items hidden (unfocused).<br>Click widget or pin 📌 to keep visible.
+              </div>
+            `;
+          } else {
+            html = `
+              <div style="padding: 16px; text-align: center; color: var(--text-dim); font-size: 0.72rem; font-style: italic;">
+                All platforms hidden by visibility configuration.
+              </div>
+            `;
+          }
+        }
         container.innerHTML = html;
       }
 
@@ -424,7 +450,11 @@ window.Widget = {
     }
 
     // Render Single Focus View
-    const provKey = this.providers[this.currentProviderIndex];
+    const visibleProviders = this.providers.filter(p => !this.hiddenPlatforms || !this.hiddenPlatforms.has(p));
+    let provKey = this.providers[this.currentProviderIndex];
+    if (this.hiddenPlatforms && this.hiddenPlatforms.has(provKey)) {
+      provKey = visibleProviders.length > 0 ? visibleProviders[0] : provKey;
+    }
     const provInfo = this.cachedProviders[provKey] || {};
     const sum = this.cachedSummary;
 

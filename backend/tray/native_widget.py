@@ -161,7 +161,7 @@ class NativeTaskbarWidget:
         working_port = None
         for p in ports_to_try:
             try:
-                req_c = urllib.request.Request(f"http://{self.host}:{p}/api/usage/comparison")
+                req_c = urllib.request.Request(f"http://{self.host}:{p}/api/usage/comparison?filter_visibility=true")
                 with urllib.request.urlopen(req_c, timeout=1.5) as resp:
                     if resp.status == 200:
                         comp = json.loads(resp.read().decode("utf-8"))
@@ -201,17 +201,17 @@ class NativeTaskbarWidget:
         if "widget_auto_resize" in st:
             self.auto_resize = bool(st["widget_auto_resize"])
         if "widget_fade_unpinned" in st:
-            self.fade_unpinned = bool(st["widget_fade_unpinned"])
+            self.fade_unpinned = (st["widget_fade_unpinned"] is True or st["widget_fade_unpinned"] == "true")
         if "widget_view_mode" in st:
             self.view_mode = st["widget_view_mode"]
         if "widget_hide_parent_chart_on_expand" in st:
             self.hide_parent_chart_on_expand = bool(st["widget_hide_parent_chart_on_expand"])
         if "pinned_items" in st and isinstance(st["pinned_items"], list):
-            self.pinned_items = set(st["pinned_items"])
+            self.pinned_items = set(p.lower().strip() for p in st["pinned_items"] if isinstance(p, str))
         if "estate_visibility" in st:
             ev = st["estate_visibility"]
             if isinstance(ev, dict) and "hidden_platforms" in ev:
-                self.hidden_platforms = set(p.lower() for p in ev["hidden_platforms"])
+                self.hidden_platforms = set(p.lower().strip() for p in ev["hidden_platforms"] if isinstance(p, str))
 
     def _save_settings_async(self, payload: dict):
         def _post():
@@ -358,6 +358,8 @@ class NativeTaskbarWidget:
 
         self.root.bind("<FocusIn>", self._on_focus_in)
         self.root.bind("<FocusOut>", self._on_focus_out)
+        self.root.bind("<Button-1>", lambda e: self._on_focus_in())
+        main_frame.bind("<Button-1>", lambda e: self._on_focus_in())
 
         self.canvas.bind("<Motion>", self._on_canvas_motion)
         self.canvas.bind("<Leave>", self._on_canvas_leave)
@@ -366,6 +368,7 @@ class NativeTaskbarWidget:
         self.canvas.bind("<MouseWheel>", self._on_mousewheel)
 
     def _start_drag(self, event):
+        self._on_focus_in()
         self._drag_data["x"] = event.x
         self._drag_data["y"] = event.y
 
@@ -393,17 +396,42 @@ class NativeTaskbarWidget:
         self._save_settings_async({"widget_view_mode": self.view_mode})
         self.render_canvas()
 
-    def _on_focus_in(self, event):
+    def _on_focus_in(self, event=None):
         if not self.has_focus:
             self.has_focus = True
             if self.fade_unpinned:
                 self.render_canvas()
 
-    def _on_focus_out(self, event):
+    def _on_focus_out(self, event=None):
         if self.has_focus:
             self.has_focus = False
             if self.fade_unpinned:
                 self.render_canvas()
+
+    def _poll_focus(self):
+        """Continuously checks foreground window state on Windows to detect focus loss."""
+        if not self.root or not self.is_running:
+            return
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                fg = ctypes.windll.user32.GetForegroundWindow()
+                hwnd = self.root.winfo_id()
+                fly_hwnd = self.flyout_window.winfo_id() if getattr(self, "flyout_window", None) else None
+                is_fg = (fg == hwnd or (fly_hwnd and fg == fly_hwnd))
+                if not is_fg:
+                    parent = ctypes.windll.user32.GetParent(hwnd)
+                    if fg == parent and parent != 0:
+                        is_fg = True
+                if is_fg != self.has_focus:
+                    if is_fg:
+                        self._on_focus_in()
+                    else:
+                        self._on_focus_out()
+            except Exception:
+                pass
+        if self.root and self.is_running:
+            self.root.after(600, self._poll_focus)
 
     def _on_canvas_click(self, event):
         """Toggles expanding or collapsing children for the clicked account or pinning if clicked on pin icon."""
@@ -447,6 +475,14 @@ class NativeTaskbarWidget:
         """Scrolls canvas up and down smoothly."""
         if hasattr(self, "canvas") and self.canvas:
             self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def get_providers_order(self) -> list:
+        """Returns the ordered list of providers respecting visibility toggles and focus-loss pinning fade."""
+        all_providers = ["claude", "gemini", "chatgpt", "ollama", "copilot"]
+        visible = [p for p in all_providers if p.lower() not in self.hidden_platforms]
+        if self.fade_unpinned and not self.has_focus:
+            return [p for p in visible if p.lower() in self.pinned_items]
+        return visible
 
     def toggle_pin(self, key: str):
         """Programmatic toggle for pinning/unpinning a provider or model."""
@@ -634,14 +670,7 @@ class NativeTaskbarWidget:
         if not hasattr(self, "expanded_accounts"):
             self.expanded_accounts = {"claude": False, "gemini": False}
 
-        all_providers = ["claude", "gemini", "chatgpt", "ollama", "copilot"]
-        # Fade unpinned if focus lost and fade_unpinned enabled; filter out hidden platforms
-        if self.fade_unpinned and not self.has_focus:
-            providers_order = [p for p in all_providers if p in self.pinned_items and p not in self.hidden_platforms]
-            if not providers_order:
-                providers_order = [p for p in all_providers if p not in self.hidden_platforms][:2]
-        else:
-            providers_order = [p for p in all_providers if p not in self.hidden_platforms]
+        providers_order = self.get_providers_order()
 
         display_names = {
             "claude": "Claude",
@@ -660,6 +689,22 @@ class NativeTaskbarWidget:
 
         self._hit_boxes = []
         self._pin_hit_boxes = []
+
+        if not providers_order:
+            if self.fade_unpinned and not self.has_focus:
+                self.canvas.create_text(
+                    card_w // 2, 40,
+                    text="Unpinned items hidden (unfocused)",
+                    fill=th["subtext"],
+                    font=self._get_font(8, "italic")
+                )
+            else:
+                self.canvas.create_text(
+                    card_w // 2, 40,
+                    text="No visible providers active",
+                    fill=th["subtext"],
+                    font=self._get_font(8, "italic")
+                )
 
         for p_key in providers_order:
             item = prov_map.get(p_key, {
@@ -1106,6 +1151,7 @@ class NativeTaskbarWidget:
         """Runs the Tkinter mainloop."""
         self.is_running = True
         self.build_ui()
+        self.root.after(600, self._poll_focus)
         # Immediate initial update
         def _initial_worker():
             c, p = self.fetch_data()

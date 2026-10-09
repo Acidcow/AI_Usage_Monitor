@@ -45,10 +45,10 @@ window.App = {
     ]);
 
     this.setupEventListeners();
+    await this.loadSettings();
     await this.loadUsageData();
     await this.loadAccountProfiles();
     await this.loadHistoricalReport();
-    await this.loadSettings();
     await this.loadCrossPlatformTags();
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -141,7 +141,7 @@ window.App = {
         fetch(`/api/usage/sessions${providerParam}`),
         fetch("/api/diagnostics/errors?limit=30"),
         fetch("/api/usage/hourly?hours=24"),
-        fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}`)
+        fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}&filter_visibility=true`)
       ]);
 
       let compData = null;
@@ -287,19 +287,31 @@ window.App = {
 
     let itemsToRender = [];
     if (this.hierarchyGroupMode === "platforms") {
-      itemsToRender = allKeys.map(k => ({ type: "platform", key: k }));
+      itemsToRender = allKeys
+        .filter(k => !hiddenPlatforms.includes(k))
+        .map(k => ({ type: "platform", key: k }));
     } else if (this.hierarchyGroupMode === "groups") {
-      itemsToRender = predefinedGroups.map(g => ({ type: "group", key: g.id, group: g }));
+      itemsToRender = predefinedGroups
+        .filter(g => g.providers.some(p => !hiddenPlatforms.includes(p)))
+        .map(g => ({ type: "group", key: g.id, group: g }));
     } else if (this.hierarchyGroupMode === "filtered") {
       allKeys.forEach(k => {
-        if (this.filteredItemIds.has(k)) itemsToRender.push({ type: "platform", key: k });
+        if (!hiddenPlatforms.includes(k) && this.filteredItemIds.has(k)) {
+          itemsToRender.push({ type: "platform", key: k });
+        }
       });
       predefinedGroups.forEach(g => {
-        if (this.filteredItemIds.has(g.id)) itemsToRender.push({ type: "group", key: g.id, group: g });
+        if (this.filteredItemIds.has(g.id) && g.providers.some(p => !hiddenPlatforms.includes(p))) {
+          itemsToRender.push({ type: "group", key: g.id, group: g });
+        }
       });
     } else {
-      itemsToRender = allKeys.map(k => ({ type: "platform", key: k }))
-        .concat(predefinedGroups.map(g => ({ type: "group", key: g.id, group: g })));
+      itemsToRender = allKeys
+        .filter(k => !hiddenPlatforms.includes(k))
+        .map(k => ({ type: "platform", key: k }))
+        .concat(predefinedGroups
+          .filter(g => g.providers.some(p => !hiddenPlatforms.includes(p)))
+          .map(g => ({ type: "group", key: g.id, group: g })));
     }
 
     const provMap = comp.providers || {};
@@ -308,7 +320,7 @@ window.App = {
     itemsToRender.forEach(itemEntry => {
       if (itemEntry.type === "platform") {
         const key = itemEntry.key;
-        if (this.hierarchyGroupMode !== "filtered" && hiddenPlatforms.includes(key)) {
+        if (hiddenPlatforms.includes(key)) {
           return;
         }
         const item = provMap[key] || {
@@ -638,17 +650,21 @@ window.App = {
         }
       } else if (itemEntry.type === "group") {
         const grp = itemEntry.group;
+        const visibleGroupProviders = grp.providers.filter(p => !hiddenPlatforms.includes(p));
+        if (visibleGroupProviders.length === 0) {
+          return;
+        }
         const gKey = grp.id;
         const isExpanded = !!this.expandedHierarchy[gKey];
         let grpTokens = 0;
         let grpCost = 0;
-        grp.providers.forEach(p => {
+        visibleGroupProviders.forEach(p => {
           const pItem = provMap[p] || {};
           grpTokens += (pItem.tokens_today || 0);
           grpCost += (pItem.cost_today_usd || 0);
         });
 
-        const grpSeries = grp.providers.map(p => {
+        const grpSeries = visibleGroupProviders.map(p => {
           const pItem = provMap[p] || {};
           const pPts = [0.15, 0.3, 0.25, 0.5, 0.45, 0.75, 0.65, 0.95].map(f => Math.round(Math.max(100, pItem.tokens_today || 1000) * f));
           return { key: p, label: displayNames[p] || p, color: provColors[p] || "#38bdf8", points: pPts };
@@ -680,7 +696,7 @@ window.App = {
             <td>
               <div style="display: flex; align-items: center; gap: 8px;">
                 ${this.generateMultiInlineSparkline(grpSeries, 120, 26)}
-                <span style="font-family: var(--font-mono); font-size: 0.74rem; color: #38bdf8;">${grp.providers.length} platforms</span>
+                <span style="font-family: var(--font-mono); font-size: 0.74rem; color: #38bdf8;">${visibleGroupProviders.length} platforms</span>
               </div>
             </td>
             <td>
@@ -700,7 +716,7 @@ window.App = {
                   Group Members Telemetry (${grp.name}):
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px;">
-                  ${grp.providers.map(p => {
+                  ${visibleGroupProviders.map(p => {
                     const pItem = provMap[p] || {};
                     const pCol = provColors[p] || "#38bdf8";
                     return `
@@ -730,6 +746,14 @@ window.App = {
   },
 
   renderPills(providers, summary) {
+    const hiddenPlatforms = (this.appSettings?.estate_visibility?.hidden_platforms || []).map(p => p.toLowerCase());
+    ["claude", "copilot", "gemini", "ollama", "chatgpt"].forEach(p => {
+      const pill = document.getElementById(`pill-${p}`);
+      if (pill) {
+        pill.style.display = hiddenPlatforms.includes(p) ? "none" : "inline-flex";
+      }
+    });
+
     const claudePillTok = document.getElementById("claude-pill-tokens");
     if (claudePillTok) {
       claudePillTok.innerText = `${Number(summary.total_tokens_today).toLocaleString()} tok`;
@@ -802,7 +826,9 @@ window.App = {
     const singleProvNotice = document.getElementById("chart-single-provider-notice");
     if (!svg) return;
 
-    const platforms = ["claude", "gemini", "chatgpt", "ollama", "copilot"];
+    const hiddenPlatforms = (this.appSettings?.estate_visibility?.hidden_platforms || []).map(p => p.toLowerCase());
+    const allKnownPlatforms = ["claude", "gemini", "chatgpt", "ollama", "copilot"];
+    const platforms = allKnownPlatforms.filter(p => !hiddenPlatforms.includes(p));
     const platformColors = {
       claude: "#f59e0b",
       gemini: "#3b82f6",
@@ -819,6 +845,13 @@ window.App = {
       copilot: "M365 Copilot",
       total: "Total Combined"
     };
+
+    allKnownPlatforms.forEach(p => {
+      const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
+      if (pill) {
+        pill.style.display = hiddenPlatforms.includes(p) ? "none" : "inline-flex";
+      }
+    });
 
     if (!hourly || hourly.length === 0) {
       svg.innerHTML = `
@@ -854,6 +887,9 @@ window.App = {
     hourly.forEach(item => {
       const h = item.hour_key;
       const prov = (item.provider || "claude").toLowerCase();
+      if (hiddenPlatforms.includes(prov)) {
+        return;
+      }
       allHoursSet.add(h);
 
       if (!hourMap[h]) {
@@ -2723,15 +2759,13 @@ window.App = {
         const data = await res.json();
         this.appSettings = data.settings || payload;
         // Also persist to visibility endpoint
-        fetch("/api/settings/visibility", {
+        await fetch("/api/settings/visibility", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload.estate_visibility)
         }).catch(() => {});
         alert("✅ Configuration successfully saved and encrypted into Windows DPAPI storage!");
-        if (this.lastCompData && window._lastProviders) {
-          this.renderComparison(this.lastCompData, window._lastProviders);
-        }
+        await this.loadUsageData();
       }
     } catch (e) {
       alert("❌ Error saving settings: " + e.message);

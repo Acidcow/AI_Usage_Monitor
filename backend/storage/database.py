@@ -805,9 +805,9 @@ class UsageDatabase:
                 else:
                     data = {}
                 return {
-                    "hidden_platforms": list(data.get("hidden_platforms", [])),
-                    "hidden_accounts": list(data.get("hidden_accounts", [])),
-                    "hidden_tags": list(data.get("hidden_tags", []))
+                    "hidden_platforms": [p.lower().strip() for p in data.get("hidden_platforms", []) if isinstance(p, str) and p.strip()],
+                    "hidden_accounts": [str(a).strip() for a in data.get("hidden_accounts", []) if a],
+                    "hidden_tags": [str(t).strip() for t in data.get("hidden_tags", []) if t]
                 }
             except Exception:
                 pass
@@ -822,11 +822,11 @@ class UsageDatabase:
         """Sets visibility configurations for platforms, accounts, and tags."""
         current = self.get_estate_visibility()
         if hidden_platforms is not None:
-            current["hidden_platforms"] = hidden_platforms
+            current["hidden_platforms"] = [p.lower().strip() for p in hidden_platforms if isinstance(p, str) and p.strip()]
         if hidden_accounts is not None:
-            current["hidden_accounts"] = hidden_accounts
+            current["hidden_accounts"] = [str(a).strip() for a in hidden_accounts if a]
         if hidden_tags is not None:
-            current["hidden_tags"] = hidden_tags
+            current["hidden_tags"] = [str(t).strip() for t in hidden_tags if t]
         self.set_setting("estate_visibility", json.dumps(current))
         return current
 
@@ -1383,7 +1383,8 @@ class UsageDatabase:
             "poll_cadence_seconds": 4,
             "refresh_cadence_seconds": 4,
             "ollama_sync_interval": 15,
-            "pinned_items": ["claude", "gemini", "ollama"]
+            "pinned_items": ["claude", "gemini", "ollama"],
+            "estate_visibility": self.get_estate_visibility()
         }
         with self._lock:
             conn = self._get_connection()
@@ -1394,10 +1395,14 @@ class UsageDatabase:
 
         for r in rows:
             k = r["key"]
+            if k == "estate_visibility":
+                defaults["estate_visibility"] = self.get_estate_visibility()
+                continue
             try:
                 defaults[k] = json.loads(r["value"])
             except Exception:
                 defaults[k] = r["value"]
+        defaults["estate_visibility"] = self.get_estate_visibility()
         return defaults
 
     # -------------------------------------------------------------

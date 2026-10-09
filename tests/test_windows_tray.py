@@ -168,6 +168,50 @@ class TestWindowsTray(unittest.TestCase):
 
         widget.close()
 
+    def test_native_widget_strict_visibility_override_and_unpinned_fade(self):
+        """Assert that visibility toggle strictly overrides pinning, and unpinned items fade on focus loss."""
+        from backend.tray.native_widget import NativeTaskbarWidget
+        widget = NativeTaskbarWidget(width=360, height=380)
+        widget.build_ui()
+
+        # 1. Strict Visibility Override: Pinned items must never render if hidden
+        widget.pinned_items = set(["claude", "gemini", "ollama"])
+        widget._apply_settings_from_server({
+            "estate_visibility": {
+                "hidden_platforms": ["claude", "copilot"]
+            }
+        })
+        self.assertIn("claude", widget.hidden_platforms)
+        self.assertIn("copilot", widget.hidden_platforms)
+
+        order = widget.get_providers_order()
+        self.assertNotIn("claude", order, "Hidden platform 'claude' must NOT be rendered even if pinned")
+        self.assertNotIn("copilot", order, "Hidden platform 'copilot' must NOT be rendered")
+        self.assertIn("gemini", order)
+        self.assertIn("ollama", order)
+
+        # 2. Focus Loss Unpinned Fade: When unfocused, unpinned items must fade out
+        widget.fade_unpinned = True
+        widget.has_focus = False
+        widget.pinned_items = set(["gemini"])
+        widget.hidden_platforms = set()
+
+        unfocused_order = widget.get_providers_order()
+        self.assertEqual(unfocused_order, ["gemini"], "Unfocused widget with fade_unpinned must only show pinned items")
+
+        # When focused, all visible items should show
+        widget.has_focus = True
+        focused_order = widget.get_providers_order()
+        self.assertEqual(len(focused_order), 5, "Focused widget should display all visible providers")
+
+        # 3. Unfocused with 0 pinned items must be empty (not fall back to displaying unpinned items)
+        widget.has_focus = False
+        widget.pinned_items = set()
+        empty_pinned_order = widget.get_providers_order()
+        self.assertEqual(empty_pinned_order, [], "Unfocused widget with no pinned items must not fall back to displaying unpinned items")
+
+        widget.close()
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -165,6 +165,16 @@ class TestHierarchicalTrendsAndFiltering(unittest.TestCase):
         val = self.db.get_setting("widget_hide_parent_chart_on_expand")
         self.assertTrue(val)
 
+    def test_all_settings_includes_estate_visibility(self):
+        """Assert that get_all_settings() always returns estate_visibility structure."""
+        st = self.db.get_all_settings()
+        self.assertIn("estate_visibility", st)
+        self.assertIn("hidden_platforms", st["estate_visibility"])
+
+        self.db.set_estate_visibility(hidden_platforms=["gemini", "copilot"])
+        st_updated = self.db.get_all_settings()
+        self.assertEqual(st_updated["estate_visibility"]["hidden_platforms"], ["gemini", "copilot"])
+
     def _start_server(self):
         providers = {
             "claude": ClaudeProvider(self.db, self.vault, self.diagnostics),
