@@ -453,8 +453,8 @@ window.App = {
                       { name: "mistral:latest", parameter_size: "7B", status: "READY (DISK)", tokens_today: 12100, total_tokens: 49000, size: "4.1 GB", color: "#38bdf8" }
                     ]).map((m, mIdx) => {
                       const mCol = m.color || ["#c084fc", "#34d399", "#38bdf8", "#f59e0b"][mIdx % 4];
-                      const mSeed = m.tokens_today || 15000;
-                      const mPts = [0.2, 0.35, 0.3, 0.55, 0.45, 0.8, 0.7, 0.95].map(f => Math.round(mSeed * f));
+                      const mSeed = Number(m.tokens_today) || 0;
+                      const mPts = mSeed > 0 ? [0.2, 0.35, 0.3, 0.55, 0.45, 0.8, 0.7, 0.95].map(f => Math.round(mSeed * f)) : [0, 0, 0, 0, 0, 0, 0, 0];
                       const spk = this.generateInlineSparkline(mPts, mCol);
                       return `
                         <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
@@ -491,7 +491,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'acidcow@gmail.com'}</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline([0.2, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#60a5fa')}
+                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.2, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#60a5fa')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Account Session:</strong> <span style="color: #60a5fa; font-weight: 700;">${ind.session_remaining_pct}% remaining</span>
@@ -507,8 +507,8 @@ window.App = {
                     <!-- Gemini Child Named Tokens -->
                     ${h.tokens.map((t, tIdx) => {
                       const tCol = ["#34d399", "#f472b6", "#fbbf24", "#38bdf8"][tIdx % 4];
-                      const tSeed = t.tokens_today || 1200;
-                      const tPts = [0.1, 0.25, 0.2, 0.4, 0.35, 0.6, 0.5, 0.8].map(f => Math.round(tSeed * f));
+                      const tSeed = Number(t.tokens_today) || 0;
+                      const tPts = tSeed > 0 ? [0.1, 0.25, 0.2, 0.4, 0.35, 0.6, 0.5, 0.8].map(f => Math.round(tSeed * f)) : [0, 0, 0, 0, 0, 0, 0, 0];
                       return `
                         <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px 12px;">
                           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -542,7 +542,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'James Eckhardt'}</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline([0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#38bdf8')}
+                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#38bdf8')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.session_remaining_pct}% remaining</span> (${ind.session_used_pct}% used)
@@ -565,7 +565,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Synthesis2'}</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline([0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#c084fc')}
+                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#c084fc')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Team Session:</strong> <span style="color: #c084fc; font-weight: 700;">${team.session_remaining_pct}% remaining</span> (${team.session_used_pct}% used)
@@ -588,7 +588,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline([0.15, 0.3, 0.25, 0.45, 0.4, 0.65, 0.55, 0.75].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#34d399')}
+                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.15, 0.3, 0.25, 0.45, 0.4, 0.65, 0.55, 0.75].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#34d399')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Division:</strong> ${dept.dept_name || 'Technology & AI'}
@@ -611,7 +611,7 @@ window.App = {
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
                       </div>
                       <div style="margin-bottom: 6px;">
-                        ${this.generateInlineSparkline([0.3, 0.45, 0.4, 0.65, 0.6, 0.85, 0.8, 1.0].map(f => Math.round(Math.max(100, item.tokens_today)*f)), '#fbbf24')}
+                        ${this.generateInlineSparkline((Number(item.tokens_today) || 0) > 0 ? [0.3, 0.45, 0.4, 0.65, 0.6, 0.85, 0.8, 1.0].map(f => Math.round(item.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], '#fbbf24')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
                         <strong>Org Name:</strong> ${ent.org_name || 'Enterprise Workspace'}
@@ -710,7 +710,7 @@ window.App = {
                           <span style="color: ${pCol}; font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700;">${Number(pItem.tokens_today || 0).toLocaleString()} tok</span>
                         </div>
                         <div style="margin-top: 4px;">
-                          ${this.generateInlineSparkline([0.15, 0.3, 0.25, 0.5, 0.45, 0.75, 0.65, 0.95].map(f => Math.round(Math.max(100, pItem.tokens_today || 1000) * f)), pCol)}
+                          ${this.generateInlineSparkline((Number(pItem.tokens_today) || 0) > 0 ? [0.15, 0.3, 0.25, 0.5, 0.45, 0.75, 0.65, 0.95].map(f => Math.round(pItem.tokens_today * f)) : [0, 0, 0, 0, 0, 0, 0, 0], pCol)}
                         </div>
                       </div>
                     `;
@@ -983,36 +983,73 @@ window.App = {
   },
 
   _getProviderChildSeries(key, item) {
-    const tSeed = Math.max(100, item.tokens_today || 1500);
-    const h = item.hierarchy || {};
+    const tToday = Number(item.tokens_today) || 0;
+    const zeroes = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Check if we have real cached hierarchical trend series from backend
+    const cacheKey = `${key}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
+    const cached = this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey];
+    if (cached && cached.series && cached.series.length > 0) {
+      return cached.series.map(s => ({
+        key: s.key || s.id,
+        id: s.id || s.key,
+        label: s.label || s.name,
+        name: s.name || s.label,
+        color: s.color,
+        points: s.points || zeroes
+      }));
+    }
+
+    if (tToday === 0) {
+      if (key === "claude") {
+        return [
+          { key: "claude_total", id: "claude_total", label: "Claude Total", name: "Claude Total", color: "#38bdf8", points: zeroes },
+          { key: "claude_individual", id: "claude_individual", label: "Individual Member", name: "Individual Member", color: "#60a5fa", points: zeroes },
+          { key: "claude_team", id: "claude_team", label: "Team Workspace", name: "Team Workspace", color: "#c084fc", points: zeroes }
+        ];
+      } else if (key === "gemini") {
+        return [
+          { key: "gemini_account", id: "gemini_account", label: "Google Umbrella", name: "Google Umbrella", color: "#60a5fa", points: zeroes },
+          { key: "tok_gem_flash", id: "tok_gem_flash", label: "Dev Key", name: "Dev Key", color: "#34d399", points: zeroes }
+        ];
+      } else if (key === "ollama") {
+        return [
+          { key: "ollama_total", id: "ollama_total", label: "Local Hardware", name: "Local Hardware", color: "#a855f7", points: zeroes }
+        ];
+      }
+      return [
+        { key: `${key}_total`, id: `${key}_total`, label: `${key} Active`, name: `${key} Active`, color: "#38bdf8", points: zeroes }
+      ];
+    }
+
     if (key === "claude") {
       return [
-        { key: "org", label: "Enterprise Org", color: "#fbbf24", points: [0.3, 0.45, 0.4, 0.65, 0.6, 0.85, 0.8, 1.0].map(f => Math.round(tSeed * f)) },
-        { key: "dept", label: "AI Department", color: "#34d399", points: [0.15, 0.3, 0.25, 0.45, 0.4, 0.65, 0.55, 0.75].map(f => Math.round(tSeed * f)) },
-        { key: "team", label: "Synthesis2 (Team)", color: "#c084fc", points: [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(tSeed * f)) },
-        { key: "ind", label: "James (Individual)", color: "#38bdf8", points: [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(tSeed * f)) }
+        { key: "org", id: "org", label: "Enterprise Org", name: "Enterprise Org", color: "#fbbf24", points: [0.3, 0.45, 0.4, 0.65, 0.6, 0.85, 0.8, 1.0].map(f => Math.round(tToday * f)) },
+        { key: "dept", id: "dept", label: "AI Department", name: "AI Department", color: "#34d399", points: [0.15, 0.3, 0.25, 0.45, 0.4, 0.65, 0.55, 0.75].map(f => Math.round(tToday * f)) },
+        { key: "team", id: "team", label: "Synthesis2 (Team)", name: "Synthesis2 (Team)", color: "#c084fc", points: [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(tToday * f)) },
+        { key: "ind", id: "ind", label: "James (Individual)", name: "James (Individual)", color: "#38bdf8", points: [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(tToday * f)) }
       ];
     } else if (key === "gemini") {
       return [
-        { key: "acct", label: "Google Umbrella", color: "#60a5fa", points: [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(tSeed * f)) },
-        { key: "key1", label: "Dev-Key-01", color: "#34d399", points: [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55].map(f => Math.round(tSeed * f)) },
-        { key: "key2", label: "Workspace-Prod", color: "#f472b6", points: [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32].map(f => Math.round(tSeed * f)) }
+        { key: "acct", id: "acct", label: "Google Umbrella", name: "Google Umbrella", color: "#60a5fa", points: [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(tToday * f)) },
+        { key: "key1", id: "key1", label: "Dev-Key-01", name: "Dev-Key-01", color: "#34d399", points: [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55].map(f => Math.round(tToday * f)) },
+        { key: "key2", id: "key2", label: "Workspace-Prod", name: "Workspace-Prod", color: "#f472b6", points: [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32].map(f => Math.round(tToday * f)) }
       ];
     } else if (key === "ollama") {
       return [
-        { key: "llama3", label: "llama3:latest", color: "#c084fc", points: [0.3, 0.2, 0.4, 0.35, 0.6, 0.5, 0.7, 0.8].map(f => Math.round(tSeed * f)) },
-        { key: "deepseek", label: "deepseek-r1:14b", color: "#34d399", points: [0.25, 0.35, 0.45, 0.6, 0.55, 0.75, 0.8, 0.9].map(f => Math.round(tSeed * f)) },
-        { key: "mistral", label: "mistral:latest", color: "#38bdf8", points: [0.1, 0.15, 0.12, 0.2, 0.18, 0.25, 0.22, 0.3].map(f => Math.round(tSeed * f)) }
+        { key: "llama3", id: "llama3", label: "llama3:latest", name: "llama3:latest", color: "#c084fc", points: [0.3, 0.2, 0.4, 0.35, 0.6, 0.5, 0.7, 0.8].map(f => Math.round(tToday * f)) },
+        { key: "deepseek", id: "deepseek", label: "deepseek-r1:14b", name: "deepseek-r1:14b", color: "#34d399", points: [0.25, 0.35, 0.45, 0.6, 0.55, 0.75, 0.8, 0.9].map(f => Math.round(tToday * f)) },
+        { key: "mistral", id: "mistral", label: "mistral:latest", name: "mistral:latest", color: "#38bdf8", points: [0.1, 0.15, 0.12, 0.2, 0.18, 0.25, 0.22, 0.3].map(f => Math.round(tToday * f)) }
       ];
     } else if (key === "chatgpt") {
       return [
-        { key: "org", label: "Main Organization", color: "#10a37f", points: [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6].map(f => Math.round(tSeed * f)) },
-        { key: "proj", label: "Default Project", color: "#6ee7b7", points: [0.1, 0.18, 0.14, 0.22, 0.2, 0.28, 0.24, 0.32].map(f => Math.round(tSeed * f)) }
+        { key: "org", id: "org", label: "Main Organization", name: "Main Organization", color: "#10a37f", points: [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6].map(f => Math.round(tToday * f)) },
+        { key: "proj", id: "proj", label: "Default Project", name: "Default Project", color: "#6ee7b7", points: [0.1, 0.18, 0.14, 0.22, 0.2, 0.28, 0.24, 0.32].map(f => Math.round(tToday * f)) }
       ];
     } else {
       return [
-        { key: "ent", label: "Enterprise E5", color: "#0284c7", points: [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4].map(f => Math.round(tSeed * f)) },
-        { key: "pool", label: "Copilot Studio Pool", color: "#38bdf8", points: [0.08, 0.12, 0.15, 0.18, 0.22, 0.25, 0.28, 0.35].map(f => Math.round(tSeed * f)) }
+        { key: "ent", id: "ent", label: "Enterprise E5", name: "Enterprise E5", color: "#0284c7", points: [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4].map(f => Math.round(tToday * f)) },
+        { key: "pool", id: "pool", label: "Copilot Studio Pool", name: "Copilot Studio Pool", color: "#38bdf8", points: [0.08, 0.12, 0.15, 0.18, 0.22, 0.25, 0.28, 0.35].map(f => Math.round(tToday * f)) }
       ];
     }
   },
@@ -1021,10 +1058,22 @@ window.App = {
     if (!seriesList || seriesList.length === 0) return "";
     let allPoints = [];
     seriesList.forEach(s => { allPoints = allPoints.concat(s.points || []); });
+    const isAllZero = allPoints.length > 0 && allPoints.every(p => p === 0);
+    const pad = 3;
+
+    if (isAllZero) {
+      const yZero = (h - pad).toFixed(1);
+      return `
+        <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);" title="No activity in window (0 tokens)">
+          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+          <text x="${w / 2}" y="${h / 2 + 3}" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
+        </svg>
+      `;
+    }
+
     const min = Math.min(...allPoints, 0);
     const max = Math.max(...allPoints, 100);
     const range = Math.max(1, max - min);
-    const pad = 3;
     const n = Math.max(...seriesList.map(s => (s.points || []).length));
     const step = n > 1 ? (w - pad * 2) / (n - 1) : (w - pad * 2);
 
@@ -1078,17 +1127,19 @@ window.App = {
   },
 
   _buildSyntheticHierarchicalTrends(providerKey, windowPeriod) {
-    const childSeries = this._getProviderChildSeries(providerKey, { tokens_today: 15000 });
+    const childSeries = this._getProviderChildSeries(providerKey, { tokens_today: 0 });
     const n = 12;
     const labels = Array.from({ length: n }, (_, i) => `${i * 2}:00`);
     const series = childSeries.map(cs => {
-      const step = (cs.points[cs.points.length - 1] - cs.points[0]) / (n - 1);
-      const pts = Array.from({ length: n }, (_, idx) => Math.round(cs.points[0] + idx * step * (0.8 + (idx % 3) * 0.15)));
+      const sKey = cs.key || cs.id;
+      const sLabel = cs.label || cs.name || sKey;
       return {
-        key: cs.key,
-        label: cs.label,
+        key: sKey,
+        id: sKey,
+        label: sLabel,
+        name: sLabel,
         color: cs.color,
-        points: pts
+        points: Array(n).fill(0)
       };
     });
     return {
@@ -1115,7 +1166,8 @@ window.App = {
 
     let allPoints = [];
     seriesList.forEach(s => {
-      if (!hiddenSet.has(s.key)) {
+      const sKey = s.key || s.id;
+      if (!hiddenSet.has(sKey)) {
         allPoints = allPoints.concat(s.points || []);
       }
     });
@@ -1168,7 +1220,9 @@ window.App = {
     let dotsHtml = "";
 
     seriesList.forEach(s => {
-      const isHidden = hiddenSet.has(s.key);
+      const sKey = s.key || s.id;
+      const sLabel = s.label || s.name || sKey;
+      const isHidden = hiddenSet.has(sKey);
       const pts = (s.points || []).map((val, idx) => {
         const x = padL + (idx * step);
         const y = padT + plotH - ((val / maxVal) * plotH);
@@ -1183,7 +1237,7 @@ window.App = {
       pathsHtml += `
         <path class="trend-chart-line" 
               data-provider="${providerKey}" 
-              data-series="${s.key}" 
+              data-series="${sKey}" 
               d="${pathData}" 
               fill="none" 
               stroke="${s.color}" 
@@ -1192,17 +1246,17 @@ window.App = {
               stroke-linecap="round" 
               stroke-linejoin="round" 
               style="transition: all 0.2s ease; cursor: pointer; pointer-events: ${isHidden ? 'none' : 'stroke'};"
-              onmouseenter="window.App.highlightSeries('${providerKey}', '${s.key}')"
+              onmouseenter="window.App.highlightSeries('${providerKey}', '${sKey}')"
               onmouseleave="window.App.unhighlightSeries('${providerKey}')">
-          <title>${s.label}: ${lastPt.val.toLocaleString()} tok</title>
+          <title>${sLabel}: ${lastPt.val.toLocaleString()} tok</title>
         </path>
       `;
 
       if (!isHidden) {
         dotsHtml += `
           <circle cx="${lastPt.x}" cy="${lastPt.y}" r="3.5" fill="${s.color}" stroke="#ffffff" stroke-width="1"
-                  class="trend-chart-dot" data-provider="${providerKey}" data-series="${s.key}">
-            <title>${s.label}: ${lastPt.val.toLocaleString()} tokens</title>
+                  class="trend-chart-dot" data-provider="${providerKey}" data-series="${sKey}">
+            <title>${sLabel}: ${lastPt.val.toLocaleString()} tokens</title>
           </circle>
         `;
       }
@@ -1210,18 +1264,20 @@ window.App = {
 
     // Interactive Legend Pills
     const legendPillsHtml = seriesList.map(s => {
-      const isHidden = hiddenSet.has(s.key);
+      const sKey = s.key || s.id;
+      const sLabel = s.label || s.name || sKey;
+      const isHidden = hiddenSet.has(sKey);
       const lastVal = s.points ? s.points[s.points.length - 1] : 0;
       return `
         <div class="trend-legend-pill" 
              data-provider="${providerKey}" 
-             data-series="${s.key}"
-             onclick="window.App.toggleSeriesVisibility('${providerKey}', '${s.key}', '${containerId}')"
-             onmouseenter="window.App.highlightSeries('${providerKey}', '${s.key}')"
+             data-series="${sKey}"
+             onclick="window.App.toggleSeriesVisibility('${providerKey}', '${sKey}', '${containerId}')"
+             onmouseenter="window.App.highlightSeries('${providerKey}', '${sKey}')"
              onmouseleave="window.App.unhighlightSeries('${providerKey}')"
              style="display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 4px; background: rgba(0,0,0,0.4); border: 1px solid ${isHidden ? 'rgba(255,255,255,0.06)' : s.color + '40'}; cursor: pointer; transition: all 0.2s ease; opacity: ${isHidden ? '0.35' : '1'};">
           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: ${s.color};"></span>
-          <span style="font-size: 0.72rem; color: #cbd5e1; font-weight: 600; text-decoration: ${isHidden ? 'line-through' : 'none'};">${s.label}</span>
+          <span style="font-size: 0.72rem; color: #cbd5e1; font-weight: 600; text-decoration: ${isHidden ? 'line-through' : 'none'};">${sLabel}</span>
           <span style="font-size: 0.70rem; color: ${s.color}; font-family: var(--font-mono); font-weight: 700;">${lastVal.toLocaleString()} t</span>
           <span style="font-size: 0.65rem; color: var(--text-dim);">${isHidden ? '👁️‍🗨️' : '👁️'}</span>
         </div>
@@ -2329,10 +2385,22 @@ window.App = {
     if (!points || points.length < 2) return "";
     const min = Math.min(...points);
     const max = Math.max(...points);
-    const range = Math.max(1, max - min);
+    const isAllZero = points.every(p => p === 0);
     const w = 110;
     const h = 26;
     const pad = 3;
+
+    if (isAllZero || (min === 0 && max === 0)) {
+      const yZero = (h - pad).toFixed(1);
+      return `
+        <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);" title="No activity in window (0 tokens)">
+          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+          <text x="${w / 2}" y="${h / 2 + 3}" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
+        </svg>
+      `;
+    }
+
+    const range = Math.max(1, max - min);
     const coords = points.map((p, idx) => {
       const x = pad + (idx / (points.length - 1)) * (w - pad * 2);
       const y = h - pad - ((p - min) / range) * (h - pad * 2);

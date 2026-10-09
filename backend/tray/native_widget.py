@@ -592,7 +592,7 @@ class NativeTaskbarWidget:
 
     def _get_provider_child_series(self, p_key: str, item: dict) -> list:
         """Returns a list of tuples (points, color, label) for each child in the provider hierarchy."""
-        t_seed = max(100, item.get("tokens_today", 1500))
+        t_seed = int(item.get("tokens_today", 0))
         h = item.get("hierarchy", {})
         if p_key == "claude":
             team_pts = [int(t_seed * f) for f in [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95]]

@@ -279,8 +279,30 @@ class TestHierarchicalTrendsAndFiltering(unittest.TestCase):
             for js in js_files:
                 content = js.read_text(encoding="utf-8")
                 # Ensure non-empty and starts properly
-                self.assertTrue(len(content) > 500)
+    def test_get_hierarchical_trends_idle_provider_returns_strict_zeroes(self):
+        """AIUM-614: Assert that an idle provider with 0 usage events returns strictly 0s (no saw-tooth modulo)."""
+        trends = self.db.get_hierarchical_trends(provider="gemini", window="24h")
+        self.assertIn("series", trends)
+        for s in trends["series"]:
+            # Every point must be exactly 0, not modulo numbers like (i % 5) * 200
+            for pt in s["points"]:
+                self.assertEqual(pt, 0, f"Point {pt} in series {s.get('name')} should be 0 for idle provider")
+            self.assertEqual(max(s["points"]), 0)
 
+    def test_get_hierarchical_trends_has_dual_key_label_and_id_name_aliases(self):
+        """AIUM-614: Assert that returned series contain both id/key and name/label aliases to prevent 'undefined' legends."""
+        self._seed_test_usage()
+        for prov in ["claude", "gemini", "ollama"]:
+            trends = self.db.get_hierarchical_trends(provider=prov, window="24h")
+            for s in trends["series"]:
+                self.assertIn("id", s)
+                self.assertIn("key", s)
+                self.assertEqual(s["id"], s["key"])
+                self.assertIn("name", s)
+                self.assertIn("label", s)
+                self.assertEqual(s["name"], s["label"])
+                self.assertNotEqual(s["label"], "undefined")
+                self.assertTrue(len(s["label"]) > 0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -921,7 +921,9 @@ class UsageDatabase:
         if prov_key == "claude":
             series.append({
                 "id": "claude_total",
+                "key": "claude_total",
                 "name": "Claude (Total Burn)",
+                "label": "Claude (Total Burn)",
                 "color": "#38bdf8",
                 "points": total_points,
                 "total_tokens": sum(total_points)
@@ -929,12 +931,12 @@ class UsageDatabase:
 
             ind_pts = child_buckets.get("individual")
             if not ind_pts or sum(ind_pts) == 0:
-                ind_pts = [int(p * 0.6) for p in total_points]
-                if sum(ind_pts) == 0:
-                    ind_pts = [int(max(5, (i % 5) * 120)) for i in range(num_bins)]
+                ind_pts = [int(p * 0.6) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
             series.append({
                 "id": "claude_individual",
+                "key": "claude_individual",
                 "name": "Individual Member (You)",
+                "label": "Individual Member (You)",
                 "color": "#60a5fa",
                 "points": ind_pts,
                 "total_tokens": sum(ind_pts)
@@ -942,30 +944,34 @@ class UsageDatabase:
 
             team_pts = child_buckets.get("team")
             if not team_pts or sum(team_pts) == 0:
-                team_pts = [int(p * 0.9) for p in total_points]
-                if sum(team_pts) == 0:
-                    team_pts = [int(max(10, (i % 7) * 210)) for i in range(num_bins)]
+                team_pts = [int(p * 0.9) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
             series.append({
                 "id": "claude_team",
+                "key": "claude_team",
                 "name": "Team Workspace Pool (Synthesis2)",
+                "label": "Team Workspace Pool (Synthesis2)",
                 "color": "#c084fc",
                 "points": team_pts,
                 "total_tokens": sum(team_pts)
             })
 
-            dept_pts = [int(p * 1.4) if p > 0 else int((i % 4) * 350 + 200) for i, p in enumerate(total_points)]
+            dept_pts = [int(p * 1.4) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
             series.append({
                 "id": "claude_department",
+                "key": "claude_department",
                 "name": "Department (Technology & AI)",
+                "label": "Department (Technology & AI)",
                 "color": "#34d399",
                 "points": dept_pts,
                 "total_tokens": sum(dept_pts)
             })
 
-            ent_pts = [int(p * 2.2) if p > 0 else int((i % 6) * 500 + 400) for i, p in enumerate(total_points)]
+            ent_pts = [int(p * 2.2) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
             series.append({
                 "id": "claude_enterprise",
+                "key": "claude_enterprise",
                 "name": "Enterprise Pool (Synthesis)",
+                "label": "Enterprise Pool (Synthesis)",
                 "color": "#fbbf24",
                 "points": ent_pts,
                 "total_tokens": sum(ent_pts)
@@ -974,7 +980,9 @@ class UsageDatabase:
         elif prov_key == "gemini":
             series.append({
                 "id": "gemini_account",
+                "key": "gemini_account",
                 "name": "Google Account Umbrella (acidcow@gmail.com)",
+                "label": "Google Account Umbrella (acidcow@gmail.com)",
                 "color": "#3b82f6",
                 "points": total_points,
                 "total_tokens": sum(total_points)
@@ -995,12 +1003,12 @@ class UsageDatabase:
                 pts = child_buckets.get(tk_id)
                 if not pts or sum(pts) == 0:
                     fraction = 0.55 if "flash" in tk_id else 0.45
-                    pts = [int(p * fraction) for p in total_points]
-                    if sum(pts) == 0:
-                        pts = [int(max(5, (i % 6) * 150)) for i in range(num_bins)]
+                    pts = [int(p * fraction) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
                 series.append({
                     "id": tk_id,
+                    "key": tk_id,
                     "name": info[0],
+                    "label": info[0],
                     "color": info[1],
                     "points": pts,
                     "total_tokens": sum(pts)
@@ -1009,7 +1017,9 @@ class UsageDatabase:
         elif prov_key == "ollama":
             series.append({
                 "id": "ollama_total",
+                "key": "ollama_total",
                 "name": "Local Hardware Total",
+                "label": "Local Hardware Total",
                 "color": "#a855f7",
                 "points": total_points,
                 "total_tokens": sum(total_points)
@@ -1029,10 +1039,13 @@ class UsageDatabase:
                 info = model_palette.get(m, (m, "#f43f5e"))
                 pts = child_buckets.get(m)
                 if not pts or sum(pts) == 0:
-                    pts = [int(max(10, ((i + len(m)) % 5) * 200)) for i in range(num_bins)]
+                    pts = [int(p * 0.5) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+                m_id = f"ollama_model_{m.replace(':', '_')}"
                 series.append({
-                    "id": f"ollama_model_{m.replace(':', '_')}",
+                    "id": m_id,
+                    "key": m_id,
                     "name": info[0],
+                    "label": info[0],
                     "color": info[1],
                     "points": pts,
                     "total_tokens": sum(pts)
@@ -1042,24 +1055,32 @@ class UsageDatabase:
             color = "#10b981" if prov_key == "chatgpt" else "#06b6d4"
             series.append({
                 "id": f"{prov_key}_total",
+                "key": f"{prov_key}_total",
                 "name": f"{provider.capitalize()} Active Session",
+                "label": f"{provider.capitalize()} Active Session",
                 "color": color,
                 "points": total_points,
                 "total_tokens": sum(total_points)
             })
+            p_pts = [int(p * 0.6) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
             series.append({
                 "id": f"{prov_key}_personal",
+                "key": f"{prov_key}_personal",
                 "name": "Personal Developer Quota",
+                "label": "Personal Developer Quota",
                 "color": "#38bdf8",
-                "points": [int(p * 0.6) if p > 0 else int((i % 5) * 80) for i, p in enumerate(total_points)],
-                "total_tokens": sum([int(p * 0.6) for p in total_points])
+                "points": p_pts,
+                "total_tokens": sum(p_pts)
             })
+            s_pts = [int(p * 0.4) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
             series.append({
                 "id": f"{prov_key}_shared",
+                "key": f"{prov_key}_shared",
                 "name": "Shared Organization Pool",
+                "label": "Shared Organization Pool",
                 "color": "#a855f7",
-                "points": [int(p * 0.4) if p > 0 else int((i % 4) * 60) for i, p in enumerate(total_points)],
-                "total_tokens": sum([int(p * 0.4) for p in total_points])
+                "points": s_pts,
+                "total_tokens": sum(s_pts)
             })
 
         return {

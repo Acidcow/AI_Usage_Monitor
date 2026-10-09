@@ -92,7 +92,15 @@ window.Widget = {
   generateSparkline(tokToday, tokWeek, color = "#06b6d4") {
     const today = Number(tokToday) || 0;
     const week = Number(tokWeek) || 0;
-    const baseline = week > 0 ? (week / 7) : Math.max(100, today);
+    if (today === 0 && week === 0) {
+      return `
+        <svg width="110" height="24" style="overflow: visible; display: block;" title="No activity recorded (0 tokens)">
+          <line x1="0" y1="21" x2="110" y2="21" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+          <text x="55" y="14" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
+        </svg>
+      `;
+    }
+    const baseline = week > 0 ? (week / 7) : today;
     const raw = [
       baseline * 0.7,
       baseline * 0.9,
@@ -124,7 +132,7 @@ window.Widget = {
   },
 
   getChildSeries(key, item) {
-    const tSeed = Math.max(100, item.tokens_today || 1500);
+    const tSeed = Number(item.tokens_today) || 0;
     if (key === "claude") {
       return [
         { label: "Synthesis2 (Team)", color: "#c084fc", points: [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(tSeed * f)) },
@@ -152,6 +160,15 @@ window.Widget = {
     if (!seriesList || seriesList.length === 0) return "";
     let allPoints = [];
     seriesList.forEach(s => { allPoints = allPoints.concat(s.points || []); });
+    const isAllZero = allPoints.length > 0 && allPoints.every(p => p === 0);
+    if (isAllZero) {
+      return `
+        <svg width="${width}" height="${height}" style="overflow: visible; display: block;" title="No activity in window (0 tokens)">
+          <line x1="0" y1="${height - 4}" x2="${width}" y2="${height - 4}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+          <text x="${width / 2}" y="${height / 2 + 2}" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
+        </svg>
+      `;
+    }
     const maxVal = Math.max(...allPoints, 100);
     const minVal = Math.min(...allPoints, 0);
     const range = (maxVal - minVal) || 1;
