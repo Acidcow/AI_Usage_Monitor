@@ -120,11 +120,17 @@ class GeminiProvider(BaseProvider):
                     saved = self.vault.get_credential("gemini", f"token_{t_id}")
                     if saved and saved.strip() == api_key.strip():
                         return t_id
-                    # Check prefix / suffix against masked key
+                # Fallback to masked key matching
+                for t in tokens:
+                    t_id = t.get("id")
+                    if not t_id:
+                        continue
                     masked = t.get("masked_key", "")
                     if "..." in masked:
-                        pref, suff = masked.split("...")
-                        if api_key.startswith(pref) or api_key.endswith(suff):
+                        parts = masked.split("...")
+                        pref = parts[0].strip()
+                        suff = parts[1].strip() if len(parts) > 1 else ""
+                        if (pref and api_key.startswith(pref)) and (suff and api_key.endswith(suff)):
                             return t_id
             except Exception:
                 pass

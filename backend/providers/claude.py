@@ -480,8 +480,38 @@ class ClaudeProvider(BaseProvider):
                     ErrorCategory.RATE_LIMIT_EXCEEDED,
                     "claude",
                     "Rate limit exceeded (HTTP 429)",
-                    {"headers": dict(e.headers)}
+                    {"headers": dict(e.headers) if hasattr(e, "headers") else {}}
                 )
+                rate_limits = {}
+                if hasattr(e, "headers") and e.headers:
+                    try:
+                        rate_limits = self.parse_rate_limit_headers(dict(e.headers))
+                    except Exception:
+                        pass
+                self.db.update_provider_snapshot(
+                    provider="claude",
+                    plan_type=self._cached_plan,
+                    tokens_remaining=rate_limits.get("tokens_remaining", 0),
+                    requests_remaining=rate_limits.get("requests_remaining", 0),
+                    reset_epoch=rate_limits.get("reset_epoch"),
+                    status="RATE_LIMITED"
+                )
+                return {"success": False, "status": "RATE_LIMITED", "error": str(e), "rate_limits": rate_limits}
+            elif e.code == 400:
+                self.diagnostics.record_error(
+                    ErrorCategory.RATE_LIMIT_EXCEEDED,
+                    "claude",
+                    f"Anthropic API request error (tokens exhausted or credit low): {e.reason}",
+                    {"status_code": 400}
+                )
+                self.db.update_provider_snapshot(
+                    provider="claude",
+                    plan_type=self._cached_plan,
+                    tokens_remaining=0,
+                    requests_remaining=0,
+                    status="QUOTA_EXHAUSTED"
+                )
+                return {"success": False, "status": "QUOTA_EXHAUSTED", "error": str(e)}
             else:
                 self.diagnostics.record_error(
                     ErrorCategory.SYSTEM_ERROR,

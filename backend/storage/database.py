@@ -45,7 +45,11 @@ class UsageDatabase:
                     total_tokens INTEGER NOT NULL DEFAULT 0,
                     estimated_cost REAL NOT NULL DEFAULT 0.0,
                     request_count INTEGER NOT NULL DEFAULT 1,
-                    recorded_at TEXT NOT NULL
+                    recorded_at TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'direct',
+                    instance_id TEXT NOT NULL DEFAULT 'local',
+                    external_id TEXT,
+                    is_proxied INTEGER NOT NULL DEFAULT 0
                 )
             ''')
 
@@ -248,7 +252,11 @@ class UsageDatabase:
                 "cache_creation_tokens INTEGER DEFAULT 0",
                 "cache_read_tokens INTEGER DEFAULT 0",
                 "client_ip TEXT",
-                "client_alias TEXT"
+                "client_alias TEXT",
+                "source TEXT NOT NULL DEFAULT 'direct'",
+                "instance_id TEXT NOT NULL DEFAULT 'local'",
+                "external_id TEXT",
+                "is_proxied INTEGER NOT NULL DEFAULT 0"
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE usage_events ADD COLUMN {col}")
@@ -263,6 +271,9 @@ class UsageDatabase:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_team ON usage_events(team_name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_events(user_name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_client_ip ON usage_events(client_ip)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_source ON usage_events(source)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_instance ON usage_events(instance_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_external_id ON usage_events(external_id)')
 
             conn.commit()
             conn.close()
@@ -285,16 +296,59 @@ class UsageDatabase:
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
         client_ip: Optional[str] = None,
-        client_alias: Optional[str] = None
+        client_alias: Optional[str] = None,
+        source: str = "direct",
+        instance_id: str = "local",
+        external_id: Optional[str] = None,
+        is_proxied: int = 0
     ) -> str:
-        """Records a single usage event with dimensional attribution, client network context, and cache metrics."""
-        event_id = f"evt_{uuid.uuid4().hex[:12]}"
+        """Records a single usage event with dimensional attribution, client network context, deduplication, and cache metrics."""
         now_utc = recorded_at or datetime.datetime.now(datetime.timezone.utc).isoformat()
         total_tokens = input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens
+        prov_clean = (provider or "unknown").lower()
+        source_clean = source or "direct"
+        instance_clean = instance_id or "local"
+        proxied_clean = 1 if is_proxied else 0
+
+        # 1. Deduplication by external_id (e.g. Anthropic message ID, OpenAI request ID)
+        if external_id:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM usage_events WHERE external_id = ? LIMIT 1", (str(external_id),))
+                existing = cursor.fetchone()
+                conn.close()
+                if existing:
+                    return existing["id"]
+
+        # 2. Temporal correlation deduplication (merged within +-60s window for same provider, session, and total_tokens)
+        if session_id:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, recorded_at FROM usage_events WHERE provider = ? AND session_id = ? AND total_tokens = ?",
+                    (prov_clean, session_id, total_tokens)
+                )
+                candidates = cursor.fetchall()
+                conn.close()
+                if candidates:
+                    try:
+                        cur_dt = datetime.datetime.fromisoformat(now_utc.replace("Z", "+00:00"))
+                        for row in candidates:
+                            rec_iso = row["recorded_at"]
+                            if rec_iso:
+                                row_dt = datetime.datetime.fromisoformat(rec_iso.replace("Z", "+00:00"))
+                                if abs((cur_dt - row_dt).total_seconds()) <= 60.0:
+                                    return row["id"]
+                    except Exception:
+                        pass
+
+        event_id = f"evt_{uuid.uuid4().hex[:12]}"
 
         # Auto-compute cost if not explicitly provided
         if estimated_cost <= 0.0 and total_tokens > 0:
-            if provider.lower() == "ollama":
+            if prov_clean == "ollama":
                 estimated_cost = 0.0
             else:
                 estimated_cost = round(
@@ -308,14 +362,14 @@ class UsageDatabase:
         # Defaults
         if not user_name:
             user_name = "James Eckhardt"
-        if not team_name and provider.lower() == "claude":
+        if not team_name and prov_clean == "claude":
             team_name = "Synthesis2"
         if not account_id:
-            active_prof = self.get_active_account_profile(provider)
+            active_prof = self.get_active_account_profile(prov_clean)
             if active_prof and active_prof.get("account_id"):
                 account_id = active_prof.get("account_id")
             else:
-                account_id = "acidcow@gmail.com" if provider.lower() == "gemini" else ("Synthesis2" if provider.lower() == "claude" else user_name)
+                account_id = "acidcow@gmail.com" if prov_clean == "gemini" else ("Synthesis2" if prov_clean == "claude" else user_name)
 
         # Client IP & Alias Network Attribution
         if not client_ip:
@@ -335,11 +389,12 @@ class UsageDatabase:
                     estimated_cost, request_count, recorded_at,
                     account_id, team_name, user_name, token_id, project_id,
                     cache_creation_tokens, cache_read_tokens,
-                    client_ip, client_alias
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    client_ip, client_alias,
+                    source, instance_id, external_id, is_proxied
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 event_id,
-                provider.lower(),
+                prov_clean,
                 model,
                 session_id or f"session_{event_id}",
                 input_tokens,
@@ -356,7 +411,11 @@ class UsageDatabase:
                 cache_creation_tokens,
                 cache_read_tokens,
                 client_ip,
-                client_alias
+                client_alias,
+                source_clean,
+                instance_clean,
+                external_id,
+                proxied_clean
             ))
             conn.commit()
             conn.close()
@@ -467,6 +526,11 @@ class UsageDatabase:
             snapshots[r["provider"]] = dict(r)
         return snapshots
 
+    def get_latest_provider_snapshot(self, provider: str) -> Optional[Dict[str, Any]]:
+        """Returns snapshot record for a specific provider if present."""
+        snaps = self.get_provider_snapshots()
+        return snaps.get(provider.lower())
+
     def get_usage_summary(self, provider: Optional[str] = None) -> Dict[str, Any]:
         """Calculates today's token usage, monthly totals, and session stats."""
         today_date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
@@ -549,7 +613,11 @@ class UsageDatabase:
                     MIN(recorded_at) as first_activity,
                     MAX(recorded_at) as last_activity,
                     COALESCE(MAX(client_ip), '127.0.0.1') as client_ip,
-                    COALESCE(MAX(client_alias), '') as client_alias
+                    COALESCE(MAX(client_alias), '') as client_alias,
+                    COALESCE(MAX(source), 'direct') as source,
+                    COALESCE(MAX(instance_id), 'local') as instance_id,
+                    COALESCE(MAX(is_proxied), 0) as is_proxied,
+                    COALESCE(MAX(account_id), '') as account_id
                 FROM usage_events
             """
             params = []
@@ -747,6 +815,7 @@ class UsageDatabase:
             elif prov == "ollama":
                 m_name = r["model"] or "llama3:latest"
                 child_buckets.setdefault(m_name, [0] * num_bins)[idx] += toks
+                child_buckets.setdefault(f"ollama_model_{m_name}", [0] * num_bins)[idx] += toks
 
         def _apply_mode(pts: List[int]) -> List[int]:
             if mode_val == "cumulative":
@@ -1096,6 +1165,44 @@ class UsageDatabase:
             """, (week_cutoff,))
             week_rows = {r["provider"].lower(): dict(r) for r in cursor.fetchall()}
 
+            # Query today stats per provider and account
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(account_id, 'default') as account_id,
+                    COALESCE(SUM(total_tokens), 0) as tokens_today,
+                    COALESCE(SUM(estimated_cost), 0.0) as cost_today
+                FROM usage_events
+                WHERE recorded_at >= ?
+                GROUP BY provider, account_id
+            """, (f"{today_prefix}T00:00:00",))
+            today_acct_rows = [dict(r) for r in cursor.fetchall()]
+
+            # Query today stats per provider and instance
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(instance_id, 'local') as instance_id,
+                    COALESCE(SUM(total_tokens), 0) as tokens_today,
+                    COALESCE(SUM(estimated_cost), 0.0) as cost_today
+                FROM usage_events
+                WHERE recorded_at >= ?
+                GROUP BY provider, instance_id
+            """, (f"{today_prefix}T00:00:00",))
+            today_inst_rows = [dict(r) for r in cursor.fetchall()]
+
+            # Query today stats per provider and traffic source
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(source, 'direct') as source,
+                    COALESCE(SUM(total_tokens), 0) as tokens_today
+                FROM usage_events
+                WHERE recorded_at >= ?
+                GROUP BY provider, source
+            """, (f"{today_prefix}T00:00:00",))
+            today_source_rows = [dict(r) for r in cursor.fetchall()]
+
             conn.close()
 
         # Calculate totals
@@ -1298,6 +1405,45 @@ class UsageDatabase:
 
             is_calibrated = bool(prov == "claude" and snap.get("individual_session_rem_pct") is not None)
 
+            # Accounts breakdown
+            prov_accts = [
+                {
+                    "account_id": r["account_id"],
+                    "tokens_today": int(r["tokens_today"]),
+                    "cost_today_usd": round(float(r["cost_today"]), 4)
+                }
+                for r in today_acct_rows if r["provider"].lower() == prov
+            ]
+            if not prov_accts and tokens_today > 0:
+                prov_accts = [{
+                    "account_id": snap.get("account_id") or "default",
+                    "tokens_today": tokens_today,
+                    "cost_today_usd": round(td.get("cost_today", 0.0), 4)
+                }]
+
+            # Instances breakdown
+            prov_insts = [
+                {
+                    "instance_id": r["instance_id"],
+                    "tokens_today": int(r["tokens_today"]),
+                    "cost_today_usd": round(float(r["cost_today"]), 4)
+                }
+                for r in today_inst_rows if r["provider"].lower() == prov
+            ]
+            if not prov_insts and tokens_today > 0:
+                prov_insts = [{
+                    "instance_id": "local",
+                    "tokens_today": tokens_today,
+                    "cost_today_usd": round(td.get("cost_today", 0.0), 4)
+                }]
+
+            # Source breakdown
+            src_bd = {"direct": 0, "proxy": 0, "emulator": 0, "log_scanner": 0}
+            for r in today_source_rows:
+                if r["provider"].lower() == prov:
+                    s_key = r["source"] or "direct"
+                    src_bd[s_key] = int(r["tokens_today"])
+
             providers_comparison[prov] = {
                 "provider": prov,
                 "plan_type": snap.get("plan_type", "Active"),
@@ -1330,7 +1476,10 @@ class UsageDatabase:
                 "source_description": source_descriptions.get(prov, "Standard API"),
                 "is_calibrated": is_calibrated,
                 "models": prov_models,
-                "hierarchy": hierarchy
+                "hierarchy": hierarchy,
+                "accounts": prov_accts,
+                "instances": prov_insts,
+                "source_breakdown": src_bd
             }
 
         # Local Model (Ollama) Cost Savings Calculation
@@ -1559,27 +1708,30 @@ class UsageDatabase:
                 "total_tokens": sum(team_pts)
             })
 
-            dept_pts = [int(p * 1.4) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
-            series.append({
-                "id": "claude_department",
-                "key": "claude_department",
-                "name": "Department (Technology & AI)",
-                "label": "Department (Technology & AI)",
-                "color": "#34d399",
-                "points": dept_pts,
-                "total_tokens": sum(dept_pts)
-            })
+            is_individual_mode = (scope == "individual" or self.get_quota_tracking_mode() == "individual")
 
-            ent_pts = [int(p * 2.2) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
-            series.append({
-                "id": "claude_enterprise",
-                "key": "claude_enterprise",
-                "name": "Enterprise Pool (Synthesis)",
-                "label": "Enterprise Pool (Synthesis)",
-                "color": "#fbbf24",
-                "points": ent_pts,
-                "total_tokens": sum(ent_pts)
-            })
+            if not is_individual_mode:
+                dept_pts = [int(p * 1.4) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+                series.append({
+                    "id": "claude_department",
+                    "key": "claude_department",
+                    "name": "Department (Technology & AI)",
+                    "label": "Department (Technology & AI)",
+                    "color": "#34d399",
+                    "points": dept_pts,
+                    "total_tokens": sum(dept_pts)
+                })
+
+                ent_pts = [int(p * 2.2) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+                series.append({
+                    "id": "claude_enterprise",
+                    "key": "claude_enterprise",
+                    "name": "Enterprise Pool (Synthesis)",
+                    "label": "Enterprise Pool (Synthesis)",
+                    "color": "#fbbf24",
+                    "points": ent_pts,
+                    "total_tokens": sum(ent_pts)
+                })
 
         elif prov_key == "gemini":
             series.append({
@@ -1719,6 +1871,142 @@ class UsageDatabase:
             "series": series
         }
 
+    def get_pivot_metrics(
+        self,
+        dimensions: Union[str, List[str]],
+        window: str = "24h",
+        filter_source: Optional[str] = None,
+        filter_client: Optional[str] = None,
+        filter_platform: Optional[str] = None,
+        filter_instance: Optional[str] = None,
+        filter_model: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Dynamically aggregates usage telemetry across specified pivot dimensions:
+        'platform' (or 'provider'), 'model', 'source', 'client' (client_ip, client_alias),
+        'account' (or 'account_id'), 'instance' (or 'instance_id').
+        Supports sliding windows ('1h', '6h', '24h', '7d', '30d', 'all') and multi-attribute filtering.
+        """
+        if isinstance(dimensions, str):
+            dim_list = [d.strip().lower() for d in dimensions.split(",") if d.strip()]
+        elif isinstance(dimensions, list):
+            dim_list = [str(d).strip().lower() for d in dimensions if str(d).strip()]
+        else:
+            dim_list = ["platform"]
+
+        dim_cols_map = {
+            "platform": ["provider"],
+            "provider": ["provider"],
+            "model": ["model"],
+            "source": ["source"],
+            "client": ["client_ip", "client_alias"],
+            "account": ["account_id"],
+            "account_id": ["account_id"],
+            "instance": ["instance_id"],
+            "instance_id": ["instance_id"]
+        }
+
+        selected_cols = []
+        for d in dim_list:
+            if d in dim_cols_map:
+                for col in dim_cols_map[d]:
+                    if col not in selected_cols:
+                        selected_cols.append(col)
+
+        if not selected_cols:
+            selected_cols = ["provider"]
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        where_clauses = []
+        params = []
+
+        # Window cutoff
+        if window != "all":
+            window_deltas = {
+                "1h": datetime.timedelta(hours=1),
+                "6h": datetime.timedelta(hours=6),
+                "24h": datetime.timedelta(hours=24),
+                "7d": datetime.timedelta(days=7),
+                "30d": datetime.timedelta(days=30)
+            }
+            delta = window_deltas.get(window, datetime.timedelta(hours=24))
+            cutoff_iso = (now - delta).isoformat()
+            where_clauses.append("recorded_at >= ?")
+            params.append(cutoff_iso)
+
+        if filter_source:
+            where_clauses.append("source = ?")
+            params.append(filter_source.lower())
+        if filter_client:
+            where_clauses.append("(client_ip = ? OR client_alias = ?)")
+            params.extend([filter_client, filter_client])
+        if filter_platform:
+            where_clauses.append("provider = ?")
+            params.append(filter_platform.lower())
+        if filter_instance:
+            where_clauses.append("instance_id = ?")
+            params.append(filter_instance)
+        if filter_model:
+            where_clauses.append("model = ?")
+            params.append(filter_model)
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        select_dims_sql = ", ".join(selected_cols)
+        group_by_sql = ", ".join(selected_cols)
+
+        query = f"""
+            SELECT 
+                {select_dims_sql},
+                COALESCE(SUM(input_tokens), 0) as input_tokens,
+                COALESCE(SUM(output_tokens), 0) as output_tokens,
+                COALESCE(SUM(total_tokens), 0) as total_tokens,
+                COALESCE(SUM(estimated_cost), 0.0) as estimated_cost,
+                COUNT(*) as request_count
+            FROM usage_events
+            {where_sql}
+            GROUP BY {group_by_sql}
+            ORDER BY total_tokens DESC
+        """
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            raw_rows = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        total_tok = sum(int(r["total_tokens"]) for r in raw_rows)
+        rows = []
+        for r in raw_rows:
+            t_tok = int(r["total_tokens"])
+            pct = round((t_tok / total_tok * 100), 2) if total_tok > 0 else 0.0
+            row_dict = dict(r)
+            row_dict["total_tokens"] = t_tok
+            row_dict["input_tokens"] = int(r["input_tokens"])
+            row_dict["output_tokens"] = int(r["output_tokens"])
+            row_dict["percentage_share"] = pct
+            row_dict["estimated_cost"] = round(float(row_dict["estimated_cost"]), 4)
+            if "client_ip" in row_dict and not row_dict.get("client_alias"):
+                ip = row_dict["client_ip"]
+                row_dict["client_alias"] = self.resolve_client_alias(ip)
+            rows.append(row_dict)
+
+        totals = {
+            "total_tokens": total_tok,
+            "input_tokens": sum(int(r["input_tokens"]) for r in raw_rows),
+            "output_tokens": sum(int(r["output_tokens"]) for r in raw_rows),
+            "estimated_cost": round(sum(float(r["estimated_cost"]) for r in raw_rows), 4),
+            "request_count": sum(int(r["request_count"]) for r in raw_rows)
+        }
+
+        return {
+            "success": True,
+            "dimensions": dim_list,
+            "window": window,
+            "rows": rows,
+            "totals": totals
+        }
+
     def query_historical_report(
         self,
         group_by: str = "day",
@@ -1732,7 +2020,10 @@ class UsageDatabase:
         model: Optional[str] = None,
         project_id: Optional[str] = None,
         dimension: Optional[str] = None,
-        limit: int = 500
+        limit: int = 500,
+        source: Optional[str] = None,
+        instance_id: Optional[str] = None,
+        client_ip: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Executes multi-dimensional historical analytics across time periods and operational dimensions.
@@ -1778,10 +2069,19 @@ class UsageDatabase:
         if project_id:
             conditions.append("project_id = ?")
             params.append(project_id)
+        if source:
+            conditions.append("source = ?")
+            params.append(source.lower())
+        if instance_id:
+            conditions.append("instance_id = ?")
+            params.append(instance_id)
+        if client_ip:
+            conditions.append("(client_ip = ? OR client_alias = ?)")
+            params.extend([client_ip, client_ip])
 
         where_clause = " AND ".join(conditions)
 
-        valid_dims = {"provider", "account_id", "team_name", "user_name", "model", "project_id"}
+        valid_dims = {"provider", "account_id", "team_name", "user_name", "model", "project_id", "source", "instance_id", "client_ip", "client_alias"}
         dim_col = dimension if dimension in valid_dims else None
 
         if dim_col:

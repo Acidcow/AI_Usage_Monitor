@@ -203,7 +203,10 @@ class OllamaProvider(BaseProvider):
                             output_tokens=eval_tok,
                             session_id=unique_sess_key,
                             estimated_cost=0.0,
-                            recorded_at=iso_ts
+                            recorded_at=iso_ts,
+                            source="log_scanner",
+                            instance_id="local",
+                            is_proxied=0
                         )
                         ingested_count += 1
 
@@ -216,7 +219,11 @@ class OllamaProvider(BaseProvider):
         model: str,
         prompt_tokens: int,
         completion_tokens: int,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        source: str = "direct",
+        instance_id: str = "local",
+        external_id: Optional[str] = None,
+        is_proxied: int = 0
     ) -> str:
         """Records a completed local inference run."""
         evt_id = self.db.record_usage_event(
@@ -225,7 +232,11 @@ class OllamaProvider(BaseProvider):
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
             session_id=session_id or f"ollama_{int(time.time())}",
-            estimated_cost=0.0 # Local hardware inference is $0 API cost!
+            estimated_cost=0.0, # Local hardware inference is $0 API cost!
+            source=source,
+            instance_id=instance_id,
+            external_id=external_id,
+            is_proxied=is_proxied
         )
         return evt_id
 

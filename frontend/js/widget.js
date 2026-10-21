@@ -57,8 +57,16 @@ window.Widget = {
         if (st.estate_visibility && Array.isArray(st.estate_visibility.hidden_platforms)) {
           this.hiddenPlatforms = new Set(st.estate_visibility.hidden_platforms.map(p => p.toLowerCase()));
         }
-        if (st.widget_theme) {
-          this.applyTheme(st.widget_theme, parseFloat(st.widget_font_scale || 1.0));
+        if (st.widget_theme || st.widget_font_size || st.widget_font_scale) {
+          let scale = 1.0;
+          const rawScale = st.widget_font_scale ?? st.widget_font_size;
+          if (typeof rawScale === "number") {
+            scale = rawScale;
+          } else if (typeof rawScale === "string") {
+            const scaleMap = { small: 0.85, standard: 1.0, medium: 1.0, large: 1.15 };
+            scale = scaleMap[rawScale.toLowerCase()] || parseFloat(rawScale) || 1.0;
+          }
+          this.applyTheme(st.widget_theme || "obsidian_neon", scale);
         }
       }
     } catch (e) {}
@@ -71,7 +79,17 @@ window.Widget = {
         cardBg: "rgba(15, 22, 36, 0.94)",
         border: "rgba(255, 255, 255, 0.12)"
       },
+      obsidian_neon: {
+        bg: "rgba(8, 11, 17, 0.98)",
+        cardBg: "rgba(15, 22, 36, 0.94)",
+        border: "rgba(255, 255, 255, 0.12)"
+      },
       cyberpunk: {
+        bg: "rgba(10, 8, 20, 0.98)",
+        cardBg: "rgba(26, 16, 45, 0.94)",
+        border: "rgba(244, 63, 94, 0.3)"
+      },
+      cyberpunk_pulse: {
         bg: "rgba(10, 8, 20, 0.98)",
         cardBg: "rgba(26, 16, 45, 0.94)",
         border: "rgba(244, 63, 94, 0.3)"
@@ -81,18 +99,31 @@ window.Widget = {
         cardBg: "rgba(8, 28, 16, 0.94)",
         border: "rgba(16, 185, 129, 0.3)"
       },
+      matrix_emerald: {
+        bg: "rgba(4, 15, 8, 0.98)",
+        cardBg: "rgba(8, 28, 16, 0.94)",
+        border: "rgba(16, 185, 129, 0.3)"
+      },
       midnight: {
+        bg: "rgba(15, 23, 42, 0.98)",
+        cardBg: "rgba(30, 41, 59, 0.94)",
+        border: "rgba(148, 163, 184, 0.2)"
+      },
+      midnight_slate: {
         bg: "rgba(15, 23, 42, 0.98)",
         cardBg: "rgba(30, 41, 59, 0.94)",
         border: "rgba(148, 163, 184, 0.2)"
       }
     };
-    const t = themes[themeName] || themes.obsidian;
+    const t = themes[themeName] || themes.obsidian_neon || themes.obsidian;
     document.body.style.background = t.bg;
     const container = document.querySelector(".widget-container");
     if (container) {
       container.style.background = t.cardBg;
       container.style.borderColor = t.border;
+    }
+    if (fontScale && !isNaN(fontScale)) {
+      document.documentElement.style.fontSize = `${Math.round(fontScale * 14)}px`;
     }
   },
 

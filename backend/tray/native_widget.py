@@ -205,10 +205,23 @@ class NativeTaskbarWidget:
     def _apply_settings_from_server(self, st: dict):
         if not isinstance(st, dict):
             return
+        theme_changed = False
+        new_theme = self.theme_name
+        new_font = self.font_scale
         if "widget_theme" in st and st["widget_theme"] in THEMES:
-            self.theme_name = st["widget_theme"]
+            if st["widget_theme"] != self.theme_name:
+                new_theme = st["widget_theme"]
+                theme_changed = True
+            else:
+                self.theme_name = st["widget_theme"]
         if "widget_font_size" in st:
-            self.font_scale = st["widget_font_size"]
+            if st["widget_font_size"] != self.font_scale:
+                new_font = st["widget_font_size"]
+                theme_changed = True
+            else:
+                self.font_scale = st["widget_font_size"]
+        if theme_changed:
+            self.apply_theme(new_theme, new_font)
         if "widget_auto_resize" in st:
             self.auto_resize = bool(st["widget_auto_resize"])
         if "widget_fade_unpinned" in st:
@@ -675,9 +688,11 @@ class NativeTaskbarWidget:
                 team_pts = [int(t_seed * f) for f in [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95]]
             if ind_pts is None:
                 ind_pts = [int(t_seed * f) for f in [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65]]
+            team_name = h.get("team_name") or "Synthesis2"
+            user_name = h.get("user_name") or "James Eckhardt"
             return [
-                (team_pts, "#c084fc", "Synthesis2 (Team)"),
-                (ind_pts, "#38bdf8", "James Eckhardt (Individual)")
+                (team_pts, "#c084fc", f"{team_name} (Team)"),
+                (ind_pts, "#38bdf8", f"{user_name} (Individual)")
             ]
         elif p_key == "gemini":
             acct_pts = find_points("gemini")
@@ -689,8 +704,9 @@ class NativeTaskbarWidget:
                 k1_pts = [int(t_seed * f) for f in [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55]]
             if k2_pts is None:
                 k2_pts = [int(t_seed * f) for f in [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32]]
+            acct_name = h.get("account_name") or h.get("account_id") or "acidcow@gmail.com"
             return [
-                (acct_pts, "#60a5fa", "acidcow@gmail.com (Account)"),
+                (acct_pts, "#60a5fa", f"{acct_name} (Account)"),
                 (k1_pts, "#34d399", "Gemini 2.0 Flash"),
                 (k2_pts, "#f472b6", "Gemini 1.5 Pro")
             ]
@@ -724,6 +740,32 @@ class NativeTaskbarWidget:
         else:
             co_pts = find_points("copilot") or [int(t_seed * f) for f in [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4]]
             return [(co_pts, "#06b6d4", "Enterprise E5")]
+
+    def calculate_card_height(self, p_key: str, is_expanded: bool, item: Optional[dict] = None) -> int:
+        """Calculates optimal card height based on expanded state, tracking mode, and child hierarchy."""
+        item = item or {}
+        h = item.get("hierarchy", {})
+        child_series = self._get_provider_child_series(p_key, item)
+        if self.view_mode in ("trends", "interval"):
+            if not is_expanded:
+                return 74
+            child_count = len(child_series)
+            child_height = child_count * 44
+            if self.hide_parent_chart_on_expand:
+                return 32 + child_height
+            return 76 + child_height
+        else:
+            if not is_expanded:
+                return 58
+            if p_key == "claude":
+                tracking_mode = getattr(self, "quota_tracking_mode", "individual")
+                if tracking_mode == "individual":
+                    return 66
+                return 106
+            elif p_key == "gemini":
+                num_toks = len(h.get("tokens", [])) or 2
+                return 62 + (num_toks * 36)
+            return 62
 
     def render_canvas(self):
         """Draws the accounts cards with click-to-expand multi-level bars, sparklines, and pin badges."""
@@ -794,27 +836,7 @@ class NativeTaskbarWidget:
             child_series = self._get_provider_child_series(p_key, item)
 
             # Determine card height based on expanded state and view mode
-            if self.view_mode in ("trends", "interval"):
-                if not is_expanded:
-                    card_h = 74
-                else:
-                    child_count = len(child_series)
-                    child_height = child_count * 44
-                    if self.hide_parent_chart_on_expand:
-                        card_h = 32 + child_height
-                    else:
-                        card_h = 76 + child_height
-            else:
-                if not is_expanded:
-                    card_h = 58
-                else:
-                    if p_key == "claude":
-                        card_h = 106
-                    elif p_key == "gemini":
-                        num_toks = len(h.get("tokens", [])) or 2
-                        card_h = 62 + (num_toks * 36)
-                    else:
-                        card_h = 62
+            card_h = self.calculate_card_height(p_key, is_expanded, item)
 
             # Main Card Box
             self.canvas.create_rectangle(

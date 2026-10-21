@@ -680,7 +680,8 @@ window.App = {
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_individual'), '#38bdf8')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                        <strong>5h Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${(item.session_tokens_available !== undefined ? item.session_tokens_available : Math.round(((ind.session_remaining_pct ?? 100) / 100) * (item.session_tokens_limit || 200000))).toLocaleString()} tok</span> left (${ind.session_remaining_pct ?? 100}% rem, ${(item.session_tokens_used || 0).toLocaleString()} used)
+                        <strong>5h Session:</strong> <span style="color: ${(ind.session_remaining_pct === 0 || item.session_tokens_available === 0) ? '#f87171' : '#38bdf8'}; font-weight: 700;">${(item.session_tokens_available !== undefined ? item.session_tokens_available : Math.round(((ind.session_remaining_pct ?? 100) / 100) * (item.session_tokens_limit || 200000))).toLocaleString()} tok</span> left (${ind.session_remaining_pct ?? 100}% rem, ${(item.session_tokens_used || 0).toLocaleString()} used)
+                        ${(ind.session_remaining_pct === 0 || item.session_tokens_available === 0) ? '<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 0.65rem; margin-left: 6px;">⚠️ Exhausted</span>' : ''}
                       </div>
                       <div style="font-size: 0.72rem; color: #38bdf8; margin-bottom: 4px; font-family: var(--font-mono);">
                         🕒 Resets in: <strong>${item.session_reset_str || ind.session_reset_str || '5h 0m'}</strong> (auto-refills upon expiry)
@@ -718,7 +719,7 @@ window.App = {
                     </div>
 
                     <!-- 3. Department Division -->
-                    <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
+                    <div style="background: rgba(160, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
                       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <span style="display: flex; align-items: center; gap: 5px;">
                           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #34d399; flex-shrink: 0;"></span>
@@ -765,6 +766,58 @@ window.App = {
                     `}
                   `)}
                 </div>
+
+                ${((item.accounts && item.accounts.length > 0) || (item.instances && item.instances.length > 0) || item.source_breakdown) ? `
+                  <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(255, 255, 255, 0.1); display: flex; flex-direction: column; gap: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                      <span style="font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: #94a3b8;">
+                        Distinct Accounts & Hardware Instances (${(item.accounts || []).length} Accounts • ${(item.instances || []).length} Instances)
+                      </span>
+                      ${item.source_breakdown ? `
+                        <div style="display: flex; gap: 6px; align-items: center; font-size: 0.7rem; font-family: var(--font-mono);">
+                          <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399;" title="Direct upstream API calls">🌐 Direct: ${Number(item.source_breakdown.direct?.tokens || 0).toLocaleString()}</span>
+                          <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;" title="Transparent Proxy (Port 8766)">⚡ Proxy: ${Number(item.source_breakdown.proxy?.tokens || 0).toLocaleString()}</span>
+                          <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;" title="Bridge Emulator (Port 11435)">🌉 Bridge: ${Number(item.source_breakdown.emulator?.tokens || 0).toLocaleString()}</span>
+                          <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;" title="Local Log Scanner">📑 Log: ${Number(item.source_breakdown.log_scanner?.tokens || 0).toLocaleString()}</span>
+                        </div>
+                      ` : ''}
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
+                      ${(item.accounts || []).map(acc => `
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
+                          <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+                            <span style="font-size: 0.8rem;">👤</span>
+                            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                              <div style="font-size: 0.75rem; color: #e2e8f0; font-weight: 600;" title="${this.escapeHtml(acc.account_id)}">${this.escapeHtml(acc.account_id)}</div>
+                              <div style="font-size: 0.65rem; color: var(--text-dim);">${acc.event_count || 0} calls</div>
+                            </div>
+                          </div>
+                          <div style="text-align: right; font-family: var(--font-mono); font-size: 0.74rem;">
+                            <div style="color: #38bdf8; font-weight: 700;">${Number(acc.tokens_today || 0).toLocaleString()} tok</div>
+                            <div style="color: var(--text-dim); font-size: 0.66rem;">$${Number(acc.cost_today_usd || 0).toFixed(3)}</div>
+                          </div>
+                        </div>
+                      `).join('')}
+
+                      ${(item.instances || []).map(inst => `
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
+                          <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+                            <span style="font-size: 0.8rem;">🖥️</span>
+                            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                              <div style="font-size: 0.75rem; color: #a78bfa; font-weight: 600;" title="${this.escapeHtml(inst.instance_id)}">${this.escapeHtml(inst.instance_id)}</div>
+                              <div style="font-size: 0.65rem; color: var(--text-dim);">${inst.event_count || 0} runs</div>
+                            </div>
+                          </div>
+                          <div style="text-align: right; font-family: var(--font-mono); font-size: 0.74rem;">
+                            <div style="color: #34d399; font-weight: 700;">${Number(inst.tokens_today || 0).toLocaleString()} tok</div>
+                            <div style="color: var(--text-dim); font-size: 0.66rem;">$${Number(inst.cost_today_usd || 0).toFixed(3)}</div>
+                          </div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                ` : ''}
               </td>
             </tr>
           `;
@@ -1938,15 +1991,32 @@ window.App = {
       const clientIp = s.client_ip || "127.0.0.1";
       const clientAlias = s.client_alias || "localhost";
 
+      const isProxied = s.is_proxied === 1 || s.source === "proxy" || s.source === "emulator";
+      const sourceTag = s.source || (isProxied ? "proxy" : "direct");
+      let routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(52, 211, 153, 0.12); color: #34d399;" title="Direct client connection">🌐 Direct</span>`;
+      if (sourceTag === "proxy") {
+        routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(6, 182, 212, 0.2); color: #38bdf8; border: 1px solid rgba(6, 182, 212, 0.4);" title="Routed via Port 8766 Transparent Proxy">⚡ Proxy</span>`;
+      } else if (sourceTag === "emulator") {
+        routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4);" title="Routed via Port 11435 Secondary Bridge">🌉 Bridge</span>`;
+      } else if (sourceTag === "log_scanner") {
+        routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(245, 158, 11, 0.15); color: #fbbf24;" title="Discovered via background CLI scanner">📑 Scanner</span>`;
+      }
+
       return `
         <tr>
           <td><code style="font-family: var(--font-mono); color: var(--accent-cyan); font-size: 0.8rem;">${this.escapeHtml(s.session_id)}</code></td>
           <td><span class="badge ${provBadgeClass}">${this.escapeHtml(s.provider)}</span></td>
           <td style="color: var(--text-muted); font-size: 0.82rem;">${this.escapeHtml(s.model || 'default')}</td>
           <td>
-            <div style="display: flex; flex-direction: column; gap: 2px;">
-              <span style="font-family: var(--font-mono); font-size: 0.8rem; color: #e2e8f0;">${this.escapeHtml(clientIp)}</span>
-              <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.12); color: #38bdf8; width: fit-content;">💻 ${this.escapeHtml(clientAlias)}</span>
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span style="font-family: var(--font-mono); font-size: 0.8rem; color: #e2e8f0;">${this.escapeHtml(clientIp)}</span>
+                ${routeBadge}
+              </div>
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.12); color: #38bdf8; width: fit-content;">💻 ${this.escapeHtml(clientAlias)}</span>
+                ${s.instance_id && s.instance_id !== 'local' ? `<span class="badge" style="font-size: 0.62rem; background: rgba(139, 92, 246, 0.15); color: #a78bfa;" title="Hardware Node">🖥️ ${this.escapeHtml(s.instance_id)}</span>` : ''}
+              </div>
             </div>
           </td>
           <td style="font-family: var(--font-mono); text-align: right;">${Number(s.input_tokens).toLocaleString()}</td>
@@ -2715,12 +2785,16 @@ window.App = {
     const acctSelect = document.getElementById("report-filter-account");
     const acct = acctSelect ? acctSelect.value.trim() : '';
 
+    const sourceSelect = document.getElementById("report-filter-source");
+    const sourceVal = sourceSelect ? sourceSelect.value.trim() : '';
+
     const params = new URLSearchParams({ group_by: group });
     if (startDate) params.set("start_date", startDate);
     if (endDate) params.set("end_date", endDate);
     if (prov) params.set("provider", prov);
     if (acct) params.set("account_id", acct);
     if (dim) params.set("dimension", dim);
+    if (sourceVal) params.set("source", sourceVal);
     if (team) params.set("team_name", team);
     if (user) params.set("user_name", user);
 

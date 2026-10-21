@@ -244,6 +244,25 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             trends = srv.database.get_hierarchical_trends(provider=prov, window=window, scope=scope)
             return self._send_json(200, trends)
 
+        if path == "/api/usage/pivot":
+            dims = query.get("dimensions", ["platform"])[0]
+            window = query.get("window", ["24h"])[0]
+            f_source = query.get("filter_source", [None])[0]
+            f_client = query.get("filter_client", [None])[0]
+            f_platform = query.get("filter_platform", [None])[0]
+            f_instance = query.get("filter_instance", [None])[0]
+            f_model = query.get("filter_model", [None])[0]
+            pivot_res = srv.database.get_pivot_metrics(
+                dimensions=dims,
+                window=window,
+                filter_source=f_source,
+                filter_client=f_client,
+                filter_platform=f_platform,
+                filter_instance=f_instance,
+                filter_model=f_model
+            )
+            return self._send_json(200, pivot_res)
+
         if path == "/api/usage/timeseries":
             provider = query.get("provider", [None])[0]
             window = query.get("window", ["24h"])[0]
@@ -355,6 +374,9 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             model = query.get("model", [None])[0]
             proj = query.get("project_id", [None])[0]
             dim = query.get("dimension", [None])[0]
+            source = query.get("source", [None])[0]
+            instance_id = query.get("instance_id", [None])[0]
+            client_ip = query.get("client_ip", [None])[0]
             fmt = query.get("format", ["json"])[0]
 
             if fmt == "csv":
@@ -388,7 +410,10 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 token_id=token,
                 model=model,
                 project_id=proj,
-                dimension=dim
+                dimension=dim,
+                source=source,
+                instance_id=instance_id,
+                client_ip=client_ip
             )
             return self._send_json(200, res)
 
