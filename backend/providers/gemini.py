@@ -1,6 +1,7 @@
 import urllib.request
 import urllib.error
 import json
+import time
 from typing import Dict, Any, List, Optional
 from backend.providers.base import BaseProvider
 from backend.diagnostics.logging_engine import ErrorCategory
@@ -102,3 +103,69 @@ class GeminiProvider(BaseProvider):
             status="ERROR"
         )
         return {"success": False, "status": "ERROR", "error": last_error}
+
+    def resolve_token_id_from_key(self, api_key: str) -> str:
+        """Resolves child token ID (e.g. tok_gem_flash) from API key or masked key."""
+        if not api_key:
+            return "tok_gem_flash"
+        raw_toks = self.vault.get_credential("google", "named_tokens")
+        if raw_toks:
+            try:
+                tokens = json.loads(raw_toks)
+                for t in tokens:
+                    t_id = t.get("id")
+                    if not t_id:
+                        continue
+                    # Check if exact key stored in vault
+                    saved = self.vault.get_credential("gemini", f"token_{t_id}")
+                    if saved and saved.strip() == api_key.strip():
+                        return t_id
+                    # Check prefix / suffix against masked key
+                    masked = t.get("masked_key", "")
+                    if "..." in masked:
+                        pref, suff = masked.split("...")
+                        if api_key.startswith(pref) or api_key.endswith(suff):
+                            return t_id
+            except Exception:
+                pass
+        return "tok_gem_flash"
+
+    def ingest_proxy_interaction(
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        token_id: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> str:
+        """Called by transparent proxy when a Gemini completion completes."""
+        cost = (input_tokens * 0.0000001) + (output_tokens * 0.0000004)
+        resolved_tok = token_id or "tok_gem_flash"
+
+        account_email = self.vault.get_credential("google", "account_email") or "acidcow@gmail.com"
+        evt_id = self.db.record_usage_event(
+            provider="gemini",
+            model=model or "gemini-2.0-flash",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            token_id=resolved_tok,
+            account_id=account_email,
+            session_id=session_id or f"gemini_proxy_{int(time.time())}",
+            estimated_cost=cost
+        )
+
+        existing_snaps = self.db.get_provider_snapshots()
+        gemini_snap = existing_snaps.get("gemini", {})
+        rem_tok = gemini_snap.get("tokens_remaining", 1000000)
+        new_rem = max(0, rem_tok - (input_tokens + output_tokens))
+
+        self.db.update_provider_snapshot(
+            provider="gemini",
+            plan_type=gemini_snap.get("plan_type", "Google AI Studio"),
+            tokens_remaining=new_rem,
+            requests_remaining=gemini_snap.get("requests_remaining", 1500),
+            status="ACTIVE"
+        )
+        self.diagnostics.mark_provider_healthy("gemini")
+        return evt_id
+

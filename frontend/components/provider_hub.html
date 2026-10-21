@@ -236,4 +236,506 @@
       <!-- Populated via API -->
     </div>
   </div>
+
+  <!-- Remote Managed AI Nodes & LAN Discovery (AIUM-703, AIUM-704) -->
+  <div class="glass-card" style="margin-top: 24px; border-left: 4px solid var(--accent-cyan); background: rgba(15, 23, 42, 0.9);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.3rem;">🌐</span>
+        <div>
+          <strong style="font-size: 1rem; color: #fff;">Remote Managed AI Nodes &amp; LAN Discovery Engine</strong>
+          <span style="display: block; font-size: 0.76rem; color: var(--text-dim);">Configurable subnet sweeps, persistent device inventory, trusted compute pools &amp; governed MCP dispatch.</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <button class="btn btn-secondary btn-sm" onclick="window.App.toggleScanGuidance()" style="font-size: 0.74rem;">
+          <span>ℹ️</span> Subnet &amp; Firewall Guide
+        </button>
+        <span class="badge" style="background: rgba(6,182,212,0.15); color: #67e8f9; border: 1px solid rgba(6,182,212,0.3);">MCP Active</span>
+        <button class="btn btn-primary btn-sm" id="btn-scan-lan" onclick="window.App.scanLANAIServices()">
+          <span>📡</span> Scan Network
+        </button>
+      </div>
+    </div>
+
+    <!-- MCP Stdio & HTTP Bridge Bar -->
+    <div style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 0.76rem;">
+      <div>
+        <span style="color: var(--accent-cyan); font-weight: 600;">Agent MCP Command:</span>
+        <code style="font-family: var(--font-mono); color: #f1f5f9; margin-left: 6px;">python -m backend.mcp.server</code>
+      </div>
+      <div>
+        <span style="color: var(--text-dim);">HTTP Bridge:</span>
+        <code style="font-family: var(--font-mono); color: #cbd5e1; margin-left: 6px;">http://127.0.0.1:8765/api/mcp/rpc</code>
+      </div>
+    </div>
+
+    <!-- Guidance & Mask Help Drawer -->
+    <div id="lan-scan-guidance-panel" style="display: none; background: rgba(8, 14, 26, 0.95); border: 1px solid rgba(6,182,212,0.3); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 14px; font-size: 0.78rem; line-height: 1.5; color: #cbd5e1;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+        <strong style="color: #67e8f9; font-size: 0.85rem;">📘 LAN Discovery &amp; Subnet Configuration Guidance</strong>
+        <button class="btn btn-secondary btn-sm" onclick="window.App.toggleScanGuidance()" style="font-size: 0.7rem; padding: 1px 6px;">✕ Close</button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
+        <div>
+          <strong style="color: #f8fafc; display: block; margin-bottom: 4px;">Subnet Masks Explained:</strong>
+          <ul style="padding-left: 18px; margin: 0; color: var(--text-dim);">
+            <li><code style="color: #38bdf8;">/24</code>: Sweeps 254 host IPs (e.g. 10.1.7.1 - 10.1.7.254). Fast (~2-4s). Recommended for standard home &amp; lab subnets.</li>
+            <li><code style="color: #38bdf8;">/28</code>: Sweeps 14 hosts. Ultra-fast for small clusters.</li>
+            <li><code style="color: #f59e0b;">/16</code>: Represents 65,534 hosts. Full /16 sweeps are clamped automatically. Use specific ranges like <code style="color: #34d399;">10.1.7.1-10.1.7.100</code> to avoid network congestion!</li>
+          </ul>
+        </div>
+        <div>
+          <strong style="color: #f8fafc; display: block; margin-bottom: 4px;">Remote Machine Binding (Firewall &amp; Host):</strong>
+          <ul style="padding-left: 18px; margin: 0; color: var(--text-dim);">
+            <li><strong style="color: #f8fafc;">Ollama:</strong> By default listens ONLY on localhost. On remote PCs (e.g. ASUS ROG / Jamese-PC), set Windows environment variable <code style="color: #34d399;">OLLAMA_HOST=0.0.0.0</code> and allow inbound TCP port 11434 in Windows Firewall.</li>
+            <li><strong style="color: #f8fafc;">LM Studio:</strong> In Developer tab, check "Serve on Local Network (0.0.0.0)".</li>
+            <li><strong style="color: #f8fafc;">Aliases:</strong> Devices are indexed by hostname alias (e.g. <code style="color: #67e8f9;">Jamese-PC</code>) so dynamic DHCP IP address changes don't lose history!</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subnet Presets & Target Range Bar -->
+    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;">
+        <div style="flex: 1; min-width: 200px;">
+          <label style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">Subnet Preset:</label>
+          <select id="lan-preset-select" onchange="window.App.onSubnetPresetChange(this.value)" style="width: 100%; background: #0b1329; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.78rem; border-radius: 4px; padding: 5px 8px;">
+            <option value="auto">Auto-Detect Local Adapter Subnet</option>
+            <option value="10.1.7.0/24">Class A 10.1.7.0/24 (ASUS ROG / Jamese-PC)</option>
+            <option value="192.168.1.0/24">Class C 192.168.1.0/24 (Home / Standard Router)</option>
+            <option value="192.168.0.0/24">Class C 192.168.0.0/24 (Alt Router Subnet)</option>
+            <option value="10.0.0.0/24">Class A 10.0.0.0/24 (Enterprise / Lab)</option>
+            <option value="127.0.0.1">Loopback Only (127.0.0.1)</option>
+            <option value="custom">Custom IP Range / CIDR / Aliases...</option>
+          </select>
+        </div>
+        <div style="flex: 2; min-width: 250px;">
+          <label style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">Target Spec (CIDR, Range e.g. 10.1.7.1-10.1.7.100, or Aliases):</label>
+          <input type="text" id="lan-target-spec-input" value="10.1.7.0/24" placeholder="e.g. 10.1.7.0/24, 10.1.7.50-10.1.7.80, Jamese-PC, 127.0.0.1" style="width: 100%; background: #0b1329; border: 1px solid rgba(255,255,255,0.15); color: #38bdf8; font-family: var(--font-mono); font-size: 0.78rem; border-radius: 4px; padding: 5px 8px;">
+        </div>
+      </div>
+
+      <!-- Platform Checkboxes & Secondary Ports (2.1 & 2.2) -->
+      <div>
+        <label style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 6px;">Platforms &amp; Interfaces to Probe:</label>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 0.76rem; color: #f1f5f9;">
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Ollama REST API (port 11434). Probes /api/version and /api/tags">
+            <input type="checkbox" id="chk-platform-ollama" checked>
+            <span>🦙 Ollama (11434)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;" title="LM Studio OpenAI-compatible local server (port 1234)">
+            <input type="checkbox" id="chk-platform-lmstudio" checked>
+            <span>🤖 LM Studio (1234)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;" title="vLLM, LocalAI, LiteLLM high-throughput inference (ports 8000, 8080)">
+            <input type="checkbox" id="chk-platform-vllm" checked>
+            <span>⚡ vLLM / LocalAI (8000, 8080)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Oobabooga Text Generation WebUI (port 5000)">
+            <input type="checkbox" id="chk-platform-oobabooga" checked>
+            <span>📜 Text Gen WebUI (5000)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Tabby Coding Assistant or KoboldCPP quantized model runner (ports 5001, 8081)">
+            <input type="checkbox" id="chk-platform-tabby">
+            <span>🐱 Tabby / Kobold (5001, 8081)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Open WebUI frontend (port 3000)">
+            <input type="checkbox" id="chk-platform-openwebui">
+            <span>🌐 Open WebUI (3000)</span>
+          </label>
+          <div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
+            <span style="font-size: 0.72rem; color: var(--text-dim);">Secondary Ports:</span>
+            <input type="text" id="lan-secondary-ports-input" placeholder="11435, 8001" style="width: 100px; background: #0b1329; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-family: var(--font-mono); font-size: 0.74rem; border-radius: 4px; padding: 3px 6px;">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scan Progress / Candidate Results Area -->
+    <div id="lan-scan-results-box" style="display: none; background: rgba(0,0,0,0.3); border: 1px dashed rgba(6,182,212,0.35); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <span style="font-size: 0.82rem; font-weight: 600; color: #a5f3fc;" id="lan-scan-status-text">Scanning network...</span>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('lan-scan-results-box').style.display='none'" style="padding: 2px 8px; font-size: 0.72rem;">Close</button>
+      </div>
+      <div id="lan-discovered-nodes-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px;">
+        <!-- Discovered candidates injected here -->
+      </div>
+    </div>
+
+    <!-- 3-State Device Inventory (Turquoise, Red, Orange) (AIUM-704 Requirement 3) -->
+    <div style="margin-bottom: 20px; background: rgba(0,0,0,0.2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <strong style="font-size: 0.86rem; color: #f8fafc;">Known Network Devices &amp; Service Inventory</strong>
+          <span style="font-size: 0.72rem; color: var(--text-dim);">(Primary Reference: Computer Alias / Hostname)</span>
+        </div>
+        <div style="display: flex; gap: 10px; font-size: 0.72rem; align-items: center;">
+          <span style="display: flex; align-items: center; gap: 4px; color: #22d3ee;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22d3ee; box-shadow: 0 0 6px #22d3ee;"></span>
+            Known AI Services (Turquoise)
+          </span>
+          <span style="display: flex; align-items: center; gap: 4px; color: #f87171;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 6px #ef4444;"></span>
+            No Services (Red)
+          </span>
+          <span style="display: flex; align-items: center; gap: 4px; color: #fbbf24;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 6px #f59e0b;"></span>
+            Pending / Unscanned (Orange)
+          </span>
+        </div>
+      </div>
+      <div id="lan-device-inventory-list" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px;">
+        <!-- Populated via App.loadDeviceInventory() -->
+      </div>
+    </div>
+
+    <!-- Managed Nodes Compute Pool (Trusted vs Untrusted & Group Allocations) -->
+    <div style="margin-top: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <strong style="font-size: 0.86rem; color: var(--text-muted);">Managed Compute Pool &amp; Clusters:</strong>
+          <span style="display: block; font-size: 0.72rem; color: var(--text-dim);">Untrusted nodes are automatically quarantined and excluded from the Active Compute failover pool.</span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" onclick="window.App.openAddCustomNodeModal()" style="font-size: 0.72rem; padding: 3px 8px;">➕ Add Custom Endpoint</button>
+        </div>
+      </div>
+      <div id="managed-nodes-list" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px;">
+        <!-- Populated via App.loadManagedNodes() -->
+      </div>
+    </div>
+
+    <!-- Proxy Bridges & Platform Integration Guidance (AIUM-707) -->
+    <div class="glass-card" style="margin-top: 20px; border-left: 4px solid var(--accent-purple); background: rgba(15, 23, 42, 0.95); padding: 18px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.4rem;">🌉</span>
+          <div>
+            <strong style="font-size: 1.05rem; color: #fff;">Proxy Bridges &amp; Platform Integration Guides</strong>
+            <span style="display: block; font-size: 0.76rem; color: var(--text-dim);">Configure external platforms, dev agents, IDE tools, and applications to consume this AI Usage Monitor instance as an Ollama instance, OpenAI /v1 endpoint, or MCP server.</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+          <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">Dual Bridge Active</span>
+          <button onclick="window.App.switchTab('settings')" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 3px 8px;" title="Jump to Settings to reconfigure bridge ports & default burst limits">⚙️ Configure Ports</button>
+        </div>
+      </div>
+
+      <!-- Quick Endpoints Ribbon -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 14px;">
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600;">🦙 Ollama Bridge</span>
+            <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(document.getElementById('bridge-guide-ollama-url').innerText, this)">📋 Copy</button>
+          </div>
+          <code id="bridge-guide-ollama-url" style="font-size: 0.78rem; color: #38bdf8; font-family: var(--font-mono); font-weight: 600;">http://127.0.0.1:8989</code>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600;">🟢 OpenAI Compatible</span>
+            <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(document.getElementById('bridge-guide-openai-url').innerText, this)">📋 Copy</button>
+          </div>
+          <code id="bridge-guide-openai-url" style="font-size: 0.78rem; color: #34d399; font-family: var(--font-mono); font-weight: 600;">http://127.0.0.1:8989/v1</code>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600;">⚡ MCP JSON-RPC Server</span>
+            <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(document.getElementById('bridge-guide-mcp-url').innerText, this)">📋 Copy</button>
+          </div>
+          <code id="bridge-guide-mcp-url" style="font-size: 0.78rem; color: #c084fc; font-family: var(--font-mono); font-weight: 600;">http://127.0.0.1:8765/api/mcp/rpc</code>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600;">🛡️ Transparent Reverse Proxy</span>
+            <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(document.getElementById('bridge-guide-proxy-url').innerText, this)">📋 Copy</button>
+          </div>
+          <code id="bridge-guide-proxy-url" style="font-size: 0.78rem; color: #fbbf24; font-family: var(--font-mono); font-weight: 600;">http://127.0.0.1:8766</code>
+        </div>
+      </div>
+
+      <!-- Implementation Guidance Tabs Header -->
+      <div style="display: flex; gap: 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); margin-bottom: 14px; padding-bottom: 2px; overflow-x: auto;">
+        <button class="btn btn-sm btn-primary bridge-tab-btn" id="btn-guide-ollama" onclick="window.App.switchBridgeGuideTab('ollama')">
+          🦙 Ollama Instance Emulation
+        </button>
+        <button class="btn btn-sm btn-secondary bridge-tab-btn" id="btn-guide-openai" onclick="window.App.switchBridgeGuideTab('openai')">
+          🟢 OpenAI SDK &amp; /v1 Routes
+        </button>
+        <button class="btn btn-sm btn-secondary bridge-tab-btn" id="btn-guide-mcp" onclick="window.App.switchBridgeGuideTab('mcp')">
+          ⚡ Model Context Protocol (MCP)
+        </button>
+        <button class="btn btn-sm btn-secondary bridge-tab-btn" id="btn-guide-proxy" onclick="window.App.switchBridgeGuideTab('proxy')">
+          🛡️ Transparent Reverse Proxy
+        </button>
+      </div>
+
+      <!-- Tab Panes Container -->
+      <div id="bridge-guide-tab-content">
+        <!-- Pane 1: Ollama Emulation -->
+        <div id="pane-guide-ollama" class="bridge-guide-pane" style="display: block;">
+          <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong style="color: #38bdf8; font-size: 0.88rem;">1. Configure External Applications as an Ollama Instance</strong>
+              <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">Drop-in Replacement</span>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0; line-height: 1.4;">
+              Any platform, web UI (e.g. Open-WebUI), dev tool (Continue.dev, Cursor), or application can connect to this bridge as if it were a native Ollama instance. AI Usage Monitor intercepts all requests, meters token usage, enforces client burst quotas, and dispatches to local or LAN worker nodes.
+            </p>
+
+            <div style="margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Environment Variable (Bash / Zsh / Linux):</span>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard('export OLLAMA_BASE_URL=http://127.0.0.1:8989', this)">📋 Copy</button>
+              </div>
+              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #38bdf8; overflow-x: auto;">export OLLAMA_BASE_URL="http://127.0.0.1:8989"</pre>
+            </div>
+
+            <div style="margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Environment Variable (Windows PowerShell):</span>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard('$env:OLLAMA_BASE_URL=\'http://127.0.0.1:8989\'', this)">📋 Copy</button>
+              </div>
+              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #38bdf8; overflow-x: auto;">$env:OLLAMA_BASE_URL='http://127.0.0.1:8989'</pre>
+            </div>
+
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Python <code>ollama</code> Official Library:</span>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`import ollama\nclient = ollama.Client(host='http://127.0.0.1:8989')\nresponse = client.chat(model='llama3:latest', messages=[{'role': 'user', 'content': 'Hello'}])\nprint(response['message']['content'])`, this)">📋 Copy</button>
+              </div>
+              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #e2e8f0; overflow-x: auto;">import ollama
+
+client = ollama.Client(host='http://127.0.0.1:8989')
+response = client.chat(model='llama3:latest', messages=[
+    {'role': 'user', 'content': 'Hello! Synthesize status.'}
+])
+print(response['message']['content'])</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pane 2: OpenAI Compatible -->
+        <div id="pane-guide-openai" class="bridge-guide-pane" style="display: none;">
+          <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong style="color: #34d399; font-size: 0.88rem;">2. OpenAI Python &amp; Node.js SDK Integration</strong>
+              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.68rem;">Standard /v1 Endpoints</span>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0; line-height: 1.4;">
+              Connect frameworks like LangChain, LlamaIndex, AutoGen, or the official OpenAI client directly to <code style="color: #34d399;">http://127.0.0.1:8989/v1</code>. Supports <code style="color: #fff;">/v1/chat/completions</code>, <code style="color: #fff;">/v1/completions</code>, and <code style="color: #fff;">/v1/models</code>.
+            </p>
+
+            <div style="margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Python <code>openai</code> Library:</span>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`from openai import OpenAI\nclient = OpenAI(base_url='http://127.0.0.1:8989/v1', api_key='aium-proxy-bridge')\nresponse = client.chat.completions.create(model='llama3:latest', messages=[{'role': 'user', 'content': 'Hello from OpenAI SDK!'}])\nprint(response.choices[0].message.content)`, this)">📋 Copy</button>
+              </div>
+              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #e2e8f0; overflow-x: auto;">from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8989/v1",
+    api_key="aium-proxy-bridge"  # Arbitrary string; governance is enforced per client IP
+)
+
+completion = client.chat.completions.create(
+    model="llama3:latest",
+    messages=[{"role": "user", "content": "Hello from OpenAI SDK!"}]
+)
+print(completion.choices[0].message.content)</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pane 3: MCP JSON-RPC Server -->
+        <div id="pane-guide-mcp" class="bridge-guide-pane" style="display: none;">
+          <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong style="color: #c084fc; font-size: 0.88rem;">3. Model Context Protocol (MCP) Server</strong>
+              <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 0.68rem;">JSON-RPC 2.0</span>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0; line-height: 1.4;">
+              Autonomous agents and platforms can directly query available tools, trigger multi-node prompt executions, scan LAN devices, and manage client limits programmatically over JSON-RPC 2.0 at <code style="color: #c084fc;">http://127.0.0.1:8765/api/mcp/rpc</code>.
+            </p>
+
+            <div style="margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">List Available Tools (cURL):</span>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`curl -X POST http://127.0.0.1:8765/api/mcp/rpc -H 'Content-Type: application/json' -d '{\x22jsonrpc\x22: \x222.0\x22, \x22id\x22: 1, \x22method\x22: \x22tools/list\x22, \x22params\x22: {}}'`, this)">📋 Copy</button>
+              </div>
+              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #c084fc; overflow-x: auto;">curl -X POST http://127.0.0.1:8765/api/mcp/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}'</pre>
+            </div>
+
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Dispatch Prompt Across Compute Pool via Tool Call:</span>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`curl -X POST http://127.0.0.1:8765/api/mcp/rpc -H 'Content-Type: application/json' -d '{\x22jsonrpc\x22: \x222.0\x22, \x22id\x22: 2, \x22method\x22: \x22tools/call\x22, \x22params\x22: {\x22name\x22: \x22prompt_cluster\x22, \x22arguments\x22: {\x22model\x22: \x22llama3:latest\x22, \x22prompt\x22: \x22Analyze data.\x22}}}'`, this)">📋 Copy</button>
+              </div>
+              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #c084fc; overflow-x: auto;">curl -X POST http://127.0.0.1:8765/api/mcp/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "prompt_cluster", "arguments": {"model": "llama3:latest", "prompt": "Analyze data."}}}'</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pane 4: Transparent Reverse Proxy -->
+        <div id="pane-guide-proxy" class="bridge-guide-pane" style="display: none;">
+          <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong style="color: #fbbf24; font-size: 0.88rem;">4. Transparent Interception for Claude CLI &amp; Gemini</strong>
+              <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.68rem;">Live SSE Interception</span>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0; line-height: 1.4;">
+              Route outbound traffic from terminal CLIs through <code style="color: #fbbf24;">http://127.0.0.1:8766</code>. Transparently extracts SSE usage chunks, captures token limits, and logs active sessions with zero latency impact.
+            </p>
+
+            <div style="margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Claude CLI Direct Endpoint Override:</span>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard('export ANTHROPIC_BASE_URL=http://127.0.0.1:8766', this)">📋 Copy</button>
+              </div>
+              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #fbbf24; overflow-x: auto;">export ANTHROPIC_BASE_URL="http://127.0.0.1:8766"</pre>
+            </div>
+
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Global Terminal Proxy (PowerShell):</span>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard('$env:HTTP_PROXY=\'http://127.0.0.1:8766\'; $env:HTTPS_PROXY=\'http://127.0.0.1:8766\'', this)">📋 Copy</button>
+              </div>
+              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #fbbf24; overflow-x: auto;">$env:HTTP_PROXY='http://127.0.0.1:8766'
+$env:HTTPS_PROXY='http://127.0.0.1:8766'</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connecting Clients & Token Rate Governance (AIUM-705, AIUM-707) -->
+    <div style="margin-top: 18px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">🛡️</span>
+          <div>
+            <strong style="font-size: 0.92rem; color: #fff;">Connected Client Governance &amp; Rate Limit Controls</strong>
+            <span style="display: block; font-size: 0.72rem; color: var(--text-dim);">Discovered client machines, IP/Alias mappings, short burst session windows, daily quotas, and 1-click block/unrestrict controls.</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <input type="text" id="client-filter-query" placeholder="🔍 Search IP, Alias, or Status..." oninput="window.App.filterClientCards(this.value)" style="background: #0f172a; border: 1px solid rgba(255,255,255,0.15); color: #fff; font-size: 0.74rem; border-radius: 4px; padding: 4px 8px; width: 200px;">
+          <button class="btn btn-secondary btn-sm" onclick="window.App.openConfigureClientModal()" style="font-size: 0.72rem; padding: 4px 8px;">➕ Add Client Policy</button>
+        </div>
+      </div>
+
+      <!-- Client Aggregate Summary Bar -->
+      <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 6px 10px; font-size: 0.72rem;">
+        <span style="color: var(--text-muted);">Integrated Machines: <strong id="client-stat-total" style="color: #38bdf8;">0</strong></span>
+        <span style="color: var(--text-dim);">•</span>
+        <span style="color: var(--text-muted);">🛡️ Governed: <strong id="client-stat-governed" style="color: #67e8f9;">0</strong></span>
+        <span style="color: var(--text-dim);">•</span>
+        <span style="color: var(--text-muted);">⚡ Unrestricted: <strong id="client-stat-unrestricted" style="color: #34d399;">0</strong></span>
+        <span style="color: var(--text-dim);">•</span>
+        <span style="color: var(--text-muted);">🚫 Blocked: <strong id="client-stat-blocked" style="color: #f87171;">0</strong></span>
+        <span style="color: var(--text-dim);">•</span>
+        <span style="color: var(--text-muted);">⏳ Active Bypasses: <strong id="client-stat-bypassed" style="color: #fbbf24;">0</strong></span>
+      </div>
+
+      <div id="lan-client-quotas-list" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px;">
+        <!-- Populated via App.loadClientQuotas() -->
+      </div>
+    </div>
+
+    <!-- Interactive Query & Prompt Console with File Attachments (AIUM-704) -->
+    <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-subtle);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">⚡</span>
+          <div>
+            <strong style="font-size: 0.95rem; color: #fff;">Multi-Node Query &amp; Prompt Console</strong>
+            <span style="display: block; font-size: 0.74rem; color: var(--text-dim);">Run governed prompts across the compute pool or specific nodes with contextual file attachments.</span>
+          </div>
+        </div>
+        <span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399; font-size: 0.7rem;">Telemetry Enabled</span>
+      </div>
+
+      <!-- Target Selection & Model Selector Strip -->
+      <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px;">
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
+          <div style="flex: 2; min-width: 220px;">
+            <label style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">Target Compute Resource:</label>
+            <select id="query-target-select" onchange="window.App.onQueryTargetChanged(this.value)" style="width: 100%; background: #0b1329; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.78rem; border-radius: 4px; padding: 6px 8px;">
+              <option value="pool">🚀 [Active Compute Pool] Auto-Route to Trusted Nodes (Failover Protected)</option>
+              <!-- Dynamic nodes populated via JS -->
+            </select>
+          </div>
+          <div style="flex: 1; min-width: 160px;">
+            <label style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">Model Identifier:</label>
+            <input type="text" id="query-model-input" value="llama3:latest" placeholder="e.g. llama3:latest, deepseek-r1:8b" style="width: 100%; background: #0b1329; border: 1px solid rgba(255,255,255,0.15); color: #38bdf8; font-family: var(--font-mono); font-size: 0.78rem; border-radius: 4px; padding: 6px 8px;">
+          </div>
+        </div>
+
+        <!-- Prominent Red Untrusted Node Warning Banner -->
+        <div id="query-untrusted-warning-banner" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 10px; color: #fca5a5; font-size: 0.78rem;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.1rem;">🚨</span>
+            <div>
+              <strong style="color: #f87171;">SECURITY WARNING: UNTRUSTED RESOURCE SELECTED</strong>
+              <div style="color: #cbd5e1; font-size: 0.74rem;">This node is marked as untrusted. Do NOT transmit sensitive proprietary code, passwords, or confidential data. Model outputs from this device may be unverified or compromised.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- File Attachment Context Strip & Dropzone -->
+        <div style="margin-bottom: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Context Files (Attached to Prompt):</label>
+            <label class="btn btn-secondary btn-sm" style="font-size: 0.7rem; padding: 2px 8px; cursor: pointer;">
+              <span>📎</span> Attach Files...
+              <input type="file" id="query-file-upload-input" multiple onchange="window.App.handleQueryFilesSelected(this.files)" style="display: none;">
+            </label>
+          </div>
+          <!-- Attached files list container -->
+          <div id="query-attached-files-container" style="display: flex; gap: 6px; flex-wrap: wrap; min-height: 28px; background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.1); border-radius: 4px; padding: 6px 8px;">
+            <span style="font-size: 0.72rem; color: var(--text-dim); font-style: italic;">No context files attached. Click "Attach Files..." or drag &amp; drop code/text files here.</span>
+          </div>
+          <!-- File + Untrusted Warning Alert -->
+          <div id="query-file-untrusted-alert" style="display: none; margin-top: 6px; font-size: 0.72rem; color: #f87171; font-weight: 600;">
+            ⚠️ CAUTION: Files are attached to an UNTRUSTED node query! Local file content will be transmitted to an unverified machine.
+          </div>
+        </div>
+
+        <!-- Prompt Textarea -->
+        <div style="margin-bottom: 10px;">
+          <label style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 4px;">User Prompt / Query:</label>
+          <textarea id="query-prompt-input" rows="4" placeholder="Enter instructions or query for the compute pool..." style="width: 100%; background: #080e1a; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.8rem; border-radius: 4px; padding: 8px; resize: vertical;"></textarea>
+        </div>
+
+        <!-- Submit & Streaming Controls -->
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div id="query-run-status-text" style="font-size: 0.74rem; color: var(--text-dim);">Ready to dispatch query.</div>
+          <button class="btn btn-primary btn-sm" id="btn-run-query" onclick="window.App.executeGovernedQuery()" style="padding: 6px 16px; font-weight: 600;">
+            <span>🚀</span> Execute Governed Query
+          </button>
+        </div>
+      </div>
+
+      <!-- Query Result & Telemetry Box -->
+      <div id="query-result-box" style="display: none; background: rgba(0,0,0,0.4); border: 1px solid rgba(6,182,212,0.3); border-radius: var(--radius-sm); padding: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span class="badge" style="background: rgba(6,182,212,0.2); color: #67e8f9;" id="query-result-node-badge">Node: Pool</span>
+            <span class="badge" style="background: rgba(16,185,129,0.2); color: #34d399;" id="query-result-model-badge">Model</span>
+          </div>
+          <div style="font-size: 0.74rem; color: var(--text-dim);" id="query-result-metrics">
+            Input: 0 &bull; Output: 0 &bull; Latency: 0ms
+          </div>
+        </div>
+        <div id="query-result-content" style="background: #060a12; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 12px; font-family: var(--font-mono); font-size: 0.8rem; color: #f1f5f9; max-height: 260px; overflow-y: auto; white-space: pre-wrap;">
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
+

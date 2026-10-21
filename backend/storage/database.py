@@ -126,6 +126,98 @@ class UsageDatabase:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_evals_prov ON model_evaluations(provider)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_evals_recorded_at ON model_evaluations(recorded_at)')
 
+            # Managed remote AI nodes (AIUM-703)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS managed_nodes (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    engine TEXT NOT NULL,
+                    endpoint TEXT NOT NULL,
+                    max_concurrency INTEGER NOT NULL DEFAULT 1,
+                    queue_timeout_seconds REAL NOT NULL DEFAULT 30.0,
+                    priority INTEGER NOT NULL DEFAULT 5,
+                    status TEXT NOT NULL DEFAULT 'ONLINE',
+                    models_json TEXT DEFAULT '[]',
+                    metadata_json TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_seen_at TEXT
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_nodes_engine ON managed_nodes(engine)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_nodes_status ON managed_nodes(status)')
+
+            # Device Inventory (AIUM-704)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS device_inventory (
+                    alias TEXT PRIMARY KEY,
+                    ip TEXT NOT NULL,
+                    mac_address TEXT,
+                    state TEXT NOT NULL DEFAULT 'PENDING',
+                    discovered_services_json TEXT DEFAULT '[]',
+                    is_trusted INTEGER NOT NULL DEFAULT 1,
+                    compute_group TEXT NOT NULL DEFAULT 'Active Compute',
+                    notes TEXT,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_dev_inv_ip ON device_inventory(ip)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_dev_inv_state ON device_inventory(state)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_dev_inv_group ON device_inventory(compute_group)')
+
+            # Client Quotas & Burst Windows (AIUM-705)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS client_quotas (
+                    client_id TEXT PRIMARY KEY,
+                    client_ip TEXT NOT NULL,
+                    alias TEXT,
+                    session_window_minutes INTEGER NOT NULL DEFAULT 15,
+                    session_token_limit INTEGER NOT NULL DEFAULT 25000,
+                    daily_token_limit INTEGER NOT NULL DEFAULT 250000,
+                    priority INTEGER NOT NULL DEFAULT 5,
+                    is_unrestricted INTEGER NOT NULL DEFAULT 0,
+                    is_blocked INTEGER NOT NULL DEFAULT 0,
+                    bypass_until TEXT,
+                    scheduled_start_at TEXT,
+                    scheduled_end_at TEXT,
+                    allowed_models_json TEXT DEFAULT '[]',
+                    blocked_models_json TEXT DEFAULT '[]',
+                    allowed_nodes_json TEXT DEFAULT '[]',
+                    blocked_nodes_json TEXT DEFAULT '[]',
+                    notes TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_client_quotas_ip ON client_quotas(client_ip)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_client_quotas_alias ON client_quotas(alias)')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS client_token_windows (
+                    id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    tokens INTEGER NOT NULL,
+                    timestamp REAL NOT NULL
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_client_tokens_id ON client_token_windows(client_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_client_tokens_time ON client_token_windows(timestamp)')
+
+            for col in [
+                "is_trusted INTEGER NOT NULL DEFAULT 1",
+                "compute_group TEXT NOT NULL DEFAULT 'Active Compute'"
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE managed_nodes ADD COLUMN {col}")
+                except Exception:
+                    pass
+
+            try:
+                cursor.execute("ALTER TABLE client_quotas ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+
             # Migration for existing DBs
             for col in [
                 "session_remaining_pct REAL",
@@ -146,7 +238,7 @@ class UsageDatabase:
                 except Exception:
                     pass
 
-            # Migration for usage_events dimensional attribution
+            # Migration for usage_events dimensional attribution and network client context
             for col in [
                 "account_id TEXT",
                 "team_name TEXT",
@@ -154,7 +246,9 @@ class UsageDatabase:
                 "token_id TEXT",
                 "project_id TEXT",
                 "cache_creation_tokens INTEGER DEFAULT 0",
-                "cache_read_tokens INTEGER DEFAULT 0"
+                "cache_read_tokens INTEGER DEFAULT 0",
+                "client_ip TEXT",
+                "client_alias TEXT"
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE usage_events ADD COLUMN {col}")
@@ -168,6 +262,7 @@ class UsageDatabase:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_account ON usage_events(account_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_team ON usage_events(team_name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_events(user_name)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_client_ip ON usage_events(client_ip)')
 
             conn.commit()
             conn.close()
@@ -188,9 +283,11 @@ class UsageDatabase:
         token_id: Optional[str] = None,
         project_id: Optional[str] = None,
         cache_creation_tokens: int = 0,
-        cache_read_tokens: int = 0
+        cache_read_tokens: int = 0,
+        client_ip: Optional[str] = None,
+        client_alias: Optional[str] = None
     ) -> str:
-        """Records a single usage event with dimensional attribution and cache token metrics."""
+        """Records a single usage event with dimensional attribution, client network context, and cache metrics."""
         event_id = f"evt_{uuid.uuid4().hex[:12]}"
         now_utc = recorded_at or datetime.datetime.now(datetime.timezone.utc).isoformat()
         total_tokens = input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens
@@ -220,6 +317,14 @@ class UsageDatabase:
             else:
                 account_id = "acidcow@gmail.com" if provider.lower() == "gemini" else ("Synthesis2" if provider.lower() == "claude" else user_name)
 
+        # Client IP & Alias Network Attribution
+        if not client_ip:
+            client_ip = "127.0.0.1"
+        if not client_alias:
+            client_alias = self.resolve_client_alias(client_ip)
+            if client_alias == client_ip and client_ip in ("127.0.0.1", "localhost", "::1"):
+                client_alias = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "Local Workstation"
+
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -229,8 +334,9 @@ class UsageDatabase:
                     input_tokens, output_tokens, total_tokens,
                     estimated_cost, request_count, recorded_at,
                     account_id, team_name, user_name, token_id, project_id,
-                    cache_creation_tokens, cache_read_tokens
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cache_creation_tokens, cache_read_tokens,
+                    client_ip, client_alias
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 event_id,
                 provider.lower(),
@@ -248,7 +354,9 @@ class UsageDatabase:
                 token_id,
                 project_id,
                 cache_creation_tokens,
-                cache_read_tokens
+                cache_read_tokens,
+                client_ip,
+                client_alias
             ))
             conn.commit()
             conn.close()
@@ -423,7 +531,7 @@ class UsageDatabase:
         }
 
     def get_recent_sessions(self, limit: int = 50, provider: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Returns the most recent sessions with aggregated tokens."""
+        """Returns the most recent sessions with aggregated tokens, network attribution, and duration timestamps."""
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -438,7 +546,10 @@ class UsageDatabase:
                     SUM(total_tokens) as total_tokens,
                     SUM(estimated_cost) as estimated_cost,
                     COUNT(*) as request_count,
-                    MAX(recorded_at) as last_activity
+                    MIN(recorded_at) as first_activity,
+                    MAX(recorded_at) as last_activity,
+                    COALESCE(MAX(client_ip), '127.0.0.1') as client_ip,
+                    COALESCE(MAX(client_alias), '') as client_alias
                 FROM usage_events
             """
             params = []
@@ -453,7 +564,16 @@ class UsageDatabase:
             rows = cursor.fetchall()
             conn.close()
 
-        return [dict(r) for r in rows]
+        results = []
+        for r in rows:
+            d = dict(r)
+            if not d.get("client_alias"):
+                ip = d.get("client_ip") or "127.0.0.1"
+                d["client_alias"] = self.resolve_client_alias(ip)
+                if d["client_alias"] == ip and ip in ("127.0.0.1", "localhost", "::1"):
+                    d["client_alias"] = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "Local Workstation"
+            results.append(d)
+        return results
 
     def get_recent_events(self, limit: int = 50, provider: Optional[str] = None) -> List[Dict[str, Any]]:
         """Returns the most recent raw usage events."""
@@ -502,11 +622,427 @@ class UsageDatabase:
 
         return [dict(r) for r in rows]
 
-    def get_comparative_metrics(self, scope: str = "individual", filter_visibility: bool = False) -> Dict[str, Any]:
+    def get_granular_timeseries(
+        self,
+        provider: Optional[str] = None,
+        window: str = "24h",
+        bucket_minutes: int = 5,
+        mode: str = "interval_delta",
+        scope: str = "individual"
+    ) -> Dict[str, Any]:
+        """
+        Returns granular time-series data aggregated into discrete time buckets (1, 5, 10, 15, 30, 60 minutes)
+        for arbitrary sliding windows (1h, 6h, 24h, 7d, 30d).
+        Supports:
+          - 'interval_delta': token consumption strictly within each bucket interval (idle = 0 baseline)
+          - 'cumulative': monotonically non-decreasing running total over the window
+        """
+        valid_buckets = (1, 5, 10, 15, 30, 60)
+        try:
+            bucket_min = int(bucket_minutes) if int(bucket_minutes) in valid_buckets else 5
+        except (ValueError, TypeError):
+            bucket_min = 5
+
+        mode_val = "cumulative" if str(mode).lower() == "cumulative" else "interval_delta"
+
+        window_map = {
+            "1h": 60,
+            "6h": 360,
+            "24h": 1440,
+            "7d": 10080,
+            "30d": 43200
+        }
+        win_mins = window_map.get(str(window).lower(), 1440)
+        num_bins = max(1, win_mins // bucket_min)
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cutoff = now - datetime.timedelta(minutes=win_mins)
+
+        # Generate continuous bin keys and labels
+        labels = []
+        keys = []
+        bin_start_timestamps = []
+
+        for i in range(num_bins - 1, -1, -1):
+            t_bin = now - datetime.timedelta(minutes=i * bucket_min)
+            bin_start_timestamps.append(t_bin)
+            keys.append(t_bin.strftime("%Y-%m-%dT%H:%M"))
+            if win_mins <= 60:
+                labels.append(t_bin.strftime("%H:%M"))
+            elif win_mins <= 1440:
+                labels.append(t_bin.strftime("%H:%M"))
+            else:
+                labels.append(t_bin.strftime("%b %d %H:%M"))
+
+        # Query events within the window
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            query = """
+                SELECT 
+                    recorded_at,
+                    provider,
+                    COALESCE(model, '') as model,
+                    COALESCE(token_id, '') as token_id,
+                    COALESCE(user_name, '') as user_name,
+                    COALESCE(team_name, '') as team_name,
+                    COALESCE(account_id, '') as account_id,
+                    total_tokens,
+                    estimated_cost
+                FROM usage_events
+                WHERE recorded_at >= ?
+            """
+            params = [cutoff.isoformat()]
+            if provider:
+                query += " AND provider = ?"
+                params.append(provider.lower())
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            conn.close()
+
+        cutoff_epoch = cutoff.timestamp()
+        bucket_secs = bucket_min * 60
+
+        total_pts = [0] * num_bins
+        total_cost = 0.0
+        prov_buckets: Dict[str, List[int]] = {}
+        child_buckets: Dict[str, List[int]] = {}
+
+        for r in rows:
+            rec_str = r["recorded_at"]
+            try:
+                dt = datetime.datetime.fromisoformat(rec_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                else:
+                    dt = dt.astimezone(datetime.timezone.utc)
+                evt_epoch = dt.timestamp()
+            except Exception:
+                continue
+
+            delta_secs = evt_epoch - cutoff_epoch
+            if delta_secs < 0:
+                continue
+            idx = int(delta_secs // bucket_secs)
+            if idx >= num_bins:
+                idx = num_bins - 1
+
+            toks = int(r["total_tokens"])
+            cost = float(r["estimated_cost"] or 0.0)
+            total_pts[idx] += toks
+            total_cost += cost
+
+            prov = (r["provider"] or "unknown").lower()
+            prov_buckets.setdefault(prov, [0] * num_bins)[idx] += toks
+
+            if prov == "claude":
+                if r["user_name"]:
+                    child_buckets.setdefault("individual", [0] * num_bins)[idx] += toks
+                if r["team_name"]:
+                    child_buckets.setdefault("team", [0] * num_bins)[idx] += toks
+            elif prov == "gemini":
+                t_id = r["token_id"] or "tok_gem_flash"
+                child_buckets.setdefault(t_id, [0] * num_bins)[idx] += toks
+            elif prov == "ollama":
+                m_name = r["model"] or "llama3:latest"
+                child_buckets.setdefault(m_name, [0] * num_bins)[idx] += toks
+
+        def _apply_mode(pts: List[int]) -> List[int]:
+            if mode_val == "cumulative":
+                cum = []
+                acc = 0
+                for p in pts:
+                    acc += p
+                    cum.append(acc)
+                return cum
+            return pts
+
+        series = []
+        pts_mode_total = _apply_mode(total_pts)
+        series.append({
+            "id": "total",
+            "key": "total",
+            "name": "Total Combined",
+            "label": "Total Combined",
+            "color": "#06b6d4",
+            "points": pts_mode_total,
+            "total_tokens": sum(total_pts),
+            "max_tokens": max(pts_mode_total) if pts_mode_total else 0
+        })
+
+        colors = {
+            "claude": "#f59e0b",
+            "gemini": "#3b82f6",
+            "chatgpt": "#10a37f",
+            "ollama": "#8b5cf6",
+            "copilot": "#0284c7"
+        }
+        for p_name, p_pts in prov_buckets.items():
+            pts_m = _apply_mode(p_pts)
+            series.append({
+                "id": p_name,
+                "key": p_name,
+                "name": p_name.capitalize(),
+                "label": p_name.capitalize(),
+                "color": colors.get(p_name, "#94a3b8"),
+                "points": pts_m,
+                "total_tokens": sum(p_pts),
+                "max_tokens": max(pts_m) if pts_m else 0
+            })
+
+        child_colors = ["#34d399", "#f472b6", "#fbbf24", "#38bdf8", "#c084fc", "#ec4899"]
+        for idx, (c_id, c_pts) in enumerate(child_buckets.items()):
+            pts_m = _apply_mode(c_pts)
+            clean_name = c_id.replace("tok_gem_", "Gemini ").replace(":", " ").title()
+            series.append({
+                "id": c_id,
+                "key": c_id,
+                "name": clean_name,
+                "label": clean_name,
+                "color": child_colors[idx % len(child_colors)],
+                "points": pts_m,
+                "total_tokens": sum(c_pts),
+                "max_tokens": max(pts_m) if pts_m else 0
+            })
+
+        return {
+            "success": True,
+            "window": window,
+            "bucket_minutes": bucket_min,
+            "mode": mode_val,
+            "labels": labels,
+            "keys": keys,
+            "num_bins": num_bins,
+            "total_tokens": sum(total_pts),
+            "total_cost": round(total_cost, 4),
+            "series": series
+        }
+
+    get_timeseries_analytics = get_granular_timeseries
+
+    def get_claude_plan_limits(self, plan_type: str = "Team Enterprise") -> Dict[str, int]:
+        """Returns standard session (5h) and weekly token limits for Claude subscription plans."""
+        pt = (plan_type or "").lower()
+        if "premium" in pt:
+            return {"session_limit": 500000, "weekly_limit": 3500000}
+        elif "max" in pt:
+            return {"session_limit": 1000000, "weekly_limit": 7000000}
+        elif "pro" in pt:
+            return {"session_limit": 75000, "weekly_limit": 500000}
+        elif "free" in pt:
+            return {"session_limit": 20000, "weekly_limit": 100000}
+        else:
+            # Default Team Standard
+            return {"session_limit": 200000, "weekly_limit": 1400000}
+
+    def format_reset_countdown(self, reset_epoch: Optional[float]) -> str:
+        """Formats remaining time until reset into human-friendly string (e.g. '3h 15m' or '45m 12s')."""
+        if not reset_epoch:
+            return "5h rolling window"
+        now = time.time()
+        diff = int(round(reset_epoch - now))
+        if diff <= 0:
+            return "Session Reset Ready"
+        hours = diff // 3600
+        mins = (diff % 3600) // 60
+        secs = diff % 60
+        if hours > 0:
+            return f"Resets in {hours}h {mins}m"
+        elif mins > 0:
+            return f"Resets in {mins}m {secs}s"
+        else:
+            return f"Resets in {secs}s"
+
+    def compute_provider_dynamic_quotas(
+        self,
+        provider: str = "claude",
+        session_limit: Optional[int] = None,
+        weekly_limit: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Dynamically computes 5-hour rolling session tokens and weekly tokens from usage_events,
+        automatically rolling over sessions when reset_epoch passes.
+        """
+        prov = provider.lower()
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_epoch = time.time()
+
+        # 1. Resolve Limits
+        snap = self.get_provider_snapshots().get(prov, {})
+        plan_type = snap.get("plan_type", "Team Enterprise")
+        defaults = self.get_claude_plan_limits(plan_type) if prov == "claude" else {"session_limit": 500000, "weekly_limit": 3500000}
+
+        sess_lim = session_limit
+        if sess_lim is None:
+            custom_s = self.get_setting(f"{prov}_session_token_limit")
+            sess_lim = int(custom_s) if custom_s and str(custom_s).isdigit() else defaults["session_limit"]
+
+        wk_lim = weekly_limit
+        if wk_lim is None:
+            custom_w = self.get_setting(f"{prov}_weekly_token_limit")
+            wk_lim = int(custom_w) if custom_w and str(custom_w).isdigit() else defaults["weekly_limit"]
+
+        # 2. Session Reset & Active Window Calculation
+        reset_epoch = snap.get("reset_epoch")
+        session_start_iso = None
+        new_reset_epoch = reset_epoch
+
+        calibrated_sess_pct = snap.get("individual_session_rem_pct")
+        if calibrated_sess_pct is None:
+            calibrated_sess_pct = snap.get("session_remaining_pct")
+
+        calibrated_week_pct = snap.get("individual_weekly_rem_pct")
+        if calibrated_week_pct is None:
+            calibrated_week_pct = snap.get("weekly_remaining_pct")
+
+        calibrated_at_iso = snap.get("last_sync") or snap.get("updated_at")
+
+        with self._lock:
+            conn = self._get_connection()
+            c = conn.cursor()
+
+            if reset_epoch is not None and now_epoch >= reset_epoch:
+                # Previous session has expired! Check if there have been new events since reset_epoch
+                reset_iso = datetime.datetime.fromtimestamp(reset_epoch, datetime.timezone.utc).isoformat()
+                c.execute(
+                    "SELECT MIN(recorded_at), SUM(total_tokens) FROM usage_events WHERE provider = ? AND recorded_at > ?",
+                    (prov, reset_iso)
+                )
+                row = c.fetchone()
+                if row and row[0] is not None:
+                    # New session has started with these new events
+                    first_new_event = row[0]
+                    session_start_iso = first_new_event
+                    try:
+                        dt = datetime.datetime.fromisoformat(first_new_event.replace("Z", "+00:00"))
+                        new_reset_epoch = dt.timestamp() + (5 * 3600)
+                    except Exception:
+                        new_reset_epoch = now_epoch + (5 * 3600)
+                    session_tokens_used = int(row[1] or 0)
+                else:
+                    # No new events since expiration -> Session is completely fresh/idle
+                    session_tokens_used = 0
+                    new_reset_epoch = None
+            else:
+                # Active session (either unexpired calibration or rolling 5h window)
+                if calibrated_sess_pct is not None and reset_epoch is not None and reset_epoch > now_epoch:
+                    calib_rem = float(calibrated_sess_pct)
+                    base_used = int(round((100.0 - calib_rem) / 100.0 * sess_lim))
+                    additional_tokens = 0
+                    if calibrated_at_iso:
+                        c.execute(
+                            "SELECT SUM(total_tokens) FROM usage_events WHERE provider = ? AND recorded_at > ?",
+                            (prov, calibrated_at_iso)
+                        )
+                        row = c.fetchone()
+                        if row and row[0] is not None:
+                            additional_tokens = int(row[0] or 0)
+                    session_tokens_used = min(sess_lim, base_used + additional_tokens)
+                elif reset_epoch is not None:
+                    session_start_epoch = reset_epoch - (5 * 3600)
+                    session_start_iso = datetime.datetime.fromtimestamp(session_start_epoch, datetime.timezone.utc).isoformat()
+                    c.execute(
+                        "SELECT SUM(total_tokens) FROM usage_events WHERE provider = ? AND recorded_at >= ?",
+                        (prov, session_start_iso)
+                    )
+                    row = c.fetchone()
+                    session_tokens_used = int(row[0] or 0) if (row and row[0] is not None) else 0
+                else:
+                    cutoff_5h = (now_utc - datetime.timedelta(hours=5)).isoformat()
+                    c.execute(
+                        "SELECT MIN(recorded_at), SUM(total_tokens) FROM usage_events WHERE provider = ? AND recorded_at >= ?",
+                        (prov, cutoff_5h)
+                    )
+                    row = c.fetchone()
+                    if row and row[0] is not None:
+                        session_start_iso = row[0]
+                        try:
+                            dt = datetime.datetime.fromisoformat(session_start_iso.replace("Z", "+00:00"))
+                            new_reset_epoch = dt.timestamp() + (5 * 3600)
+                        except Exception:
+                            new_reset_epoch = now_epoch + (5 * 3600)
+                        session_tokens_used = int(row[1] or 0)
+                    else:
+                        if calibrated_sess_pct is not None:
+                            session_tokens_used = int(round((100.0 - float(calibrated_sess_pct)) / 100.0 * sess_lim))
+                        else:
+                            session_tokens_used = 0
+                        new_reset_epoch = None
+
+            # 3. Weekly Usage Calculation: 7-day rolling window
+            weekly_cutoff = (now_utc - datetime.timedelta(days=7)).isoformat()
+
+            c.execute(
+                "SELECT SUM(total_tokens) FROM usage_events WHERE provider = ? AND recorded_at >= ?",
+                (prov, weekly_cutoff)
+            )
+            w_row = c.fetchone()
+            event_weekly_tokens = int(w_row[0] or 0) if (w_row and w_row[0] is not None) else 0
+
+            if calibrated_week_pct is not None:
+                calib_wk_rem = float(calibrated_week_pct)
+                base_wk_used = int(round((100.0 - calib_wk_rem) / 100.0 * wk_lim))
+                add_wk = 0
+                if calibrated_at_iso:
+                    c.execute(
+                        "SELECT SUM(total_tokens) FROM usage_events WHERE provider = ? AND recorded_at > ?",
+                        (prov, calibrated_at_iso)
+                    )
+                    row = c.fetchone()
+                    if row and row[0] is not None:
+                        add_wk = int(row[0] or 0)
+                weekly_tokens_used = min(wk_lim, base_wk_used + add_wk)
+            else:
+                weekly_tokens_used = event_weekly_tokens
+
+            # If reset epoch changed, persist it back to snapshot atomically
+            if new_reset_epoch != reset_epoch and new_reset_epoch is not None:
+                c.execute(
+                    "UPDATE provider_snapshots SET reset_epoch = ? WHERE provider = ?",
+                    (new_reset_epoch, prov)
+                )
+                conn.commit()
+
+            conn.close()
+
+        # Available balances and percentages
+        session_tokens_avail = max(0, sess_lim - session_tokens_used)
+        sess_rem_pct = round((session_tokens_avail / sess_lim) * 100.0, 1) if sess_lim > 0 else 100.0
+        sess_used_pct = round(100.0 - sess_rem_pct, 1)
+
+        weekly_tokens_avail = max(0, wk_lim - weekly_tokens_used)
+        wk_rem_pct = round((weekly_tokens_avail / wk_lim) * 100.0, 1) if wk_lim > 0 else 100.0
+        wk_used_pct = round(100.0 - wk_rem_pct, 1)
+
+        sess_countdown = self.format_reset_countdown(new_reset_epoch)
+
+        return {
+            "provider": prov,
+            "session_tokens_used": session_tokens_used,
+            "session_tokens_available": session_tokens_avail,
+            "session_tokens_limit": sess_lim,
+            "session_balance_remaining_pct": sess_rem_pct,
+            "session_used_pct": sess_used_pct,
+            "weekly_tokens_used": weekly_tokens_used,
+            "weekly_tokens_available": weekly_tokens_avail,
+            "weekly_tokens_limit": wk_lim,
+            "weekly_balance_remaining_pct": wk_rem_pct,
+            "weekly_used_pct": wk_used_pct,
+            "reset_epoch": new_reset_epoch,
+            "session_reset_str": sess_countdown,
+            "weekly_reset_str": snap.get("weekly_reset_str", "Mon 3:00 AM")
+        }
+
+    def get_comparative_metrics(self, scope: Optional[str] = None, filter_visibility: bool = False) -> Dict[str, Any]:
         """
         Returns comparative analytics across all accounts with multi-scope hierarchy
         (individual, team, department, enterprise) and local AI cost savings analysis.
         """
+        tracking_mode = self.get_quota_tracking_mode()
+        if scope is None or scope == "":
+            scope = tracking_mode
+
         now = datetime.datetime.now(datetime.timezone.utc)
         today_prefix = now.strftime("%Y-%m-%d")
         week_cutoff = (now - datetime.timedelta(days=7)).isoformat()
@@ -582,6 +1118,12 @@ class UsageDatabase:
             daily_allowance = allowance_defaults.get(prov, 500000)
             weekly_allowance = daily_allowance * 7
 
+            dyn_quota = {}
+            if prov == "claude":
+                dyn_quota = self.compute_provider_dynamic_quotas("claude")
+                daily_allowance = dyn_quota["session_tokens_limit"]
+                weekly_allowance = dyn_quota["weekly_tokens_limit"]
+
             share_pct = round((tokens_today / total_tokens_today_all * 100), 1) if total_tokens_today_all > 0 else 0.0
 
             # Hierarchical resolution
@@ -601,31 +1143,44 @@ class UsageDatabase:
             if team_week_rem is None:
                 team_week_rem = snap.get("weekly_remaining_pct")
 
-            # Determine active percentage based on scope
-            if scope == "team":
-                if team_sess_rem is not None:
+            # Determine active percentage based on scope and dynamic quota
+            if prov == "claude":
+                if scope == "team" and team_sess_rem is not None:
                     session_rem_pct = round(float(team_sess_rem), 1)
-                else:
-                    session_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_today / daily_allowance)) * 100, 1)))
-
-                if team_week_rem is not None:
                     weekly_rem_pct = round(float(team_week_rem), 1)
                 else:
-                    weekly_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_week / weekly_allowance)) * 100, 1)))
+                    session_rem_pct = dyn_quota["session_balance_remaining_pct"]
+                    weekly_rem_pct = dyn_quota["weekly_balance_remaining_pct"]
+                    ind_sess_rem = session_rem_pct
+                    ind_week_rem = weekly_rem_pct
             else:
-                # individual scope (default)
-                if ind_sess_rem is not None:
-                    session_rem_pct = round(float(ind_sess_rem), 1)
-                else:
-                    session_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_today / daily_allowance)) * 100, 1)))
+                if scope == "team":
+                    if team_sess_rem is not None:
+                        session_rem_pct = round(float(team_sess_rem), 1)
+                    else:
+                        session_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_today / daily_allowance)) * 100, 1)))
 
-                if ind_week_rem is not None:
-                    weekly_rem_pct = round(float(ind_week_rem), 1)
+                    if team_week_rem is not None:
+                        weekly_rem_pct = round(float(team_week_rem), 1)
+                    else:
+                        weekly_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_week / weekly_allowance)) * 100, 1)))
                 else:
-                    weekly_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_week / weekly_allowance)) * 100, 1)))
+                    # individual scope (default)
+                    if ind_sess_rem is not None:
+                        session_rem_pct = round(float(ind_sess_rem), 1)
+                    else:
+                        session_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_today / daily_allowance)) * 100, 1)))
 
+                    if ind_week_rem is not None:
+                        weekly_rem_pct = round(float(ind_week_rem), 1)
+                    else:
+                        weekly_rem_pct = max(0.0, min(100.0, round((1.0 - (tokens_week / weekly_allowance)) * 100, 1)))
+
+            is_streamlined = (tracking_mode == "individual")
             hierarchy = {
                 "scope": scope,
+                "tracking_mode": tracking_mode,
+                "streamlined": is_streamlined,
                 "user_name": snap.get("user_name") or "James Eckhardt",
                 "team_name": snap.get("team_name") or ("Synthesis2" if prov == "claude" else "Core Engineering Team"),
                 "dept_name": snap.get("dept_name") or "Technology & AI Division",
@@ -638,7 +1193,14 @@ class UsageDatabase:
                     "weekly_remaining_pct": round(float(ind_week_rem), 1) if ind_week_rem is not None else weekly_rem_pct,
                     "weekly_used_pct": round(100.0 - float(ind_week_rem), 1) if ind_week_rem is not None else round(100.0 - weekly_rem_pct, 1),
                     "weekly_reset_str": snap.get("weekly_reset_str", "Mon 3:00 AM"),
-                    "reset_epoch": snap.get("reset_epoch")
+                    "reset_epoch": dyn_quota.get("reset_epoch") if (prov == "claude" and dyn_quota.get("reset_epoch") is not None) else snap.get("reset_epoch"),
+                    "session_tokens_used": dyn_quota.get("session_tokens_used", tokens_today),
+                    "session_tokens_available": dyn_quota.get("session_tokens_available", max(0, daily_allowance - tokens_today)),
+                    "session_tokens_limit": dyn_quota.get("session_tokens_limit", daily_allowance),
+                    "weekly_tokens_used": dyn_quota.get("weekly_tokens_used", tokens_week),
+                    "weekly_tokens_available": dyn_quota.get("weekly_tokens_available", max(0, weekly_allowance - tokens_week)),
+                    "weekly_tokens_limit": dyn_quota.get("weekly_tokens_limit", weekly_allowance),
+                    "session_reset_str": dyn_quota.get("session_reset_str", "5h rolling window")
                 },
                 "team": {
                     "team_name": snap.get("team_name") or "Synthesis2",
@@ -646,18 +1208,21 @@ class UsageDatabase:
                     "session_used_pct": round(100.0 - float(team_sess_rem), 1) if team_sess_rem is not None else 56.0,
                     "weekly_remaining_pct": round(float(team_week_rem), 1) if team_week_rem is not None else 74.0,
                     "weekly_used_pct": round(100.0 - float(team_week_rem), 1) if team_week_rem is not None else 26.0,
-                    "weekly_reset_str": snap.get("weekly_reset_str", "Mon 3:00 AM")
+                    "weekly_reset_str": snap.get("weekly_reset_str", "Mon 3:00 AM"),
+                    "enabled": not is_streamlined
                 },
                 "department": {
                     "dept_name": snap.get("dept_name") or "Technology & AI Division",
                     "monthly_tokens": at.get("total_tokens", 0) * 3 + 43680381,
                     "active_seats": 14,
-                    "budget_limit_usd": 1500.00
+                    "budget_limit_usd": 1500.00,
+                    "enabled": not is_streamlined
                 },
                 "enterprise": {
                     "org_name": snap.get("org_name") or "Synthesis Software Technologies",
                     "plan_type": snap.get("plan_type", "Team Enterprise"),
-                    "shared_pool_active": True
+                    "shared_pool_active": True,
+                    "enabled": not is_streamlined
                 }
             }
 
@@ -751,7 +1316,14 @@ class UsageDatabase:
                 "session_used_pct": round(100.0 - session_rem_pct, 1),
                 "weekly_balance_remaining_pct": weekly_rem_pct,
                 "weekly_used_pct": round(100.0 - weekly_rem_pct, 1),
-                "reset_epoch": snap.get("reset_epoch"),
+                "session_tokens_used": dyn_quota.get("session_tokens_used", tokens_today),
+                "session_tokens_available": dyn_quota.get("session_tokens_available", max(0, daily_allowance - tokens_today)),
+                "session_tokens_limit": dyn_quota.get("session_tokens_limit", daily_allowance),
+                "weekly_tokens_used": dyn_quota.get("weekly_tokens_used", tokens_week),
+                "weekly_tokens_available": dyn_quota.get("weekly_tokens_available", max(0, weekly_allowance - tokens_week)),
+                "weekly_tokens_limit": dyn_quota.get("weekly_tokens_limit", weekly_allowance),
+                "session_reset_str": dyn_quota.get("session_reset_str", "5h rolling window"),
+                "reset_epoch": dyn_quota.get("reset_epoch") if (prov == "claude" and dyn_quota.get("reset_epoch") is not None) else snap.get("reset_epoch"),
                 "weekly_reset_str": snap.get("weekly_reset_str", "Mon 3:00 AM"),
                 "last_sync": last_sync_iso,
                 "last_sync_age_seconds": last_sync_age,
@@ -786,6 +1358,7 @@ class UsageDatabase:
 
         return {
             "timestamp": now.isoformat(),
+            "tracking_mode": tracking_mode,
             "active_scope": scope,
             "total_tokens_today": total_tokens_today_all,
             "total_tokens_week": total_tokens_week_all,
@@ -1076,19 +1649,24 @@ class UsageDatabase:
 
             model_palette = {
                 "llama3:latest": ("Llama 3 (8B)", "#38bdf8"),
-                "deepseek-r1:14b": ("DeepSeek R1 (14B)", "#34d399"),
-                "mistral:latest": ("Mistral (7B)", "#fbbf24")
+                "mistral:latest": ("Mistral (7B)", "#fbbf24"),
+                "gemma4:e4b": ("Gemma 4 (e4b)", "#06b6d4"),
+                "gemma4:e2b": ("Gemma 4 (e2b)", "#38bdf8"),
+                "gemma4:latest": ("Gemma 4 (Latest)", "#06b6d4"),
+                "qwen2.5:14b": ("Qwen 2.5 (14B)", "#ec4899"),
+                "phi4:14b": ("Phi 4 (14B)", "#10b981")
             }
+            dynamic_colors = ["#06b6d4", "#ec4899", "#10b981", "#f59e0b", "#3b82f6", "#8b5cf6", "#f43f5e", "#14b8a6"]
 
             models_present = list(child_buckets.keys())
-            if not models_present:
-                models_present = ["llama3:latest", "deepseek-r1:14b", "mistral:latest"]
 
-            for m in models_present:
-                info = model_palette.get(m, (m, "#f43f5e"))
+            for idx, m in enumerate(models_present):
+                fallback_name = m.replace(":", " ").title()
+                fallback_color = dynamic_colors[idx % len(dynamic_colors)]
+                info = model_palette.get(m, (fallback_name, fallback_color))
                 pts = child_buckets.get(m)
-                if not pts or sum(pts) == 0:
-                    pts = [int(p * 0.5) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+                if not pts:
+                    pts = [0] * num_bins
                 m_id = f"ollama_model_{m.replace(':', '_')}"
                 series.append({
                     "id": m_id,
@@ -1137,6 +1715,7 @@ class UsageDatabase:
             "window": window,
             "window_label": window_label,
             "labels": labels,
+            "keys": keys,
             "series": series
         }
 
@@ -1373,6 +1952,31 @@ class UsageDatabase:
             conn.commit()
             conn.close()
 
+    def get_quota_tracking_mode(self) -> str:
+        """Returns the configured quota tracking mode ('individual' or 'team'). Defaults to 'individual'."""
+        mode = self.get_setting("quota_tracking_mode", "individual")
+        if isinstance(mode, str):
+            mode = mode.strip('"\'').lower()
+        if mode not in ("individual", "team"):
+            return "individual"
+        return mode
+
+    def set_quota_tracking_mode(self, mode: str) -> str:
+        """Sets the quota tracking mode ('individual' or 'team'). Raises ValueError if invalid."""
+        if not isinstance(mode, str) or mode.strip().lower() not in ("individual", "team"):
+            raise ValueError("quota_tracking_mode must be 'individual' or 'team'")
+        sanitized = mode.strip().lower()
+        self.set_setting("quota_tracking_mode", sanitized)
+        return sanitized
+
+    def get_app_setting(self, key: str, default: Any = None) -> Any:
+        """Retrieves a single setting from app_settings with fallback."""
+        return self.get_setting(key, default)
+
+    def set_app_setting(self, key: str, value: Any):
+        """Persists a single setting into app_settings."""
+        return self.set_setting(key, value)
+
     def get_all_settings(self) -> Dict[str, Any]:
         defaults = {
             "widget_theme": "obsidian_neon",
@@ -1382,9 +1986,16 @@ class UsageDatabase:
             "widget_view_mode": "balances",
             "poll_cadence_seconds": 4,
             "refresh_cadence_seconds": 4,
+            "ui_refresh_interval_seconds": 30,
             "ollama_sync_interval": 15,
             "pinned_items": ["claude", "gemini", "ollama"],
-            "estate_visibility": self.get_estate_visibility()
+            "quota_tracking_mode": self.get_quota_tracking_mode(),
+            "estate_visibility": self.get_estate_visibility(),
+            "ollama_emulator_port": 8989,
+            "transparent_proxy_port": 8766,
+            "default_session_window_minutes": 15,
+            "default_session_token_limit": 25000,
+            "default_daily_token_limit": 250000
         }
         with self._lock:
             conn = self._get_connection()
@@ -1403,7 +2014,19 @@ class UsageDatabase:
             except Exception:
                 defaults[k] = r["value"]
         defaults["estate_visibility"] = self.get_estate_visibility()
+        # Enforce minimum 30s for ui_refresh_interval_seconds
+        if "ui_refresh_interval_seconds" in defaults:
+            try:
+                defaults["ui_refresh_interval_seconds"] = max(30, min(300, int(defaults["ui_refresh_interval_seconds"])))
+            except Exception:
+                defaults["ui_refresh_interval_seconds"] = 30
         return defaults
+
+    def set_ui_refresh_cadence(self, interval_seconds: int) -> int:
+        """Sets the UI refresh cadence in seconds (minimum 30s, maximum 300s)."""
+        val = max(30, min(300, int(interval_seconds)))
+        self.set_setting("ui_refresh_interval_seconds", json.dumps(val))
+        return val
 
     # -------------------------------------------------------------
     # Cross-Platform Grouping Labels / Tags
@@ -1821,5 +2444,679 @@ class UsageDatabase:
             })
         return leaderboard
 
+    # Managed Remote AI Nodes (AIUM-703, AIUM-704)
+    def register_managed_node(
+        self,
+        name: str,
+        endpoint: str,
+        engine: str = "ollama",
+        max_concurrency: int = 1,
+        queue_timeout_seconds: float = 30.0,
+        priority: int = 5,
+        models: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        node_id: Optional[str] = None,
+        is_trusted: int = 1,
+        compute_group: str = "Active Compute"
+    ) -> Dict[str, Any]:
+        """Registers or updates a managed AI compute node."""
+        import uuid
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        clean_ep = endpoint.rstrip("/")
+        nid = node_id or f"node_{engine}_{abs(hash(clean_ep)) % 10000000}"
+        models_str = json.dumps(models or [])
+        meta_str = json.dumps(metadata or {})
+        trusted_val = 1 if is_trusted else 0
+        group_val = compute_group or "Active Compute"
+        # Strict Invariant: Untrusted nodes are automatically excluded from 'Active Compute'
+        if trusted_val == 0 and group_val == "Active Compute":
+            group_val = "Quarantined"
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO managed_nodes (
+                    id, name, engine, endpoint, max_concurrency,
+                    queue_timeout_seconds, priority, status, models_json, metadata_json,
+                    is_trusted, compute_group,
+                    created_at, updated_at, last_seen_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ONLINE', ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    engine = excluded.engine,
+                    endpoint = excluded.endpoint,
+                    max_concurrency = excluded.max_concurrency,
+                    queue_timeout_seconds = excluded.queue_timeout_seconds,
+                    priority = excluded.priority,
+                    models_json = excluded.models_json,
+                    metadata_json = excluded.metadata_json,
+                    is_trusted = excluded.is_trusted,
+                    compute_group = excluded.compute_group,
+                    updated_at = excluded.updated_at,
+                    last_seen_at = excluded.last_seen_at
+            ''', (
+                nid, name, engine, clean_ep, int(max_concurrency),
+                float(queue_timeout_seconds), int(priority),
+                models_str, meta_str, trusted_val, group_val, now, now, now
+            ))
+            conn.commit()
+            conn.close()
+
+        return self.get_managed_node(nid)
+
+    def get_managed_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Fetches a managed node by unique ID."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM managed_nodes WHERE id = ?", (node_id,))
+            row = cursor.fetchone()
+            conn.close()
+
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["models"] = json.loads(d.get("models_json") or "[]")
+        except Exception:
+            d["models"] = []
+        try:
+            d["metadata"] = json.loads(d.get("metadata_json") or "{}")
+        except Exception:
+            d["metadata"] = {}
+        return d
+
+    def list_managed_nodes(self, status: Optional[str] = None, engine: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Lists managed nodes with optional filtering."""
+        query = "SELECT * FROM managed_nodes WHERE 1=1"
+        params = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if engine:
+            query += " AND engine = ?"
+            params.append(engine)
+        query += " ORDER BY priority DESC, created_at ASC"
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+            conn.close()
+
+        result = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["models"] = json.loads(d.get("models_json") or "[]")
+            except Exception:
+                d["models"] = []
+            try:
+                d["metadata"] = json.loads(d.get("metadata_json") or "{}")
+            except Exception:
+                d["metadata"] = {}
+            result.append(d)
+        return result
+
+    def update_managed_node(self, node_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """Updates specific fields of a managed node."""
+        node = self.get_managed_node(node_id)
+        if not node:
+            return None
+
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        allowed = {
+            "name", "endpoint", "engine", "max_concurrency", "queue_timeout_seconds",
+            "priority", "status", "models", "metadata", "last_seen_at",
+            "is_trusted", "compute_group"
+        }
+        updates = []
+        params = []
+
+        # Trust guardrail
+        if "is_trusted" in kwargs:
+            is_tr = int(kwargs["is_trusted"])
+            if is_tr == 0:
+                if "compute_group" not in kwargs:
+                    curr_group = node.get("compute_group", "Active Compute")
+                    if curr_group == "Active Compute":
+                        kwargs["compute_group"] = "Quarantined"
+                elif kwargs.get("compute_group") == "Active Compute":
+                    kwargs["compute_group"] = "Quarantined"
+
+        for k, v in kwargs.items():
+            if k in allowed:
+                if k == "models":
+                    updates.append("models_json = ?")
+                    params.append(json.dumps(v))
+                elif k == "metadata":
+                    updates.append("metadata_json = ?")
+                    params.append(json.dumps(v))
+                else:
+                    updates.append(f"{k} = ?")
+                    params.append(v)
+
+        if not updates:
+            return node
+
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(node_id)
+
+        sql = f"UPDATE managed_nodes SET {', '.join(updates)} WHERE id = ?"
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(sql, tuple(params))
+            conn.commit()
+            conn.close()
+
+        return self.get_managed_node(node_id)
+
+    def delete_managed_node(self, node_id: str) -> bool:
+        """Removes a managed node from database."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM managed_nodes WHERE id = ?", (node_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+        return deleted
+
+    # Device Inventory Engine (AIUM-704)
+    def upsert_device_inventory(
+        self,
+        alias: str,
+        ip: str,
+        state: str = "PENDING",
+        discovered_services: Optional[List[Any]] = None,
+        is_trusted: int = 1,
+        compute_group: str = "Active Compute",
+        notes: str = "",
+        mac_address: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Upserts a discovered or manually added network device into inventory."""
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        clean_alias = alias.strip() if alias else ip
+        services_str = json.dumps(discovered_services or [])
+        trusted_val = 1 if is_trusted else 0
+        group_val = compute_group or "Active Compute"
+        if trusted_val == 0 and group_val == "Active Compute":
+            group_val = "Quarantined"
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO device_inventory (
+                    alias, ip, mac_address, state, discovered_services_json,
+                    is_trusted, compute_group, notes, first_seen_at, last_seen_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(alias) DO UPDATE SET
+                    ip = excluded.ip,
+                    mac_address = COALESCE(excluded.mac_address, device_inventory.mac_address),
+                    state = excluded.state,
+                    discovered_services_json = CASE WHEN excluded.discovered_services_json != '[]' THEN excluded.discovered_services_json ELSE device_inventory.discovered_services_json END,
+                    is_trusted = excluded.is_trusted,
+                    compute_group = excluded.compute_group,
+                    notes = CASE WHEN excluded.notes != '' THEN excluded.notes ELSE device_inventory.notes END,
+                    last_seen_at = excluded.last_seen_at
+            ''', (
+                clean_alias, ip, mac_address, state, services_str,
+                trusted_val, group_val, notes, now, now
+            ))
+            conn.commit()
+            conn.close()
+
+        return self.get_device_inventory(clean_alias)
+
+    def get_device_inventory(self, alias_or_ip: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a device from inventory by alias or IP address."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM device_inventory WHERE alias = ? OR ip = ?", (alias_or_ip, alias_or_ip))
+            row = cursor.fetchone()
+            conn.close()
+
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["discovered_services"] = json.loads(d.get("discovered_services_json") or "[]")
+        except Exception:
+            d["discovered_services"] = []
+        return d
+
+    def list_device_inventory(
+        self,
+        state: Optional[str] = None,
+        compute_group: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Lists all registered devices in inventory with optional state or group filter."""
+        query = "SELECT * FROM device_inventory WHERE 1=1"
+        params = []
+        if state:
+            query += " AND state = ?"
+            params.append(state)
+        if compute_group:
+            query += " AND compute_group = ?"
+            params.append(compute_group)
+        query += " ORDER BY CASE state WHEN 'KNOWN_SERVICES' THEN 1 WHEN 'NO_SERVICES' THEN 2 ELSE 3 END, last_seen_at DESC"
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+            conn.close()
+
+        results = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["discovered_services"] = json.loads(d.get("discovered_services_json") or "[]")
+            except Exception:
+                d["discovered_services"] = []
+            results.append(d)
+        return results
+
+    def delete_device_inventory(self, alias: str) -> bool:
+        """Deletes a device from inventory."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM device_inventory WHERE alias = ? OR ip = ?", (alias, alias))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+        return deleted
+
+    # -------------------------------------------------------------
+    # AIUM-705: Per-Client Token Limitations & Multi-Tier Quotas
+    # -------------------------------------------------------------
+    def resolve_client_alias(self, client_ip: str) -> str:
+        """Resolves computer alias from device_inventory or client_quotas; falls back to client_ip."""
+        if not client_ip:
+            return "unknown"
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT alias FROM device_inventory WHERE ip = ? AND alias IS NOT NULL LIMIT 1", (client_ip,))
+            row = cursor.fetchone()
+            if row and row["alias"]:
+                conn.close()
+                return row["alias"]
+            cursor.execute("SELECT alias FROM client_quotas WHERE client_ip = ? AND alias IS NOT NULL LIMIT 1", (client_ip,))
+            row = cursor.fetchone()
+            if row and row["alias"]:
+                conn.close()
+                return row["alias"]
+            cursor.execute("SELECT client_alias FROM usage_events WHERE client_ip = ? AND client_alias IS NOT NULL AND client_alias != '' ORDER BY recorded_at DESC LIMIT 1", (client_ip,))
+            row = cursor.fetchone()
+            conn.close()
+            if row and row["client_alias"]:
+                return row["client_alias"]
+        return client_ip
+
+    def upsert_client_quota(
+        self,
+        client_ip: str,
+        alias: Optional[str] = None,
+        session_window_minutes: int = 15,
+        session_token_limit: int = 25000,
+        daily_token_limit: int = 250000,
+        priority: int = 5,
+        is_unrestricted: int = 0,
+        is_blocked: int = 0,
+        bypass_until: Optional[str] = None,
+        scheduled_start_at: Optional[str] = None,
+        scheduled_end_at: Optional[str] = None,
+        allowed_models: Optional[List[str]] = None,
+        blocked_models: Optional[List[str]] = None,
+        allowed_nodes: Optional[List[str]] = None,
+        blocked_nodes: Optional[List[str]] = None,
+        notes: str = ""
+    ) -> Dict[str, Any]:
+        """Creates or updates a client quota policy."""
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        resolved_alias = alias or self.resolve_client_alias(client_ip)
+        allowed_m_json = json.dumps(allowed_models if allowed_models is not None else [])
+        blocked_m_json = json.dumps(blocked_models if blocked_models is not None else [])
+        allowed_n_json = json.dumps(allowed_nodes if allowed_nodes is not None else [])
+        blocked_n_json = json.dumps(blocked_nodes if blocked_nodes is not None else [])
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT created_at FROM client_quotas WHERE client_ip = ?", (client_ip,))
+            existing = cursor.fetchone()
+            created_at = existing["created_at"] if existing else now_iso
+
+            cursor.execute('''
+                INSERT INTO client_quotas (
+                    client_id, client_ip, alias, session_window_minutes, session_token_limit,
+                    daily_token_limit, priority, is_unrestricted, is_blocked, bypass_until,
+                    scheduled_start_at, scheduled_end_at, allowed_models_json, blocked_models_json,
+                    allowed_nodes_json, blocked_nodes_json, notes, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(client_id) DO UPDATE SET
+                    client_ip=excluded.client_ip,
+                    alias=excluded.alias,
+                    session_window_minutes=excluded.session_window_minutes,
+                    session_token_limit=excluded.session_token_limit,
+                    daily_token_limit=excluded.daily_token_limit,
+                    priority=excluded.priority,
+                    is_unrestricted=excluded.is_unrestricted,
+                    is_blocked=excluded.is_blocked,
+                    bypass_until=excluded.bypass_until,
+                    scheduled_start_at=excluded.scheduled_start_at,
+                    scheduled_end_at=excluded.scheduled_end_at,
+                    allowed_models_json=excluded.allowed_models_json,
+                    blocked_models_json=excluded.blocked_models_json,
+                    allowed_nodes_json=excluded.allowed_nodes_json,
+                    blocked_nodes_json=excluded.blocked_nodes_json,
+                    notes=excluded.notes,
+                    updated_at=excluded.updated_at
+            ''', (
+                client_ip, client_ip, resolved_alias, session_window_minutes, session_token_limit,
+                daily_token_limit, priority, is_unrestricted, is_blocked, bypass_until,
+                scheduled_start_at, scheduled_end_at, allowed_m_json, blocked_m_json,
+                allowed_n_json, blocked_n_json, notes, created_at, now_iso
+            ))
+            conn.commit()
+            conn.close()
+
+        return self.get_client_quota(client_ip)
+
+    set_client_quota = upsert_client_quota
+
+    def get_client_quota(self, client_ip: str) -> Dict[str, Any]:
+        """Returns client quota policy; defaults if client not yet explicitly configured."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM client_quotas WHERE client_ip = ?", (client_ip,))
+            row = cursor.fetchone()
+            conn.close()
+
+        if row:
+            d = dict(row)
+            d["is_blocked"] = int(d.get("is_blocked") or 0)
+            try:
+                d["allowed_models"] = json.loads(d.get("allowed_models_json") or "[]")
+            except Exception:
+                d["allowed_models"] = []
+            try:
+                d["blocked_models"] = json.loads(d.get("blocked_models_json") or "[]")
+            except Exception:
+                d["blocked_models"] = []
+            try:
+                d["allowed_nodes"] = json.loads(d.get("allowed_nodes_json") or "[]")
+            except Exception:
+                d["allowed_nodes"] = []
+            try:
+                d["blocked_nodes"] = json.loads(d.get("blocked_nodes_json") or "[]")
+            except Exception:
+                d["blocked_nodes"] = []
+            return d
+
+        # Default fallback quota for unconfigured client dynamically from app_settings
+        def_win = int(self.get_setting("default_session_window_minutes", 15))
+        def_sess = int(self.get_setting("default_session_token_limit", 25000))
+        def_daily = int(self.get_setting("default_daily_token_limit", 250000))
+        return {
+            "client_id": client_ip,
+            "client_ip": client_ip,
+            "alias": self.resolve_client_alias(client_ip),
+            "session_window_minutes": def_win,
+            "session_token_limit": def_sess,
+            "daily_token_limit": def_daily,
+            "priority": 5,
+            "is_unrestricted": 0,
+            "is_blocked": 0,
+            "bypass_until": None,
+            "scheduled_start_at": None,
+            "scheduled_end_at": None,
+            "allowed_models": [],
+            "blocked_models": [],
+            "allowed_nodes": [],
+            "blocked_nodes": [],
+            "notes": "Default unconfigured client quota"
+        }
+
+    def list_all_integrated_clients(self) -> List[Dict[str, Any]]:
+        """
+        Discovers and returns all integrated client machines across configured client_quotas,
+        recent token window activity in client_token_windows, and usage_events.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT client_ip FROM client_quotas")
+            quota_ips = [r["client_ip"] for r in cursor.fetchall() if r["client_ip"]]
+
+            cursor.execute("SELECT DISTINCT client_id FROM client_token_windows WHERE client_id IS NOT NULL")
+            window_ips = [r["client_id"] for r in cursor.fetchall() if r["client_id"]]
+
+            cursor.execute("SELECT DISTINCT client_ip FROM usage_events WHERE client_ip IS NOT NULL AND client_ip != ''")
+            event_ips = [r["client_ip"] for r in cursor.fetchall() if r["client_ip"]]
+
+            conn.close()
+
+        all_ips = list(dict.fromkeys(quota_ips + window_ips + event_ips))
+
+        results = []
+        for ip in all_ips:
+            quota = self.get_client_quota(ip)
+            usage = self.get_client_token_usage(ip)
+            q_copy = dict(quota)
+            q_copy.update({
+                "session_tokens_used": usage.get("session_tokens_used", 0),
+                "session_tokens_remaining": usage.get("session_tokens_remaining", 0),
+                "daily_tokens_used": usage.get("daily_tokens_used", 0),
+                "daily_tokens_remaining": usage.get("daily_tokens_remaining", 0),
+                "is_bypass_active": usage.get("is_bypass_active", False)
+            })
+            results.append(q_copy)
+
+        results.sort(key=lambda x: (
+            x.get("is_blocked", 0),
+            x.get("is_unrestricted", 0),
+            x.get("priority", 5),
+            x.get("session_tokens_used", 0) + x.get("daily_tokens_used", 0)
+        ), reverse=True)
+        return results
+
+    def list_client_quotas(self) -> List[Dict[str, Any]]:
+        """Returns all configured and discovered client quotas."""
+        return self.list_all_integrated_clients()
+
+    def delete_client_quota(self, client_ip: str) -> bool:
+        """Deletes a custom client quota."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM client_quotas WHERE client_ip = ?", (client_ip,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+        return deleted
+
+    def record_client_tokens(self, client_ip: str, tokens: int, timestamp: Optional[float] = None) -> str:
+        """Records token consumption for a client with millisecond/second epoch timestamp."""
+        rec_id = f"ctok_{uuid.uuid4().hex[:12]}"
+        ts = timestamp if timestamp is not None else time.time()
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO client_token_windows (id, client_id, tokens, timestamp) VALUES (?, ?, ?, ?)",
+                (rec_id, client_ip, tokens, ts)
+            )
+            conn.commit()
+            conn.close()
+        return rec_id
+
+    def get_client_token_usage(self, client_ip: str) -> Dict[str, Any]:
+        """Calculates sliding session burst window tokens and daily rolling tokens for a client."""
+        quota = self.get_client_quota(client_ip)
+        window_mins = quota.get("session_window_minutes", 15)
+        sess_limit = quota.get("session_token_limit", 25000)
+        daily_limit = quota.get("daily_token_limit", 250000)
+        now_ts = time.time()
+        window_start_ts = now_ts - (window_mins * 60)
+        daily_start_ts = now_ts - 86400
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT SUM(tokens) as total FROM client_token_windows WHERE client_id = ? AND timestamp >= ?",
+                (client_ip, window_start_ts)
+            )
+            r1 = cursor.fetchone()
+            sess_used = int(r1["total"] or 0) if r1 and r1["total"] is not None else 0
+
+            cursor.execute(
+                "SELECT SUM(tokens) as total FROM client_token_windows WHERE client_id = ? AND timestamp >= ?",
+                (client_ip, daily_start_ts)
+            )
+            r2 = cursor.fetchone()
+            daily_used = int(r2["total"] or 0) if r2 and r2["total"] is not None else 0
+            conn.close()
+
+        sess_rem = max(0, sess_limit - sess_used)
+        daily_rem = max(0, daily_limit - daily_used)
+        bypass_active = self.is_client_bypass_active(quota)
+
+        return {
+            "client_ip": client_ip,
+            "alias": quota.get("alias") or self.resolve_client_alias(client_ip),
+            "session_window_minutes": window_mins,
+            "session_token_limit": sess_limit,
+            "session_tokens_used": sess_used,
+            "session_tokens_remaining": sess_rem,
+            "daily_token_limit": daily_limit,
+            "daily_tokens_used": daily_used,
+            "daily_tokens_remaining": daily_rem,
+            "priority": quota.get("priority", 5),
+            "is_unrestricted": quota.get("is_unrestricted", 0),
+            "is_bypass_active": bypass_active,
+            "bypass_until": quota.get("bypass_until"),
+            "scheduled_start_at": quota.get("scheduled_start_at"),
+            "scheduled_end_at": quota.get("scheduled_end_at")
+        }
+
+    def is_client_bypass_active(self, client: Dict[str, Any]) -> bool:
+        """Determines if a client has an active unrestricted state, temporary bypass, or scheduled bypass."""
+        if not client:
+            return False
+        if client.get("is_unrestricted") in [1, True, "1"]:
+            return True
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        bypass_until = client.get("bypass_until")
+        if bypass_until:
+            try:
+                dt = datetime.datetime.fromisoformat(bypass_until)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                if dt > now:
+                    return True
+            except Exception:
+                pass
+
+        sched_start = client.get("scheduled_start_at")
+        sched_end = client.get("scheduled_end_at")
+        if sched_start and sched_end:
+            try:
+                dt_s = datetime.datetime.fromisoformat(sched_start)
+                dt_e = datetime.datetime.fromisoformat(sched_end)
+                if dt_s.tzinfo is None:
+                    dt_s = dt_s.replace(tzinfo=datetime.timezone.utc)
+                if dt_e.tzinfo is None:
+                    dt_e = dt_e.replace(tzinfo=datetime.timezone.utc)
+                if dt_s <= now <= dt_e:
+                    return True
+            except Exception:
+                pass
+
+        return False
+
+    def set_client_temporary_bypass(self, client_ip: str, duration_minutes: float) -> Dict[str, Any]:
+        """Activates a temporary elevated bypass for the specified number of minutes."""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        bypass_until_iso = (now + datetime.timedelta(minutes=duration_minutes)).isoformat()
+        quota = self.get_client_quota(client_ip)
+        return self.upsert_client_quota(
+            client_ip=client_ip,
+            alias=quota.get("alias"),
+            session_window_minutes=quota.get("session_window_minutes", 15),
+            session_token_limit=quota.get("session_token_limit", 25000),
+            daily_token_limit=quota.get("daily_token_limit", 250000),
+            priority=quota.get("priority", 5),
+            is_unrestricted=quota.get("is_unrestricted", 0),
+            bypass_until=bypass_until_iso,
+            scheduled_start_at=quota.get("scheduled_start_at"),
+            scheduled_end_at=quota.get("scheduled_end_at"),
+            allowed_models=quota.get("allowed_models", []),
+            blocked_models=quota.get("blocked_models", []),
+            allowed_nodes=quota.get("allowed_nodes", []),
+            blocked_nodes=quota.get("blocked_nodes", []),
+            notes=quota.get("notes", "")
+        )
+
+    def set_client_scheduled_bypass(self, client_ip: str, start_iso: str, end_iso: str) -> Dict[str, Any]:
+        """Sets a scheduled bypass window with start and end ISO timestamps."""
+        quota = self.get_client_quota(client_ip)
+        return self.upsert_client_quota(
+            client_ip=client_ip,
+            alias=quota.get("alias"),
+            session_window_minutes=quota.get("session_window_minutes", 15),
+            session_token_limit=quota.get("session_token_limit", 25000),
+            daily_token_limit=quota.get("daily_token_limit", 250000),
+            priority=quota.get("priority", 5),
+            is_unrestricted=quota.get("is_unrestricted", 0),
+            bypass_until=quota.get("bypass_until"),
+            scheduled_start_at=start_iso,
+            scheduled_end_at=end_iso,
+            allowed_models=quota.get("allowed_models", []),
+            blocked_models=quota.get("blocked_models", []),
+            allowed_nodes=quota.get("allowed_nodes", []),
+            blocked_nodes=quota.get("blocked_nodes", []),
+            notes=quota.get("notes", "")
+        )
+
+    def clear_client_bypass(self, client_ip: str) -> bool:
+        """Clears both temporary and scheduled bypasses for a client."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE client_quotas SET bypass_until = NULL, scheduled_start_at = NULL, scheduled_end_at = NULL WHERE client_ip = ?",
+                (client_ip,)
+            )
+            updated = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+        return updated
+
+    def reset_client_tokens(self, client_ip: str) -> bool:
+        """Purges all token usage window records for a client."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM client_token_windows WHERE client_id = ?", (client_ip,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+        return deleted
+
 DatabaseEngine = UsageDatabase
+
 

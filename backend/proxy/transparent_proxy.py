@@ -4,6 +4,7 @@ import threading
 import urllib.request
 import urllib.error
 import time
+import re
 from typing import Optional, Dict, Any
 
 from backend.diagnostics.logging_engine import ErrorCategory
@@ -11,7 +12,7 @@ from backend.diagnostics.logging_engine import ErrorCategory
 class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
     """
     HTTP Request Handler that transparently proxies LLM calls and extracts token telemetry.
-    Supports both standard JSON responses and Server-Sent Events (SSE) streaming.
+    Supports Anthropic Claude and Google Gemini APIs, SSE streaming, and exact usage metrics.
     """
 
     def log_message(self, format, *args):
@@ -26,6 +27,7 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
             resp = {
                 "status": "UP",
                 "proxy_target": "claude",
+                "proxy_targets": ["claude", "gemini"],
                 "listening_port": self.server.server_port
             }
             self.wfile.write(json.dumps(resp).encode("utf-8"))
@@ -34,8 +36,170 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
         self.send_error(404, "Endpoint not found")
 
     def do_POST(self):
+        client_ip = self.headers.get("X-Forwarded-For") or (self.client_address[0] if hasattr(self, "client_address") and self.client_address else "127.0.0.1")
         content_length = int(self.headers.get("Content-Length", 0))
         raw_body = self.rfile.read(content_length)
+
+        # Check if Google Gemini endpoint
+        is_gemini = (
+            "/v1beta/" in self.path or 
+            "/v1/models" in self.path or 
+            self.headers.get("x-mock-gemini-response") == "true" or
+            "x-goog-api-key" in self.headers or
+            ("key=" in self.path and "generateContent" in self.path)
+        )
+
+        if is_gemini:
+            # 1. Gemini Mock Response Mode
+            if self.headers.get("x-mock-gemini-response") == "true":
+                in_tok = int(self.headers.get("x-mock-input-tokens", 100))
+                out_tok = int(self.headers.get("x-mock-output-tokens", 50))
+                m_model = re.search(r'/models/([^:]+)', self.path)
+                model_name = m_model.group(1) if m_model else "gemini-2.0-flash"
+                
+                m_key = re.search(r'[?&]key=([^&]+)', self.path)
+                key_val = m_key.group(1) if m_key else self.headers.get("x-goog-api-key", "")
+                
+                token_id = "tok_gem_flash"
+                if hasattr(self.server, "gemini_provider") and self.server.gemini_provider:
+                    token_id = self.server.gemini_provider.resolve_token_id_from_key(key_val)
+                    self.server.gemini_provider.ingest_proxy_interaction(
+                        model=model_name,
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
+                        token_id=token_id
+                    )
+
+                mock_response = {
+                    "candidates": [{
+                        "content": {
+                            "parts": [{"text": "Mock response proxied from Google Gemini."}],
+                            "role": "model"
+                        },
+                        "finishReason": "STOP"
+                    }],
+                    "usageMetadata": {
+                        "promptTokenCount": in_tok,
+                        "candidatesTokenCount": out_tok,
+                        "totalTokenCount": in_tok + out_tok
+                    }
+                }
+                body_bytes = json.dumps(mock_response).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            # 2. Gemini Real Upstream Proxying
+            path = self.path
+            if path.startswith("/models/"):
+                path = "/v1beta" + path
+            upstream_url = "https://generativelanguage.googleapis.com" + path
+            upstream_headers = dict(self.headers)
+            upstream_headers.pop("Host", None)
+            upstream_headers.pop("host", None)
+
+            m_key = re.search(r'[?&]key=([^&]+)', path)
+            key_val = m_key.group(1) if m_key else upstream_headers.get("x-goog-api-key", "")
+            if not key_val and hasattr(self.server, "gemini_provider") and self.server.gemini_provider:
+                try:
+                    db = getattr(self.server.gemini_provider, "db", None)
+                    vault = getattr(self.server.gemini_provider, "vault", None)
+                    if db and vault:
+                        active_acct = db.get_active_account_profile("gemini")
+                        if active_acct and active_acct.get("account_id"):
+                            stored = vault.get_credential("gemini", active_acct["account_id"])
+                            if stored:
+                                key_val = stored
+                                upstream_headers["x-goog-api-key"] = stored
+                except Exception:
+                    pass
+
+            try:
+                req = urllib.request.Request(
+                    upstream_url,
+                    data=raw_body,
+                    headers=upstream_headers,
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=120.0) as resp:
+                    resp_headers = dict(resp.headers)
+                    content_type = resp_headers.get("content-type", "")
+
+                    m_model = re.search(r'/models/([^:]+)', path)
+                    model_name = m_model.group(1) if m_model else "gemini-2.0-flash"
+                    token_id = "tok_gem_flash"
+                    if hasattr(self.server, "gemini_provider") and self.server.gemini_provider:
+                        token_id = self.server.gemini_provider.resolve_token_id_from_key(key_val)
+
+                    if "text/event-stream" in content_type:
+                        # SSE Streaming Passthrough for Gemini
+                        self.send_response(resp.status)
+                        for k, v in resp.headers.items():
+                            if k.lower() not in ["content-encoding", "transfer-encoding"]:
+                                self.send_header(k, v)
+                        self.end_headers()
+
+                        in_t = 0
+                        out_t = 0
+                        for line in resp:
+                            self.wfile.write(line)
+                            self.wfile.flush()
+                            line_str = line.decode("utf-8", errors="replace").strip()
+                            if line_str.startswith("data:"):
+                                try:
+                                    payload = json.loads(line_str[5:].strip())
+                                    u = payload.get("usageMetadata", {})
+                                    if u:
+                                        in_t = u.get("promptTokenCount", in_t)
+                                        out_t = u.get("candidatesTokenCount", out_t)
+                                except Exception:
+                                    pass
+
+                        if hasattr(self.server, "gemini_provider") and self.server.gemini_provider and (in_t > 0 or out_t > 0):
+                            self.server.gemini_provider.ingest_proxy_interaction(
+                                model=model_name,
+                                input_tokens=in_t,
+                                output_tokens=out_t,
+                                token_id=token_id
+                            )
+                        return
+
+                    resp_body = resp.read()
+                    try:
+                        resp_data = json.loads(resp_body.decode("utf-8"))
+                        if "usageMetadata" in resp_data and hasattr(self.server, "gemini_provider") and self.server.gemini_provider:
+                            u = resp_data["usageMetadata"]
+                            in_t = u.get("promptTokenCount", 0)
+                            out_t = u.get("candidatesTokenCount", 0)
+                            self.server.gemini_provider.ingest_proxy_interaction(
+                                model=model_name,
+                                input_tokens=in_t,
+                                output_tokens=out_t,
+                                token_id=token_id
+                            )
+                    except Exception:
+                        pass
+
+                    self.send_response(resp.status)
+                    for k, v in resp.headers.items():
+                        if k.lower() not in ["content-encoding", "transfer-encoding"]:
+                            self.send_header(k, v)
+                    self.end_headers()
+                    self.wfile.write(resp_body)
+                    return
+            except urllib.error.HTTPError as e:
+                err_body = e.read()
+                self.send_response(e.code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err_body)
+                return
+            except Exception as e:
+                self.send_error(502, f"Bad Gateway (Gemini): {e}")
+                return
 
         # 1. Test / Mock Streaming Mode
         if self.headers.get("x-mock-stream") == "true":
@@ -70,7 +234,8 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
                 model=model_name,
                 input_tokens=in_tok,
                 output_tokens=out_tok,
-                session_id=f"stream_{int(time.time())}"
+                session_id=f"stream_{int(time.time())}",
+                client_ip=client_ip
             )
             return
 
@@ -89,7 +254,8 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
                 model=model_name,
                 input_tokens=in_tok,
                 output_tokens=out_tok,
-                session_id=f"cli_proxy_{int(time.time())}"
+                session_id=f"cli_proxy_{int(time.time())}",
+                client_ip=client_ip
             )
 
             mock_response = {
@@ -176,7 +342,8 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
                         model=stream_model,
                         input_tokens=in_tokens,
                         output_tokens=out_tokens,
-                        rate_limit_headers=resp_headers
+                        rate_limit_headers=resp_headers,
+                        client_ip=client_ip
                     )
 
                 else:
@@ -193,7 +360,8 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
                             model=model_val,
                             input_tokens=in_tok,
                             output_tokens=out_tok,
-                            rate_limit_headers=resp_headers
+                            rate_limit_headers=resp_headers,
+                            client_ip=client_ip
                         )
                     except Exception:
                         pass
@@ -229,10 +397,12 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
 class TransparentProxyServer:
     """
     Transparent Local Proxy Server running in background thread.
+    Supports Anthropic Claude and Google Gemini completion proxying.
     """
 
-    def __init__(self, claude_provider, host: str = "127.0.0.1", port: int = 8766):
+    def __init__(self, claude_provider, host: str = "127.0.0.1", port: int = 8766, gemini_provider=None):
         self.claude_provider = claude_provider
+        self.gemini_provider = gemini_provider
         self.host = host
         self.port = port
         self._server: Optional[http.server.ThreadingHTTPServer] = None
@@ -248,6 +418,7 @@ class TransparentProxyServer:
         server_address = (self.host, self.port)
         self._server = http.server.ThreadingHTTPServer(server_address, TransparentProxyHandler)
         self._server.claude_provider = self.claude_provider
+        self._server.gemini_provider = self.gemini_provider
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 

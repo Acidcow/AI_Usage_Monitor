@@ -102,13 +102,38 @@
         <button id="view-mode-btn-balances" class="btn btn-sm btn-primary" onclick="window.App.switchDashboardViewMode('balances')" style="font-size: 0.72rem; padding: 3px 8px;">📊 Balances</button>
         <button id="view-mode-btn-trends" class="btn btn-sm btn-secondary" onclick="window.App.switchDashboardViewMode('trends')" style="font-size: 0.72rem; padding: 3px 8px;">📈 Trend Lines</button>
       </div>
-      <div id="trend-window-control" style="display: none; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
+      <div id="trend-window-control" style="display: none; align-items: center; gap: 6px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
         <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Window:</span>
         <select id="trend-window-select" class="form-control" onchange="window.App.changeTrendWindow(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
-          <option value="1h">Last 1 Hour</option>
-          <option value="24h" selected>Last 24 Hours</option>
-          <option value="7d">Last 7 Days</option>
-          <option value="30d">Last 30 Days</option>
+          <option value="1h">1h</option>
+          <option value="24h" selected>24h</option>
+          <option value="7d">7d</option>
+          <option value="30d">30d</option>
+        </select>
+        <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Bucket:</span>
+        <select id="trend-granularity-select" class="form-control" onchange="window.App.changeTrendGranularity(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
+          <option value="1">1m</option>
+          <option value="5" selected>5m</option>
+          <option value="10">10m</option>
+          <option value="15">15m</option>
+          <option value="30">30m</option>
+          <option value="60">60m</option>
+        </select>
+        <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Mode:</span>
+        <select id="trend-mode-select" class="form-control" onchange="window.App.changeTrendMode(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
+          <option value="interval_delta" selected>⚡ Delta</option>
+          <option value="cumulative">📈 Cumulative</option>
+        </select>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
+        <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Auto-Refresh:</span>
+        <select id="ui-refresh-cadence-select" class="form-control" onchange="window.App.changeRefreshCadence(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #34d399; border-radius: 4px; cursor: pointer;" title="Delay between auto-refreshes (minimum 30s to eliminate jumpiness)">
+          <option value="30" selected>⏱ 30s</option>
+          <option value="60">⏱ 1m</option>
+          <option value="90">⏱ 1.5m</option>
+          <option value="120">⏱ 2m</option>
+          <option value="180">⏱ 3m</option>
+          <option value="300">⏱ 5m</option>
         </select>
       </div>
       <span class="badge" id="live-sync-indicator" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); display: flex; align-items: center; gap: 4px;">
@@ -123,7 +148,7 @@
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06);">
     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
       <span style="font-size: 0.76rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Usage Scope:</span>
-      <div class="scope-switcher" style="display: flex; gap: 6px;">
+      <div class="scope-switcher" id="scope-switcher-container" style="display: flex; gap: 6px;">
         <button id="scope-btn-individual" class="btn btn-sm btn-primary" onclick="window.App.switchScope('individual')" style="font-size: 0.74rem;">
           👤 Individual (My Quota)
         </button>
@@ -179,11 +204,38 @@
 <div class="glass-card" style="margin-bottom: 28px;">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
     <div>
-      <h3 style="font-size: 1.05rem; font-weight: 700; color: #fff;">24-Hour Token Velocity & Multi-Platform Trends</h3>
-      <p style="font-size: 0.78rem; color: var(--text-muted);">Real-time comparative velocity curves tracking hourly token consumption across each monitored AI platform.</p>
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: #fff;">Token Velocity & Multi-Platform Telemetry Curves</h3>
+      <p style="font-size: 0.78rem; color: var(--text-muted);">Real-time comparative telemetry curves plotted by configurable interval buckets or cumulative totals.</p>
     </div>
-    <div style="display: flex; gap: 12px; align-items: center;">
-      <span style="font-size: 0.75rem; color: var(--accent-cyan); font-family: var(--font-mono); background: rgba(6, 182, 212, 0.1); padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.25);" id="chart-peak-info">Peak: -- tokens/hr</span>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
+        <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Window:</span>
+        <select id="chart-window-select" class="form-control" onchange="window.App.changeChartWindow(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
+          <option value="1h">Last 1 Hour</option>
+          <option value="24h" selected>Last 24 Hours</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="30d">Last 30 Days</option>
+        </select>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
+        <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Bucket:</span>
+        <select id="chart-granularity-select" class="form-control" onchange="window.App.changeChartGranularity(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
+          <option value="1">1 min</option>
+          <option value="5" selected>5 min</option>
+          <option value="10">10 min</option>
+          <option value="15">15 min</option>
+          <option value="30">30 min</option>
+          <option value="60">60 min</option>
+        </select>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
+        <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Mode:</span>
+        <select id="chart-mode-select" class="form-control" onchange="window.App.changeChartMode(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
+          <option value="interval_delta" selected>⚡ Delta Bursts (From 0)</option>
+          <option value="cumulative">📈 Cumulative (Total Run)</option>
+        </select>
+      </div>
+      <span style="font-size: 0.75rem; color: var(--accent-cyan); font-family: var(--font-mono); background: rgba(6, 182, 212, 0.1); padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.25);" id="chart-peak-info">Peak: -- tokens</span>
     </div>
   </div>
 

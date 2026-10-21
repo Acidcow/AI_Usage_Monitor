@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Transparent Proxy Setup Guide | AI Usage Monitor</title>
+  <meta name="description" content="Step-by-step interactive guide to routing Claude Code CLI, Antigravity IDE, Cline, Continue, and Anthropic SDK setups through the AI Usage Monitor transparent local proxy.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #080b11;
+      --bg-card: rgba(15, 22, 36, 0.78);
+      --bg-card-hover: rgba(22, 32, 54, 0.90);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-glow: rgba(6, 182, 212, 0.35);
+
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+
+      --accent-cyan: #06b6d4;
+      --accent-blue: #3b82f6;
+      --accent-purple: #8b5cf6;
+      --accent-amber: #f59e0b;
+      --accent-emerald: #10b981;
+      --accent-rose: #f43f5e;
+      --claude-color: #d97706;
+
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --shadow-glow: 0 0 25px rgba(6, 182, 212, 0.15);
+      --shadow-amber: 0 0 25px rgba(217, 119, 6, 0.20);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 15% 15%, rgba(217, 119, 6, 0.09) 0px, transparent 50%),
+        radial-gradient(at 85% 20%, rgba(6, 182, 212, 0.08) 0px, transparent 50%),
+        radial-gradient(at 50% 85%, rgba(139, 92, 246, 0.06) 0px, transparent 60%);
+      background-attachment: fixed;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: 60px;
+    }
+
+    /* Top Navigation Header */
+    header.guide-header {
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(8, 11, 17, 0.88);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--claude-color), var(--accent-cyan));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      box-shadow: var(--shadow-amber);
+    }
+
+    .brand-title h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+
+    .brand-title p {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Live Status Badge */
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-subtle);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: all 0.3s ease;
+    }
+
+    .status-pill.online {
+      border-color: rgba(16, 185, 129, 0.4);
+      background: rgba(16, 185, 129, 0.12);
+      color: #34d399;
+    }
+    .status-pill.online .status-dot {
+      background: #10b981;
+      box-shadow: 0 0 10px #10b981;
+    }
+
+    .status-pill.offline {
+      border-color: rgba(244, 63, 94, 0.4);
+      background: rgba(244, 63, 94, 0.12);
+      color: #fb7185;
+    }
+    .status-pill.offline .status-dot {
+      background: #f43f5e;
+      box-shadow: 0 0 10px #f43f5e;
+    }
+
+    .btn-nav {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.8rem;
+      text-decoration: none;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-nav:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--accent-cyan);
+      color: #fff;
+    }
+
+    /* Main Container */
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+
+    /* Hero Card */
+    .hero-card {
+      background: linear-gradient(135deg, rgba(217, 119, 6, 0.14) 0%, rgba(15, 22, 36, 0.85) 60%, rgba(6, 182, 212, 0.12) 100%);
+      border: 1px solid rgba(217, 119, 6, 0.35);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      margin-bottom: 28px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: var(--shadow-amber);
+    }
+
+    .hero-card::after {
+      content: '';
+      position: absolute;
+      top: -60px;
+      right: -60px;
+      width: 220px;
+      height: 220px;
+      background: radial-gradient(circle, rgba(217, 119, 6, 0.25) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: rgba(217, 119, 6, 0.22);
+      border: 1px solid rgba(217, 119, 6, 0.45);
+      color: #fbbf24;
+      margin-bottom: 12px;
+    }
+
+    .hero-title {
+      font-size: 1.85rem;
+      font-weight: 800;
+      line-height: 1.25;
+      margin-bottom: 10px;
+      letter-spacing: -0.02em;
+    }
+
+    .hero-title span.highlight {
+      background: linear-gradient(135deg, #fbbf24 0%, #f97316 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-desc {
+      color: var(--text-muted);
+      font-size: 0.98rem;
+      max-width: 820px;
+      margin-bottom: 20px;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-top: 20px;
+    }
+
+    .feature-item {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .feature-icon {
+      font-size: 1.25rem;
+      line-height: 1;
+    }
+
+    .feature-text strong {
+      display: block;
+      font-size: 0.84rem;
+      color: #f8fafc;
+      margin-bottom: 2px;
+    }
+
+    .feature-text p {
+      font-size: 0.74rem;
+      color: var(--text-dim);
+    }
+
+    /* Diagram Card */
+    .diagram-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      margin-bottom: 32px;
+    }
+
+    .diagram-title {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--accent-cyan);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .flow-diagram {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 16px 8px;
+    }
+
+    .flow-step {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      flex: 1;
+      min-width: 170px;
+      text-align: center;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .flow-step:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-2px);
+    }
+
+    .flow-step.active {
+      border-color: var(--accent-cyan);
+      background: rgba(6, 182, 212, 0.08);
+      box-shadow: 0 0 16px rgba(6, 182, 212, 0.15);
+    }
+
+    .flow-step.amber {
+      border-color: var(--claude-color);
+      background: rgba(217, 119, 6, 0.08);
+      box-shadow: 0 0 16px rgba(217, 119, 6, 0.15);
+    }
+
+    .flow-icon {
+      font-size: 1.4rem;
+      margin-bottom: 6px;
+    }
+
+    .flow-name {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .flow-detail {
+      font-size: 0.70rem;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .flow-arrow {
+      color: var(--accent-cyan);
+      font-weight: 700;
+      font-size: 1.2rem;
+      opacity: 0.6;
+    }
+
+    /* Tab Switcher */
+    .tab-nav {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 12px;
+      margin-bottom: 24px;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      padding: 8px 16px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    .tab-btn.active {
+      background: linear-gradient(135deg, rgba(217, 119, 6, 0.25), rgba(6, 182, 212, 0.2));
+      border-color: var(--claude-color);
+      color: #fef08a;
+      box-shadow: 0 0 14px rgba(217, 119, 6, 0.2);
+    }
+
+    /* Setup Cards */
+    .setup-section {
+      display: none;
+      animation: fadeIn 0.3s ease forwards;
+    }
+
+    .setup-section.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .guide-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      margin-bottom: 24px;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      position: relative;
+    }
+
+    .guide-card:hover {
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+
+    .card-header-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .card-tag {
+      font-size: 0.70rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(6, 182, 212, 0.15);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      color: #67e8f9;
+    }
+
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-desc {
+      font-size: 0.86rem;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    /* Code Snippet Box */
+    .code-box {
+      background: #06090e;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+
+    .code-header {
+      background: rgba(15, 23, 42, 0.7);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 8px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .code-lang {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+
+    .btn-copy {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      color: var(--text-main);
+      padding: 4px 10px;
+      font-size: 0.72rem;
+      font-family: var(--font-sans);
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-copy:hover {
+      background: var(--accent-cyan);
+      color: #000;
+      border-color: var(--accent-cyan);
+    }
+
+    .btn-copy.copied {
+      background: var(--accent-emerald);
+      color: #000;
+      border-color: var(--accent-emerald);
+    }
+
+    pre.code-content {
+      padding: 14px 16px;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: #e2e8f0;
+      line-height: 1.55;
+      overflow-x: auto;
+      margin: 0;
+    }
+
+    /* Callouts */
+    .callout {
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      font-size: 0.82rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .callout.tip {
+      background: rgba(6, 182, 212, 0.08);
+      border: 1px solid rgba(6, 182, 212, 0.25);
+      color: #a5f3fc;
+    }
+
+    .callout.amber {
+      background: rgba(217, 119, 6, 0.10);
+      border: 1px solid rgba(217, 119, 6, 0.3);
+      color: #fde68a;
+    }
+
+    .callout.emerald {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      color: #a7f3d0;
+    }
+
+    /* Quick Test Widget */
+    .test-box {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      margin-top: 32px;
+    }
+
+    .test-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .test-header strong {
+      font-size: 0.94rem;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .test-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-test {
+      background: linear-gradient(135deg, var(--claude-color), #f97316);
+      border: none;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-test:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+
+    .test-output {
+      background: #000;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      color: #94a3b8;
+      max-height: 160px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      margin-top: 10px;
+    }
+
+    /* Footer */
+    footer.guide-footer {
+      text-align: center;
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 0.78rem;
+      color: var(--text-dim);
+    }
+
+    footer.guide-footer a {
+      color: var(--accent-cyan);
+      text-decoration: none;
+    }
+
+    footer.guide-footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top App Navigation -->
+  <header class="guide-header">
+    <div class="brand-group">
+      <div class="brand-icon">🤖</div>
+      <div class="brand-title">
+        <h1>Claude Transparent Proxy Guide</h1>
+        <p>AI Usage Monitor &bull; Port 8766 Telemetry Bridge</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div id="proxy-status-pill" class="status-pill">
+        <span class="status-dot"></span>
+        <span id="proxy-status-text">Checking Port 8766...</span>
+      </div>
+      <a href="/index.html" class="btn-nav" id="btn-back-dashboard">📊 Dashboard</a>
+      <a href="/mini_widget.html" class="btn-nav" id="btn-mini-widget">🪟 Mini Widget</a>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Hero Card -->
+    <section class="hero-card">
+      <div class="hero-badge">⚡ Native Windows Telemetry Interceptor</div>
+      <h2 class="hero-title">Route Your Claude Workflows Through <span class="highlight">Port 8766</span></h2>
+      <p class="hero-desc">
+        AI Usage Monitor was architected with a native, zero-latency transparent proxy on <code>http://127.0.0.1:8766</code>.
+        Any CLI tool, IDE extension, or script pointing to this endpoint is automatically tracked in your desktop SQLite database
+        without any external dependencies or performance overhead.
+      </p>
+
+      <div class="feature-grid">
+        <div class="feature-item">
+          <span class="feature-icon">⚡</span>
+          <div class="feature-text">
+            <strong>SSE Streaming Interception</strong>
+            <p>Real-time token counting with instant pass-through to your tool.</p>
+          </div>
+        </div>
+        <div class="feature-item">
+          <span class="feature-icon">🪙</span>
+          <div class="feature-text">
+            <strong>Prompt Cache Visibility</strong>
+            <p>Tracks cache writes (5m TTL) and reads (90% discount) automatically.</p>
+          </div>
+        </div>
+        <div class="feature-item">
+          <span class="feature-icon">🛡️</span>
+          <div class="feature-text">
+            <strong>DPAPI Vault Injection</strong>
+            <p>Injects Windows DPAPI encrypted keys if client omits an API key.</p>
+          </div>
+        </div>
+        <div class="feature-item">
+          <span class="feature-icon">⚖️</span>
+          <div class="feature-text">
+            <strong>Rate Limit Telemetry</strong>
+            <p>Captures Anthropic quota headers to power the Johnny 5 gauge.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture Diagram -->
+    <section class="diagram-card">
+      <div class="diagram-title">
+        <span>🔄</span> End-to-End Interception Architecture
+      </div>
+      <div class="flow-diagram">
+        <div class="flow-step">
+          <div class="flow-icon">💻</div>
+          <div class="flow-name">Claude Clients</div>
+          <div class="flow-detail">CLI &bull; Cline &bull; SDK</div>
+        </div>
+        <div class="flow-arrow">&rarr;</div>
+        <div class="flow-step active">
+          <div class="flow-icon">🛡️</div>
+          <div class="flow-name">Local Proxy</div>
+          <div class="flow-detail">127.0.0.1:8766/v1</div>
+        </div>
+        <div class="flow-arrow">&rarr;</div>
+        <div class="flow-step amber">
+          <div class="flow-icon">💾</div>
+          <div class="flow-name">AI Usage Monitor</div>
+          <div class="flow-detail">SQLite + DPAPI Vault</div>
+        </div>
+        <div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">
+          <div class="flow-icon">☁️</div>
+          <div class="flow-name">Anthropic API</div>
+          <div class="flow-detail">api.anthropic.com</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Navigation Tabs -->
+    <nav class="tab-nav" aria-label="Setup Guides">
+      <button class="tab-btn active" onclick="switchTab('tab-terminal')" id="btn-tab-terminal">
+        <span>🖥️</span> IDE Terminal (settings.json)
+      </button>
+      <button class="tab-btn" onclick="switchTab('tab-windows-env')" id="btn-tab-windows-env">
+        <span>⚡</span> Windows PowerShell Env
+      </button>
+      <button class="tab-btn" onclick="switchTab('tab-ide-plugins')" id="btn-tab-ide-plugins">
+        <span>🧩</span> Cline & Continue Extensions
+      </button>
+      <button class="tab-btn" onclick="switchTab('tab-sdks')" id="btn-tab-sdks">
+        <span>🐍</span> Python & Node SDKs
+      </button>
+      <button class="tab-btn" onclick="switchTab('tab-scanner')" id="btn-tab-scanner">
+        <span>📁</span> Zero-Proxy Local Scanner
+      </button>
+    </nav>
+
+    <!-- TAB 1: IDE Terminal (settings.json) -->
+    <section id="tab-terminal" class="setup-section active">
+      <div class="guide-card">
+        <div class="card-header-line">
+          <div class="card-title">
+            <span>⚙️</span> Antigravity IDE / VS Code Integrated Terminal
+          </div>
+          <span class="card-tag">Recommended for IDE Users</span>
+        </div>
+        <p class="card-desc">
+          Add the following block to your user <code>settings.json</code>. Whenever you open an integrated PowerShell terminal
+          in Antigravity IDE or VS Code, <code>ANTHROPIC_BASE_URL</code> will be preset automatically.
+        </p>
+
+        <div class="code-box">
+          <div class="code-header">
+            <span class="code-lang">JSON &bull; settings.json</span>
+            <button class="btn-copy" onclick="copySnippet(this, 'snippet-settings-json')">📋 Copy</button>
+          </div>
+          <pre class="code-content" id="snippet-settings-json">{
+  "terminal.integrated.env.windows": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8766"
+  }
+}</pre>
+        </div>
+
+        <div class="callout tip">
+          <span>💡</span>
+          <div>
+            <strong>Why this is ideal:</strong> Any CLI tools launched inside the IDE terminal (such as <code>claude-code</code>, <code>aider</code>, or custom agent runners) will route their calls through the proxy without needing manual environment setup each time.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: Windows PowerShell Environment -->
+    <section id="tab-windows-env" class="setup-section">
+      <div class="guide-card">
+        <div class="card-header-line">
+          <div class="card-title">
+            <span>⚡</span> Windows / PowerShell Environment Variables
+          </div>
+          <span class="card-tag">Terminal &amp; Global</span>
+        </div>
+        <p class="card-desc">
+          Set <code>ANTHROPIC_BASE_URL</code> in Windows. You can set it for the current terminal session, or persist it permanently across all Windows processes for your user account.
+        </p>
+
+        <!-- Current Session -->
+        <h3 style="font-size: 0.88rem; color: #f1f5f9; margin-bottom: 8px;">Option A: Current PowerShell Session Only</h3>
+        <div class="code-box">
+          <div class="code-header">
+            <span class="code-lang">PowerShell</span>
+            <button class="btn-copy" onclick="copySnippet(this, 'snippet-ps-session')">📋 Copy</button>
+          </div>
+          <pre class="code-content" id="snippet-ps-session">$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8766"</pre>
+        </div>
+
+        <!-- Persistent User Environment -->
+        <h3 style="font-size: 0.88rem; color: #f1f5f9; margin-bottom: 8px; margin-top: 16px;">Option B: Permanent User Environment Variable</h3>
+        <div class="code-box">
+          <div class="code-header">
+            <span class="code-lang">PowerShell (Run Once)</span>
+            <button class="btn-copy" onclick="copySnippet(this, 'snippet-ps-permanent')">📋 Copy</button>
+          </div>
+          <pre class="code-content" id="snippet-ps-permanent">[System.Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL', 'http://127.0.0.1:8766', 'User')</pre>
+        </div>
+
+        <!-- CMD -->
+        <h3 style="font-size: 0.88rem; color: #f1f5f9; margin-bottom: 8px; margin-top: 16px;">Option C: Windows Command Prompt (cmd.exe)</h3>
+        <div class="code-box">
+          <div class="code-header">
+            <span class="code-lang">CMD</span>
+            <button class="btn-copy" onclick="copySnippet(this, 'snippet-cmd')">📋 Copy</button>
+          </div>
+          <pre class="code-content" id="snippet-cmd">set ANTHROPIC_BASE_URL=http://127.0.0.1:8766</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: IDE Extensions (Cline, Roo, Continue) -->
+    <section id="tab-ide-plugins" class="setup-section">
+      <div class="guide-card">
+        <div class="card-header-line">
+          <div class="card-title">
+            <span>🧩</span> Cline, Roo Code, &amp; Continue Extensions
+          </div>
+          <span class="card-tag">Extension Config</span>
+        </div>
+        <p class="card-desc">
+          Popular agentic coding extensions allow specifying a custom API base URL directly in their settings.
+        </p>
+
+        <!-- Cline & Roo -->
+        <h3 style="font-size: 0.88rem; color: #f1f5f9; margin-bottom: 8px;">1. Cline &amp; Roo Code (UI Settings)</h3>
+        <ul style="font-size: 0.82rem; color: var(--text-muted); margin-left: 20px; margin-bottom: 16px; line-height: 1.8;">
+          <li>Open the Cline / Roo Code settings view (gear icon in the sidebar).</li>
+          <li>Set <strong>API Provider</strong> to <code>Anthropic</code>.</li>
+          <li>Set <strong>Base URL</strong> or <strong>Custom API URL</strong> to: <code>http://127.0.0.1:8766</code>.</li>
+          <li>Your API Key can either be entered in Cline or left blank if already saved in AI Usage Monitor's vault.</li>
+        </ul>
+
+        <!-- Continue -->
+        <h3 style="font-size: 0.88rem; color: #f1f5f9; margin-bottom: 8px;">2. Continue Extension (config.yaml)</h3>
+        <div class="code-box">
+          <div class="code-header">
+            <span class="code-lang">YAML &bull; ~/.continue/config.yaml</span>
+            <button class="btn-copy" onclick="copySnippet(this, 'snippet-continue')">📋 Copy</button>
+          </div>
+          <pre class="code-content" id="snippet-continue">models:
+  - name: Claude 3.7 Sonnet (Proxied)
+    provider: anthropic
+    model: claude-3-7-sonnet-20250219
+    apiBase: "http://127.0.0.1:8766"</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: SDKs -->
+    <section id="tab-sdks" class="setup-section">
+      <div class="guide-card">
+        <div class="card-header-line">
+          <div class="card-title">
+            <span>🐍</span> Python &amp; Node.js / TypeScript SDKs
+          </div>
+          <span class="card-tag">Programmatic</span>
+        </div>
+        <p class="card-desc">
+          If you are developing custom agent pipelines or automation scripts using the official Anthropic client libraries,
+          specify <code>base_url</code> on initialization.
+        </p>
+
+        <!-- Python -->
+        <h3 style="font-size: 0.88rem; color: #f1f5f9; margin-bottom: 8px;">Python (anthropic SDK)</h3>
+        <div class="code-box">
+          <div class="code-header">
+            <span class="code-lang">Python</span>
+            <button class="btn-copy" onclick="copySnippet(this, 'snippet-python')">📋 Copy</button>
+          </div>
+          <pre class="code-content" id="snippet-python">import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://127.0.0.1:8766"
+    # api_key is optional if stored in AI Usage Monitor's DPAPI Vault!
+)
+
+response = client.messages.create(
+    model="claude-3-7-sonnet-20250219",
+    max_tokens=1000,
+    messages=[{"role": "user", "content": "Hello via transparent proxy!"}]
+)
+print(response.content[0].text)</pre>
+        </div>
+
+        <!-- Node.js / TypeScript -->
+        <h3 style="font-size: 0.88rem; color: #f1f5f9; margin-bottom: 8px; margin-top: 16px;">Node.js / TypeScript (@anthropic-ai/sdk)</h3>
+        <div class="code-box">
+          <div class="code-header">
+            <span class="code-lang">TypeScript</span>
+            <button class="btn-copy" onclick="copySnippet(this, 'snippet-ts')">📋 Copy</button>
+          </div>
+          <pre class="code-content" id="snippet-ts">import Anthropic from '@anthropic-ai/sdk';
+
+const anthropic = new Anthropic({
+  baseURL: 'http://127.0.0.1:8766',
+});
+
+const msg = await anthropic.messages.create({
+  model: 'claude-3-7-sonnet-20250219',
+  max_tokens: 1000,
+  messages: [{ role: 'user', content: 'Hello via transparent proxy!' }],
+});
+console.log(msg.content[0]);</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: Zero-Proxy Local Scanner -->
+    <section id="tab-scanner" class="setup-section">
+      <div class="guide-card">
+        <div class="card-header-line">
+          <div class="card-title">
+            <span>📁</span> Zero-Configuration Local Scanner (Claude Code CLI)
+          </div>
+          <span class="card-tag">Built-in Fallback</span>
+        </div>
+        <p class="card-desc">
+          If you are using the official <strong>Claude Code CLI</strong> (<code>claude</code> command), AI Usage Monitor includes an automated
+          background log parser that scans your local logs without requiring any proxy redirection.
+        </p>
+
+        <div class="callout emerald">
+          <span>✨</span>
+          <div>
+            <strong>How it works:</strong> Claude Code persists full session traces as JSONL logs in <code>~/.claude/projects/</code> and <code>~/.claude/sessions/</code>.
+            AI Usage Monitor's <code>scan_local_logs()</code> automatically parses these logs, extracts model names, input/output tokens, and prompt cache hit counts, and reconciles them into your SQLite database idempotently.
+          </div>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <h4 style="font-size: 0.84rem; color: #fff; margin-bottom: 6px;">Trigger Manual Scanner Ingestion:</h4>
+          <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 10px;">
+            You can trigger an on-demand scan via the Web Dashboard, or programmatically via the REST API:
+          </p>
+          <div class="code-box">
+            <div class="code-header">
+              <span class="code-lang">PowerShell</span>
+              <button class="btn-copy" onclick="copySnippet(this, 'snippet-scan-curl')">📋 Copy</button>
+            </div>
+            <pre class="code-content" id="snippet-scan-curl">Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/providers/claude/scan" -Method Post</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Live Verification Test -->
+    <section class="test-box">
+      <div class="test-header">
+        <strong><span>🧪</span> Live Proxy Health &amp; Ingestion Test</strong>
+        <div class="test-actions">
+          <button class="btn-test" onclick="runLiveHealthCheck()" id="btn-run-check">Ping Proxy (Port 8766)</button>
+        </div>
+      </div>
+      <p style="font-size: 0.78rem; color: var(--text-muted);">
+        Click the button to test whether the local proxy is actively listening and ready to intercept Claude and Gemini completions.
+      </p>
+      <div class="test-output" id="test-output-console">Ready to test. Click "Ping Proxy" above.</div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="guide-footer">
+      <p>AI Usage Monitor &bull; Windows DPAPI Security &bull; Zero External Dependencies</p>
+      <p style="margin-top: 6px;">
+        <a href="http://127.0.0.1:8765" target="_blank">Open Web Dashboard</a> &bull;
+        <a href="http://127.0.0.1:8765/mini_widget.html" target="_blank">Open Mini Floating Widget</a> &bull;
+        <a href="https://github.com/Acidcow/AI_Usage_Monitor" target="_blank">GitHub Repository</a>
+      </p>
+    </footer>
+
+  </main>
+
+  <script>
+    // Tab Switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.setup-section').forEach(sec => sec.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+
+      const target = document.getElementById(tabId);
+      if (target) {
+        target.classList.add('active');
+      }
+
+      const activeBtn = document.querySelector(`[onclick="switchTab('${tabId}')"]`);
+      if (activeBtn) {
+        activeBtn.classList.add('active');
+      }
+    }
+
+    // 1-Click Code Copy
+    function copySnippet(btn, elementId) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const text = el.innerText || el.textContent;
+
+      navigator.clipboard.writeText(text).then(() => {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = "✅ Copied!";
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+          btn.classList.remove('copied');
+        }, 2000);
+      }).catch(err => {
+        console.error("Failed to copy:", err);
+      });
+    }
+
+    // Live Health Probe for Proxy Port 8766
+    async function checkProxyHealth() {
+      const pill = document.getElementById('proxy-status-pill');
+      const text = document.getElementById('proxy-status-text');
+
+      try {
+        const res = await fetch('http://127.0.0.1:8766/health', { method: 'GET', mode: 'cors' });
+        if (res.ok) {
+          const data = await res.json();
+          pill.className = 'status-pill online';
+          text.innerText = `Proxy Port 8766: ONLINE (${data.status})`;
+          return data;
+        } else {
+          throw new Error('HTTP ' + res.status);
+        }
+      } catch (err) {
+        pill.className = 'status-pill offline';
+        text.innerText = 'Proxy Port 8766: OFFLINE';
+        return null;
+      }
+    }
+
+    // Interactive Test Button
+    async function runLiveHealthCheck() {
+      const consoleEl = document.getElementById('test-output-console');
+      consoleEl.innerText = "[*] Pinging http://127.0.0.1:8766/health ...\n";
+
+      const data = await checkProxyHealth();
+      if (data) {
+        consoleEl.innerText += "[✓] SUCCESS: Transparent Proxy is active!\n";
+        consoleEl.innerText += JSON.stringify(data, null, 2);
+      } else {
+        consoleEl.innerText += "[!] WARNING: Could not connect to http://127.0.0.1:8766/health.\n";
+        consoleEl.innerText += "[!] Verify that AI Usage Monitor is running via setup.ps1 or python run_monitor.py";
+      }
+    }
+
+    // Initial Health Check on Page Load
+    document.addEventListener('DOMContentLoaded', () => {
+      checkProxyHealth();
+      // Periodically refresh status every 15s
+      setInterval(checkProxyHealth, 15000);
+    });
+  </script>
+</body>
+</html>

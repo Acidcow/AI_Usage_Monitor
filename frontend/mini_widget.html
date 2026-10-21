@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Usage Monitor Widget</title>
   <link rel="icon" type="image/jpeg" href="/assets/icons/app_icon_johnny5.jpg">
-  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/css/styles.css?v=0.9.1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -299,7 +299,8 @@
       <div class="widget-actions">
         <!-- View Mode Switcher -->
         <button class="widget-btn widget-btn-active" id="btn-mode-multi" onclick="window.Widget.setViewMode('multi')" title="Show All Accounts with Dual Bars">⊞ Accounts</button>
-        <button class="widget-btn" id="btn-mode-trends" onclick="window.Widget.setViewMode('trends')" title="Show Trend Sparklines">📈 Trends</button>
+        <button class="widget-btn" id="btn-mode-trends" onclick="window.Widget.setViewMode('trends')" title="Show Cumulative Trend Curves">📈 Trends</button>
+        <button class="widget-btn" id="btn-mode-interval" onclick="window.Widget.setViewMode('interval')" title="Show Discrete Token Bursts from 0 Baseline">⚡ Interval</button>
         <button class="widget-btn" id="btn-mode-single" onclick="window.Widget.setViewMode('single')" title="Focus Single Account">⚲ Focus</button>
         <button class="widget-btn" onclick="window.open('/?tab=settings', '_blank')" title="Settings & Preferences">⚙</button>
         <button class="widget-btn" onclick="window.Widget.sync()" title="Sync Token Quotas">🔄</button>
@@ -385,6 +386,6 @@
     </div>
   </div>
 
-  <script src="/js/widget.js"></script>
+  <script src="/js/widget.js?v=0.9.1"></script>
 </body>
 </html>

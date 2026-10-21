@@ -202,7 +202,9 @@ class ClaudeProvider(BaseProvider):
         session_id: Optional[str] = None,
         rate_limit_headers: Optional[Dict[str, str]] = None,
         cache_creation_tokens: int = 0,
-        cache_read_tokens: int = 0
+        cache_read_tokens: int = 0,
+        client_ip: Optional[str] = None,
+        client_alias: Optional[str] = None
     ) -> str:
         """Called by transparent proxy or CLI scanner when a request completes."""
         # Estimate cost (approx Sonnet rates: $3/M in, $15/M out, $3.75/M cache write, $0.30/M cache read)
@@ -220,7 +222,9 @@ class ClaudeProvider(BaseProvider):
             cache_creation_tokens=cache_creation_tokens,
             cache_read_tokens=cache_read_tokens,
             session_id=session_id or f"proxy_{int(time.time())}",
-            estimated_cost=cost
+            estimated_cost=cost,
+            client_ip=client_ip,
+            client_alias=client_alias
         )
 
         # Update rate limits if provided
@@ -324,7 +328,9 @@ class ClaudeProvider(BaseProvider):
                                 cache_read_tokens=cache_read,
                                 session_id=unique_sess_key,
                                 estimated_cost=cost,
-                                recorded_at=ts
+                                recorded_at=ts,
+                                client_ip="127.0.0.1",
+                                client_alias=os.environ.get("COMPUTERNAME") or "Local Workstation"
                             )
                             ingested_count += 1
                         else:

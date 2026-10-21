@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from backend.config import DEFAULT_HOST, DEFAULT_PORT, PROXY_PORT
+from backend.config import DEFAULT_HOST, DEFAULT_PORT, PROXY_PORT, DEFAULT_OLLAMA_PORT
 from backend.security.dpapi_vault import DPAPIVault
 from backend.diagnostics.logging_engine import DiagnosticsEngine
 from backend.storage.database import UsageDatabase
@@ -45,6 +45,7 @@ def parse_args():
     parser.add_argument("--host", default=DEFAULT_HOST, help="Host to bind HTTP server to")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port for web dashboard and API")
     parser.add_argument("--proxy-port", type=int, default=PROXY_PORT, help="Port for transparent Claude proxy")
+    parser.add_argument("--ollama-port", type=int, default=DEFAULT_OLLAMA_PORT, help="Port for secondary Ollama emulator and worker node RPC bridge")
     parser.add_argument("--no-tray", action="store_true", help="Disable native Windows system tray icon")
     parser.add_argument("--open-browser", action="store_true", help="Open web dashboard in default browser on launch")
     parser.add_argument("--widget", action="store_true", help="Launch standalone floating desktop widget on launch")
@@ -60,12 +61,28 @@ def main():
     print(f"[INIT] Host: {args.host}")
     print(f"[INIT] Web Dashboard: http://{args.host}:{args.port}")
     print(f"[INIT] Transparent Proxy: http://{args.host}:{args.proxy_port}/v1")
+    print(f"[INIT] Ollama API Emulator: http://{args.host}:{args.ollama_port}")
     print(f"[INIT] Platform: {sys.platform} (Native Windows DPAPI: Active)")
 
     # 1. Initialize Core Subsystems
     vault = DPAPIVault()
     diagnostics = DiagnosticsEngine()
     database = UsageDatabase()
+
+    # Dynamic bridge ports from saved database settings
+    saved_ollama_port = database.get_setting("ollama_emulator_port")
+    if saved_ollama_port and args.ollama_port == DEFAULT_OLLAMA_PORT:
+        try:
+            args.ollama_port = int(saved_ollama_port)
+        except Exception:
+            pass
+
+    saved_proxy_port = database.get_setting("transparent_proxy_port")
+    if saved_proxy_port and args.proxy_port == PROXY_PORT:
+        try:
+            args.proxy_port = int(saved_proxy_port)
+        except Exception:
+            pass
 
     # 2. Initialize Providers
     claude = ClaudeProvider(database=database, vault=vault, diagnostics=diagnostics)
@@ -109,6 +126,7 @@ def main():
     # 3. Start Transparent Proxy Server
     proxy = TransparentProxyServer(
         claude_provider=claude,
+        gemini_provider=gemini,
         host=args.host,
         port=args.proxy_port
     )
@@ -127,6 +145,21 @@ def main():
     )
     server.start()
     print(f"[OK] Web Dashboard running on http://{args.host}:{server.server_port}")
+    print(f"[OK] LAN Service Discovery & Node Governor: Ready")
+    print(f"[OK] Model Context Protocol (MCP) Bridge: http://{args.host}:{server.server_port}/api/mcp/rpc")
+
+    # 4b. Start Secondary Ollama API Emulator & Worker Node Bridge Server
+    from backend.server.ollama_emulator import OllamaEmulatorServer
+    ollama_emulator = OllamaEmulatorServer(
+        host=args.host,
+        port=args.ollama_port,
+        governor=server.governor,
+        registry=server.registry,
+        database=database,
+        mcp_server=server.mcp_server
+    )
+    ollama_emulator.start()
+    print(f"[OK] Ollama API Emulator & Worker Node Bridge: http://{args.host}:{ollama_emulator.server_port}")
 
     # 5. Initialize Windows Tray Manager
     tray = None
@@ -177,6 +210,16 @@ def main():
     def background_poller():
         while running:
             try:
+                # Continuously scan and ingest local model usage (Ollama & Claude)
+                try:
+                    ollama.sync_usage()
+                except Exception:
+                    pass
+                try:
+                    claude.sync_usage()
+                except Exception:
+                    pass
+
                 summary = database.get_usage_summary(provider="claude")
                 total_today = summary.get("total_tokens_today", 0)
                 snapshots = database.get_provider_snapshots()
@@ -205,6 +248,8 @@ def main():
         running = False
         if tray:
             tray.stop()
+        if ollama_emulator:
+            ollama_emulator.stop()
         server.stop()
         proxy.stop()
         print("[SHUTDOWN] Finished cleanly.")

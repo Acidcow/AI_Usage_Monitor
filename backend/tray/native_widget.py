@@ -116,6 +116,7 @@ class NativeTaskbarWidget:
         self.pinned_items = set(["claude", "gemini", "ollama"])
         self.hide_parent_chart_on_expand = False
         self.hidden_platforms = set()
+        self.quota_tracking_mode = "individual"
         self.has_focus = True
         self._hit_boxes = []
         self._pin_hit_boxes = []
@@ -189,6 +190,16 @@ class NativeTaskbarWidget:
             except Exception:
                 pass
 
+            if self.view_mode in ("trends", "interval"):
+                try:
+                    ts_mode = "interval_delta" if self.view_mode == "interval" else "cumulative"
+                    req_ts = urllib.request.Request(f"http://{self.host}:{self.active_port}/api/usage/timeseries?window=1h&bucket_minutes=5&mode={ts_mode}")
+                    with urllib.request.urlopen(req_ts, timeout=1.5) as resp:
+                        if resp.status == 200:
+                            self.cached_timeseries = json.loads(resp.read().decode("utf-8"))
+                except Exception:
+                    pass
+
         return comp, provs
 
     def _apply_settings_from_server(self, st: dict):
@@ -212,6 +223,8 @@ class NativeTaskbarWidget:
             ev = st["estate_visibility"]
             if isinstance(ev, dict) and "hidden_platforms" in ev:
                 self.hidden_platforms = set(p.lower().strip() for p in ev["hidden_platforms"] if isinstance(p, str))
+        if "quota_tracking_mode" in st:
+            self.quota_tracking_mode = st["quota_tracking_mode"]
 
     def _save_settings_async(self, payload: dict):
         def _post():
@@ -390,11 +403,22 @@ class NativeTaskbarWidget:
         webbrowser.open(f"http://{self.host}:{target_port}/?tab=settings")
 
     def _toggle_view_mode(self):
-        self.view_mode = "trends" if self.view_mode == "balances" else "balances"
+        cycle = {"balances": "trends", "trends": "interval", "interval": "balances"}
+        self.view_mode = cycle.get(self.view_mode, "balances")
+        icons = {"balances": "📊", "trends": "📈", "interval": "⚡"}
         if hasattr(self, "btn_view_mode"):
-            self.btn_view_mode.configure(text="📈" if self.view_mode == "trends" else "📊")
+            self.btn_view_mode.configure(text=icons.get(self.view_mode, "📊"))
         self._save_settings_async({"widget_view_mode": self.view_mode})
         self.render_canvas()
+
+    def set_view_mode(self, mode: str):
+        if mode in ("balances", "trends", "interval"):
+            self.view_mode = mode
+            if hasattr(self, "btn_view_mode"):
+                icons = {"balances": "📊", "trends": "📈", "interval": "⚡"}
+                self.btn_view_mode.configure(text=icons.get(self.view_mode, "📊"))
+            self._save_settings_async({"widget_view_mode": self.view_mode})
+            self.render_canvas()
 
     def _on_focus_in(self, event=None):
         if not self.has_focus:
@@ -628,36 +652,77 @@ class NativeTaskbarWidget:
 
     def _get_provider_child_series(self, p_key: str, item: dict) -> list:
         """Returns a list of tuples (points, color, label) for each child in the provider hierarchy."""
+        ts = getattr(self, "cached_timeseries", None)
+        num_bins = ts.get("num_bins", 8) if ts else 8
+        zero_bins = [0] * num_bins
+
+        def find_points(id_pattern):
+            if not ts or "series" not in ts:
+                return None
+            for s in ts.get("series", []):
+                s_id = s.get("id", "")
+                s_key = s.get("key", "")
+                if s_id == id_pattern or (s_key and id_pattern.lower() in s_key.lower()):
+                    return s.get("points")
+            return None
+
         t_seed = int(item.get("tokens_today", 0))
         h = item.get("hierarchy", {})
         if p_key == "claude":
-            team_pts = [int(t_seed * f) for f in [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95]]
-            ind_pts = [int(t_seed * f) for f in [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65]]
+            team_pts = find_points("team")
+            ind_pts = find_points("individual")
+            if team_pts is None:
+                team_pts = [int(t_seed * f) for f in [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95]]
+            if ind_pts is None:
+                ind_pts = [int(t_seed * f) for f in [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65]]
             return [
                 (team_pts, "#c084fc", "Synthesis2 (Team)"),
                 (ind_pts, "#38bdf8", "James Eckhardt (Individual)")
             ]
         elif p_key == "gemini":
-            acct_pts = [int(t_seed * f) for f in [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9]]
-            k1_pts = [int(t_seed * f) for f in [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55]]
-            k2_pts = [int(t_seed * f) for f in [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32]]
+            acct_pts = find_points("gemini")
+            k1_pts = find_points("tok_gem_flash")
+            k2_pts = find_points("tok_gem_pro")
+            if acct_pts is None:
+                acct_pts = [int(t_seed * f) for f in [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9]]
+            if k1_pts is None:
+                k1_pts = [int(t_seed * f) for f in [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55]]
+            if k2_pts is None:
+                k2_pts = [int(t_seed * f) for f in [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32]]
             return [
                 (acct_pts, "#60a5fa", "acidcow@gmail.com (Account)"),
-                (k1_pts, "#34d399", "Dev-Key-01"),
-                (k2_pts, "#f472b6", "Workspace-Prod")
+                (k1_pts, "#34d399", "Gemini 2.0 Flash"),
+                (k2_pts, "#f472b6", "Gemini 1.5 Pro")
             ]
         elif p_key == "ollama":
-            m1_pts = [int(t_seed * f) for f in [0.3, 0.2, 0.4, 0.35, 0.6, 0.5, 0.7, 0.8]]
-            m2_pts = [int(t_seed * f) for f in [0.1, 0.15, 0.12, 0.2, 0.18, 0.25, 0.22, 0.3]]
-            return [
-                (m1_pts, "#a855f7", "llama3.2:3b"),
-                (m2_pts, "#ec4899", "deepseek-r1:8b")
-            ]
+            if ts and "series" in ts:
+                ollama_series = [s for s in ts.get("series", []) if s.get("id", "").startswith("ollama_model_")]
+                if ollama_series:
+                    colors = ["#06b6d4", "#a855f7", "#38bdf8", "#34d399", "#fbbf24", "#ec4899"]
+                    return [
+                        (s.get("points") or zero_bins, s.get("color") or colors[i % len(colors)], s.get("name") or s.get("label") or s.get("id", "").replace("ollama_model_", ""))
+                        for i, s in enumerate(ollama_series)
+                    ]
+            models_list = item.get("models", [])
+            if not models_list:
+                models_list = item.get("hierarchy", {}).get("models", [])
+            active_models = [m for m in models_list if (m.get("tokens_today", 0) > 0 or m.get("total_tokens", 0) > 0)]
+            if not active_models and models_list:
+                active_models = models_list[:2]
+            colors = ["#06b6d4", "#a855f7", "#38bdf8", "#34d399", "#fbbf24", "#ec4899"]
+            result = []
+            for idx, m in enumerate(active_models[:3]):
+                m_name = m.get("model") or m.get("name") or "Local Model"
+                m_toks = int(m.get("tokens_today", 0))
+                color = colors[idx % len(colors)]
+                pts = [int(m_toks * f) for f in [0.1, 0.2, 0.15, 0.3, 0.25, 0.45, 0.35, 0.5]] if m_toks > 0 else zero_bins
+                result.append((pts, color, m_name))
+            return result if result else [(zero_bins, "#06b6d4", "Ollama")]
         elif p_key == "chatgpt":
-            org_pts = [int(t_seed * f) for f in [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6]]
-            return [(org_pts, "#10b981", "Default Project")]
+            pts = find_points("chatgpt") or [int(t_seed * f) for f in [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6]]
+            return [(pts, "#10b981", "Default Project")]
         else:
-            co_pts = [int(t_seed * f) for f in [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4]]
+            co_pts = find_points("copilot") or [int(t_seed * f) for f in [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4]]
             return [(co_pts, "#06b6d4", "Enterprise E5")]
 
     def render_canvas(self):
@@ -729,7 +794,7 @@ class NativeTaskbarWidget:
             child_series = self._get_provider_child_series(p_key, item)
 
             # Determine card height based on expanded state and view mode
-            if self.view_mode == "trends":
+            if self.view_mode in ("trends", "interval"):
                 if not is_expanded:
                     card_h = 74
                 else:
@@ -823,7 +888,7 @@ class NativeTaskbarWidget:
             )
 
             # --- CARD BODY ---
-            if self.view_mode == "trends":
+            if self.view_mode in ("trends", "interval"):
                 if not is_expanded:
                     # Overlaid line plots corresponding to each child
                     self._draw_multi_sparkline(10, card_y + 26, card_w - 16, 40, child_series, "All Children Overlaid:")
@@ -850,21 +915,31 @@ class NativeTaskbarWidget:
                 else:
                     # Expanded Multi-Level Hierarchical Bars
                     if p_key == "claude":
-                        team_info = h.get("team", {})
-                        t_sess = team_info.get("session_remaining_pct", 44.0)
-                        t_week = team_info.get("weekly_remaining_pct", 74.0)
-                        self.canvas.create_rectangle(8, card_y + 26, card_w - 6, card_y + 62, fill="#131b2c", outline="#1e293b")
-                        self.canvas.create_text(14, card_y + 34, text="👥 Synthesis2 (Team Pool)", anchor="w", fill="#c084fc", font=self._get_font(7, "bold"))
-                        self._draw_sub_bar(14, card_y + 42, card_w - 22, t_sess, "Team Sess:", th["accent"])
-                        self._draw_sub_bar(14, card_y + 51, card_w - 22, t_week, "Team Wk:", th["accent2"])
+                        tracking_mode = h.get("tracking_mode", "individual")
+                        if tracking_mode != "individual":
+                            team_info = h.get("team", {})
+                            t_sess = team_info.get("session_remaining_pct", 44.0)
+                            t_week = team_info.get("weekly_remaining_pct", 74.0)
+                            self.canvas.create_rectangle(8, card_y + 26, card_w - 6, card_y + 62, fill="#131b2c", outline="#1e293b")
+                            self.canvas.create_text(14, card_y + 34, text="👥 Synthesis2 (Team Pool)", anchor="w", fill="#c084fc", font=self._get_font(7, "bold"))
+                            self._draw_sub_bar(14, card_y + 42, card_w - 22, t_sess, "Team Sess:", th["accent"])
+                            self._draw_sub_bar(14, card_y + 51, card_w - 22, t_week, "Team Wk:", th["accent2"])
 
-                        ind_info = h.get("individual", {})
-                        i_sess = ind_info.get("session_remaining_pct", 40.0)
-                        i_week = ind_info.get("weekly_remaining_pct", 73.0)
-                        self.canvas.create_rectangle(8, card_y + 66, card_w - 6, card_y + 102, fill="#0f172a", outline="#1e293b")
-                        self.canvas.create_text(14, card_y + 74, text="👤 James Eckhardt (My Quota)", anchor="w", fill="#38bdf8", font=self._get_font(7, "bold"))
-                        self._draw_sub_bar(14, card_y + 82, card_w - 22, i_sess, "My Sess:", "#38bdf8")
-                        self._draw_sub_bar(14, card_y + 91, card_w - 22, i_week, "My Wk:", "#3b82f6")
+                            ind_info = h.get("individual", {})
+                            i_sess = ind_info.get("session_remaining_pct", 40.0)
+                            i_week = ind_info.get("weekly_remaining_pct", 73.0)
+                            self.canvas.create_rectangle(8, card_y + 66, card_w - 6, card_y + 102, fill="#0f172a", outline="#1e293b")
+                            self.canvas.create_text(14, card_y + 74, text=f"👤 {h.get('user_name', 'My Quota')}", anchor="w", fill="#38bdf8", font=self._get_font(7, "bold"))
+                            self._draw_sub_bar(14, card_y + 82, card_w - 22, i_sess, "My Sess:", "#38bdf8")
+                            self._draw_sub_bar(14, card_y + 91, card_w - 22, i_week, "My Wk:", "#3b82f6")
+                        else:
+                            ind_info = h.get("individual", {})
+                            i_sess = ind_info.get("session_remaining_pct", item.get("session_balance_remaining_pct", 100.0))
+                            i_week = ind_info.get("weekly_remaining_pct", item.get("weekly_balance_remaining_pct", 100.0))
+                            self.canvas.create_rectangle(8, card_y + 26, card_w - 6, card_y + 62, fill="#0f172a", outline="#1e293b")
+                            self.canvas.create_text(14, card_y + 34, text=f"👤 {h.get('user_name', 'Personal Direct Quota')}", anchor="w", fill="#38bdf8", font=self._get_font(7, "bold"))
+                            self._draw_sub_bar(14, card_y + 42, card_w - 22, i_sess, "Session:", "#38bdf8")
+                            self._draw_sub_bar(14, card_y + 51, card_w - 22, i_week, "Weekly:", "#3b82f6")
 
                     elif p_key == "gemini":
                         self.canvas.create_rectangle(8, card_y + 26, card_w - 6, card_y + 58, fill="#0d1b30", outline="#1e293b")
@@ -923,8 +998,90 @@ class NativeTaskbarWidget:
         else:
             self._hide_flyout()
 
-    def _on_canvas_leave(self, event):
+    def _on_canvas_leave(self, event=None):
+        """Hides the hover flyout when the mouse leaves the canvas."""
         self._hide_flyout()
+
+    def format_flyout_quota_lines(self, p_key: str, item: dict, tracking_mode: str = "individual") -> dict:
+        """
+        Formats flyout quota and reset lines based on tracking mode ('individual' vs 'team').
+        In individual mode, displays direct personal quotas without the confusing/calculated team pool line.
+        """
+        sess_rem = item.get("session_balance_remaining_pct", 100.0)
+        sess_used = item.get("session_used_pct", 0.0)
+        week_rem = item.get("weekly_balance_remaining_pct", 100.0)
+        week_used = item.get("weekly_used_pct", 0.0)
+        weekly_reset_str = item.get("weekly_reset_str", "Mon 3:00 AM")
+        sess_reset_str = item.get("session_reset_str", "5h rolling window")
+
+        hier = item.get("hierarchy", {})
+        ind_data = hier.get("individual", {})
+        team_data = hier.get("team", {})
+
+        ind_sess_rem = ind_data.get("session_remaining_pct", sess_rem)
+        ind_sess_used = ind_data.get("session_used_pct", sess_used)
+        team_sess_rem = team_data.get("session_remaining_pct", 44.0)
+        team_sess_used = team_data.get("session_used_pct", 56.0)
+
+        ind_week_rem = ind_data.get("weekly_remaining_pct", week_rem)
+        ind_week_used = ind_data.get("weekly_used_pct", week_used)
+        team_week_rem = team_data.get("weekly_remaining_pct", 74.0)
+        team_week_used = team_data.get("weekly_used_pct", 26.0)
+
+        effective_mode = tracking_mode or hier.get("tracking_mode", "individual")
+
+        if effective_mode == "team" and p_key == "claude" and (ind_sess_used != team_sess_used or ind_week_used != team_week_used):
+            return {
+                "sess_quota": {
+                    "text": f"• 👤 My Quota:   {ind_sess_rem}% rem ({ind_sess_used}% used)",
+                    "fg": "#38bdf8"
+                },
+                "sess_reset": {
+                    "text": f"• 👥 Team Pool:  {team_sess_rem}% rem ({team_sess_used}% used)  ↳ {sess_reset_str}",
+                    "fg": "#06b6d4"
+                },
+                "week_quota": {
+                    "text": f"• 👤 My Weekly:  {ind_week_rem}% rem ({ind_week_used}% used)",
+                    "fg": "#c084fc"
+                },
+                "week_reset": {
+                    "text": f"• 👥 Team Weekly:{team_week_rem}% rem ({team_week_used}% used)  ↳ {weekly_reset_str}",
+                    "fg": "#a855f7"
+                }
+            }
+        else:
+            quota_label = "👤 Session Quota" if p_key == "claude" else "Current Session"
+            week_label = "👤 Weekly Quota" if p_key == "claude" else "Weekly Pool"
+            
+            s_tok_extra = ""
+            w_tok_extra = ""
+            if p_key == "claude" and item.get("session_tokens_available") is not None:
+                s_avail = item.get("session_tokens_available", 0)
+                s_lim = item.get("session_tokens_limit", 200000)
+                s_tok_extra = f" [{s_avail:,} / {s_lim:,} tok]"
+            if p_key == "claude" and item.get("weekly_tokens_available") is not None:
+                w_avail = item.get("weekly_tokens_available", 0)
+                w_lim = item.get("weekly_tokens_limit", 1400000)
+                w_tok_extra = f" [{w_avail:,} / {w_lim:,} tok]"
+
+            return {
+                "sess_quota": {
+                    "text": f"• {quota_label}:   {sess_rem}% rem  ({sess_used}% used){s_tok_extra}",
+                    "fg": "#38bdf8"
+                },
+                "sess_reset": {
+                    "text": f"  ↳ {sess_reset_str}",
+                    "fg": "#94a3b8"
+                },
+                "week_quota": {
+                    "text": f"• {week_label}:        {week_rem}% rem  ({week_used}% used){w_tok_extra}",
+                    "fg": "#c084fc" if p_key == "claude" else "#a855f7"
+                },
+                "week_reset": {
+                    "text": f"  ↳ Resets {weekly_reset_str}",
+                    "fg": "#94a3b8"
+                }
+            }
 
     def _show_flyout(self, p_key: str, item: dict, p_stat: dict):
         import tkinter as tk
@@ -1054,56 +1211,12 @@ class NativeTaskbarWidget:
         tokens_week = item.get("tokens_week", 0)
         cost_today = item.get("cost_today_usd", 0.0)
 
-        hier = item.get("hierarchy", {})
-        ind_data = hier.get("individual", {})
-        team_data = hier.get("team", {})
-        user_name = hier.get("user_name", "You")
-        team_name = hier.get("team_name", "Team")
-
-        ind_sess_rem = ind_data.get("session_remaining_pct", sess_rem)
-        ind_sess_used = ind_data.get("session_used_pct", sess_used)
-        team_sess_rem = team_data.get("session_remaining_pct", 44.0)
-        team_sess_used = team_data.get("session_used_pct", 56.0)
-
-        ind_week_rem = ind_data.get("weekly_remaining_pct", week_rem)
-        ind_week_used = ind_data.get("weekly_used_pct", week_used)
-        team_week_rem = team_data.get("weekly_remaining_pct", 74.0)
-        team_week_used = team_data.get("weekly_used_pct", 26.0)
-
-        if p_key == "claude" and (ind_sess_used != team_sess_used or ind_week_used != team_week_used):
-            self.flyout_labels["sess_quota"].configure(
-                text=f"• 👤 My Quota:   {ind_sess_rem}% rem ({ind_sess_used}% used)",
-                fg="#38bdf8"
-            )
-            self.flyout_labels["sess_reset"].configure(
-                text=f"• 👥 Team Pool:  {team_sess_rem}% rem ({team_sess_used}% used)  ↳ {sess_reset_str}",
-                fg="#06b6d4"
-            )
-            self.flyout_labels["week_quota"].configure(
-                text=f"• 👤 My Weekly:  {ind_week_rem}% rem ({ind_week_used}% used)",
-                fg="#c084fc"
-            )
-            self.flyout_labels["week_reset"].configure(
-                text=f"• 👥 Team Weekly:{team_week_rem}% rem ({team_week_used}% used)  ↳ {weekly_reset_str}",
-                fg="#a855f7"
-            )
-        else:
-            self.flyout_labels["sess_quota"].configure(
-                text=f"• Current Session:   {sess_rem}% rem  ({sess_used}% used)",
-                fg="#38bdf8"
-            )
-            self.flyout_labels["sess_reset"].configure(
-                text=f"  ↳ {sess_reset_str}",
-                fg="#94a3b8"
-            )
-            self.flyout_labels["week_quota"].configure(
-                text=f"• Weekly Pool:        {week_rem}% rem  ({week_used}% used)",
-                fg="#a855f7"
-            )
-            self.flyout_labels["week_reset"].configure(
-                text=f"  ↳ Resets {weekly_reset_str}",
-                fg="#94a3b8"
-            )
+        lines = self.format_flyout_quota_lines(p_key=p_key, item=item, tracking_mode=getattr(self, "quota_tracking_mode", "individual"))
+        for rk in ("sess_quota", "sess_reset", "week_quota", "week_reset"):
+            if rk in lines:
+                self.flyout_labels[rk].configure(text=lines[rk]["text"], fg=lines[rk]["fg"])
+            if rk in lines:
+                self.flyout_labels[rk].configure(text=lines[rk]["text"], fg=lines[rk]["fg"])
 
         self.flyout_labels["tokens_info"].configure(
             text=f"• Tokens: {tokens_today:,} today  |  {tokens_week:,} weekly",

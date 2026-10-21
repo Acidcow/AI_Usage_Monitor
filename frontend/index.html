@@ -235,7 +235,7 @@
       </div>
 
       <!-- Section: 👥 Team Workspace Pool Quota -->
-      <div style="background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+      <div id="claude-quota-team-section" style="background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
           <span style="font-size: 0.82rem; font-weight: 700; color: #c084fc;">👥 Team Workspace Pool Quota (Aggregated Division Pool)</span>
           <span style="font-size: 0.7rem; color: var(--text-dim);">Shared Workspace</span>
@@ -684,6 +684,99 @@
 
       <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
         <button class="btn btn-secondary" onclick="window.App.closeAccountModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Client Quota & Elevated Bypass Modal (AIUM-705) -->
+  <div class="modal-overlay" id="client-quota-config-modal">
+    <div class="modal-box" style="max-width: 600px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.25rem;">🛡️</span>
+          <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff;">Client Quota &amp; Rate Limit Policy</h3>
+        </div>
+        <button onclick="window.App.closeClientQuotaModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+        Impose per-client token limits, short burst session windows (anti-overload), queue priorities, and temporary or scheduled bypasses.
+      </p>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="client-quota-form-ip" style="font-size: 0.74rem;">Client IP Address</label>
+          <input type="text" id="client-quota-form-ip" placeholder="e.g. 192.168.2.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #38bdf8; padding: 6px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 0.8rem;">
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="client-quota-form-alias" style="font-size: 0.74rem;">Client Alias / Computer Name</label>
+          <input type="text" id="client-quota-form-alias" placeholder="e.g. Jamese-PC (ASUS ROG)" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem;">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="client-quota-form-window" style="font-size: 0.74rem;">Burst Window (Min)</label>
+          <input type="number" id="client-quota-form-window" value="15" min="1" max="1440" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem;">
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="client-quota-form-session-limit" style="font-size: 0.74rem;">Session Token Limit</label>
+          <input type="number" id="client-quota-form-session-limit" value="25000" min="100" step="1000" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #38bdf8; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: bold;">
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="client-quota-form-daily-limit" style="font-size: 0.74rem;">Daily Token Limit</label>
+          <input type="number" id="client-quota-form-daily-limit" value="250000" min="100" step="5000" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #a855f7; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: bold;">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="client-quota-form-priority" style="font-size: 0.74rem;">Queue Priority (1=Low, 10=High)</label>
+          <select id="client-quota-form-priority" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem;">
+            <option value="1">1 (Lowest / Background)</option>
+            <option value="3">3 (Low)</option>
+            <option value="5" selected>5 (Standard)</option>
+            <option value="7">7 (High)</option>
+            <option value="9">9 (Elevated / Worker)</option>
+            <option value="10">10 (Critical / Realtime)</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 0; display: flex; flex-direction: column; justify-content: center;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.76rem; cursor: pointer; color: #cbd5e1; margin-top: 6px;">
+            <input type="checkbox" id="client-quota-form-unrestricted" style="accent-color: #10b981;">
+            <span>⚡ <strong>Permanent Unrestricted</strong> (Bypass all limits)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.76rem; cursor: pointer; color: #fca5a5; margin-top: 6px;">
+            <input type="checkbox" id="client-quota-form-blocked" style="accent-color: #ef4444;">
+            <span>🚫 <strong>Block Client</strong> (Deny all requests with HTTP 403)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Temporary & Scheduled Elevated Bypass Section -->
+      <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 12px;">
+        <strong style="color: #34d399; font-size: 0.8rem; display: block; margin-bottom: 6px;">⚡ Elevated Bypass (Temporary or Scheduled)</strong>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="client-quota-form-bypass-mins" style="font-size: 0.72rem; color: var(--text-dim);">Quick Bypass Duration (Minutes, 0=None):</label>
+            <input type="number" id="client-quota-form-bypass-mins" placeholder="0" value="0" min="0" step="15" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #34d399; padding: 5px 8px; border-radius: 4px; font-size: 0.78rem;">
+          </div>
+          <div style="display: flex; gap: 4px; align-items: flex-end;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('client-quota-form-bypass-mins').value='60'" style="font-size: 0.68rem; padding: 4px 6px;">1h</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('client-quota-form-bypass-mins').value='240'" style="font-size: 0.68rem; padding: 4px 6px;">4h</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('client-quota-form-bypass-mins').value='1440'" style="font-size: 0.68rem; padding: 4px 6px;">24h</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('client-quota-form-bypass-mins').value='0'" style="font-size: 0.68rem; padding: 4px 6px; color: #f87171;">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 12px;">
+        <label for="client-quota-form-notes" style="font-size: 0.74rem;">Notes / Attribution</label>
+        <input type="text" id="client-quota-form-notes" placeholder="e.g. Lead Developer Machine, CI runner, Automated Worker" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem;">
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
+        <button class="btn btn-secondary" onclick="window.App.closeClientQuotaModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="window.App.submitClientQuotaForm()">💾 Save Policy</button>
       </div>
     </div>
   </div>

@@ -5,10 +5,12 @@ window.Widget = {
   pollInterval: null,
   providers: ["claude", "gemini", "chatgpt", "ollama", "copilot"],
   currentProviderIndex: 0,
-  viewMode: "multi", // 'multi' | 'trends' | 'single'
+  viewMode: "multi", // 'multi' | 'trends' | 'interval' | 'single'
+  refreshCadenceSeconds: 30,
   cachedSummary: null,
   cachedProviders: null,
   cachedComparison: null,
+  cachedTimeseries: null,
   pinnedItems: new Set(["claude", "gemini", "ollama"]),
   fadeUnpinned: false,
   hasWindowFocus: true,
@@ -18,6 +20,7 @@ window.Widget = {
 
   async init() {
     await this.fetchSettings();
+    this.updateModeUI(this.viewMode);
     window.addEventListener("blur", () => {
       this.hasWindowFocus = false;
       if (this.fadeUnpinned) this.render();
@@ -27,7 +30,8 @@ window.Widget = {
       if (this.fadeUnpinned) this.render();
     });
     await this.refresh();
-    this.pollInterval = setInterval(() => this.refresh(), 3000);
+    const intervalMs = Math.max(30, this.refreshCadenceSeconds || 30) * 1000;
+    this.pollInterval = setInterval(() => this.refresh(), intervalMs);
   },
 
   async fetchSettings() {
@@ -43,6 +47,9 @@ window.Widget = {
         }
         if (st.widget_view_mode) {
           this.viewMode = st.widget_view_mode;
+        }
+        if (st.ui_refresh_interval_seconds) {
+          this.refreshCadenceSeconds = Math.max(30, Math.min(300, parseInt(st.ui_refresh_interval_seconds, 10) || 30));
         }
         if (st.widget_hide_parent_chart_on_expand !== undefined) {
           this.hideParentChartOnExpand = (st.widget_hide_parent_chart_on_expand === true || st.widget_hide_parent_chart_on_expand === "true");
@@ -132,27 +139,50 @@ window.Widget = {
   },
 
   getChildSeries(key, item) {
-    const tSeed = Number(item.tokens_today) || 0;
+    const ts = this.cachedTimeseries;
+    const numBins = ts && ts.num_bins ? ts.num_bins : 12;
+    const zeroBins = new Array(numBins).fill(0);
+
+    const findPoints = (idPattern) => {
+      if (!ts || !ts.series) return null;
+      const s = ts.series.find(x => x.id === idPattern || (x.key && x.key.toLowerCase().includes(idPattern.toLowerCase())));
+      return s && s.points ? s.points : null;
+    };
+
     if (key === "claude") {
+      const teamPts = findPoints("team") || zeroBins;
+      const indPts = findPoints("individual") || zeroBins;
       return [
-        { label: "Synthesis2 (Team)", color: "#c084fc", points: [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95].map(f => Math.round(tSeed * f)) },
-        { label: "James (Individual)", color: "#38bdf8", points: [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65].map(f => Math.round(tSeed * f)) }
+        { label: "Synthesis2 (Team)", color: "#c084fc", points: teamPts },
+        { label: "James (Individual)", color: "#38bdf8", points: indPts }
       ];
     } else if (key === "gemini") {
+      const acctPts = findPoints("gemini") || zeroBins;
+      const flashPts = findPoints("tok_gem_flash") || zeroBins;
+      const proPts = findPoints("tok_gem_pro") || zeroBins;
       return [
-        { label: "acidcow@gmail.com", color: "#60a5fa", points: [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9].map(f => Math.round(tSeed * f)) },
-        { label: "Dev-Key-01", color: "#34d399", points: [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55].map(f => Math.round(tSeed * f)) },
-        { label: "Workspace-Prod", color: "#f472b6", points: [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32].map(f => Math.round(tSeed * f)) }
+        { label: "acidcow@gmail.com", color: "#60a5fa", points: acctPts },
+        { label: "Gemini 2.0 Flash", color: "#34d399", points: flashPts },
+        { label: "Gemini 1.5 Pro", color: "#f472b6", points: proPts }
       ];
     } else if (key === "ollama") {
-      return [
-        { label: "llama3.2:3b", color: "#a855f7", points: [0.3, 0.2, 0.4, 0.35, 0.6, 0.5, 0.7, 0.8].map(f => Math.round(tSeed * f)) },
-        { label: "deepseek-r1:8b", color: "#ec4899", points: [0.1, 0.15, 0.12, 0.2, 0.18, 0.25, 0.22, 0.3].map(f => Math.round(tSeed * f)) }
-      ];
+      const ollamaSeries = (ts && ts.series) ? ts.series.filter(s => s.id && s.id.startsWith("ollama_model_")) : [];
+      const colors = ["#06b6d4", "#a855f7", "#38bdf8", "#34d399", "#fbbf24", "#ec4899"];
+      if (ollamaSeries.length > 0) {
+        return ollamaSeries.map((s, idx) => ({
+          label: s.name || s.label || s.id.replace("ollama_model_", ""),
+          color: s.color || colors[idx % colors.length],
+          points: s.points || zeroBins
+        }));
+      }
+      const defPts = findPoints("ollama") || zeroBins;
+      return [{ label: "Local Models", color: "#06b6d4", points: defPts }];
     } else if (key === "chatgpt") {
-      return [{ label: "Default Project", color: "#10b981", points: [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6].map(f => Math.round(tSeed * f)) }];
+      const chatPts = findPoints("chatgpt") || zeroBins;
+      return [{ label: "Default Project", color: "#10b981", points: chatPts }];
     } else {
-      return [{ label: "Enterprise E5", color: "#06b6d4", points: [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4].map(f => Math.round(tSeed * f)) }];
+      const copPts = findPoints("copilot") || zeroBins;
+      return [{ label: "Enterprise E5", color: "#06b6d4", points: copPts }];
     }
   },
 
@@ -207,16 +237,17 @@ window.Widget = {
     this.render();
   },
 
-  setViewMode(mode) {
-    this.viewMode = mode;
+  updateModeUI(mode) {
     const btnMulti = document.getElementById("btn-mode-multi");
     const btnTrends = document.getElementById("btn-mode-trends");
+    const btnInterval = document.getElementById("btn-mode-interval");
     const btnSingle = document.getElementById("btn-mode-single");
     const multiContainer = document.getElementById("w-multi-accounts-container");
     const singleContainer = document.getElementById("w-single-container");
 
     if (btnMulti) btnMulti.className = mode === "multi" ? "widget-btn widget-btn-active" : "widget-btn";
     if (btnTrends) btnTrends.className = mode === "trends" ? "widget-btn widget-btn-active" : "widget-btn";
+    if (btnInterval) btnInterval.className = mode === "interval" ? "widget-btn widget-btn-active" : "widget-btn";
     if (btnSingle) btnSingle.className = mode === "single" ? "widget-btn widget-btn-active" : "widget-btn";
 
     if (mode === "single") {
@@ -226,9 +257,21 @@ window.Widget = {
       if (multiContainer) multiContainer.style.display = "flex";
       if (singleContainer) singleContainer.style.display = "none";
       const nameEl = document.getElementById("w-provider-name");
-      if (nameEl) nameEl.innerText = mode === "trends" ? "Trends" : "All Accounts";
+      if (nameEl) {
+        nameEl.innerText = mode === "trends" ? "Trends (Cumulative)" : (mode === "interval" ? "Interval (Bursts)" : "All Accounts");
+      }
     }
-    this.render();
+  },
+
+  setViewMode(mode) {
+    this.viewMode = mode;
+    this.updateModeUI(mode);
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { widget_view_mode: mode } })
+    }).catch(() => {});
+    this.refresh();
   },
 
   togglePin(key) {
@@ -262,11 +305,17 @@ window.Widget = {
   async refresh() {
     try {
       await this.fetchSettings();
-      const [sumRes, provRes, compRes] = await Promise.all([
+      const isSparklineMode = (this.viewMode === "trends" || this.viewMode === "interval");
+      const tsMode = this.viewMode === "interval" ? "interval_delta" : "cumulative";
+      const fetchPromises = [
         fetch("/api/usage/summary"),
         fetch("/api/providers"),
         fetch("/api/usage/comparison?filter_visibility=true")
-      ]);
+      ];
+      if (isSparklineMode) {
+        fetchPromises.push(fetch(`/api/usage/timeseries?window=1h&bucket_minutes=5&mode=${tsMode}`));
+      }
+      const [sumRes, provRes, compRes, tsRes] = await Promise.all(fetchPromises);
 
       if (sumRes.ok && provRes.ok) {
         this.cachedSummary = await sumRes.json();
@@ -274,6 +323,9 @@ window.Widget = {
       }
       if (compRes.ok) {
         this.cachedComparison = await compRes.json();
+      }
+      if (tsRes && tsRes.ok) {
+        this.cachedTimeseries = await tsRes.json();
       }
       this.render();
     } catch (e) {
@@ -301,7 +353,7 @@ window.Widget = {
     };
 
     // Render Multi-Account Overview or Trends View
-    if ((this.viewMode === "multi" || this.viewMode === "trends") && this.cachedComparison) {
+    if ((this.viewMode === "multi" || this.viewMode === "trends" || this.viewMode === "interval") && this.cachedComparison) {
       const container = document.getElementById("w-multi-accounts-container");
       if (container) {
         const comp = this.cachedComparison;
@@ -336,14 +388,16 @@ window.Widget = {
           const childSeries = this.getChildSeries(key, item);
 
           let bodyContent = "";
-          if (this.viewMode === "trends") {
+          if (this.viewMode === "trends" || this.viewMode === "interval") {
+            const modeBadgeText = this.viewMode === "interval" ? "⚡ DELTA BURST" : "📈 CUMULATIVE";
             if (!isExpanded) {
               const multiSvg = this.generateMultiSparkline(childSeries, 120, 26);
               bodyContent = `
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px; gap: 8px;">
                   <div style="flex-shrink: 0;">${multiSvg}</div>
                   <div style="font-size: 0.62rem; color: var(--text-dim); text-align: right; line-height: 1.25;">
-                    <div>Wk: <span style="color: #cbd5e1; font-family: var(--font-mono); font-weight: 600;">${Number(item.tokens_week).toLocaleString()}</span></div>
+                    <div style="font-size: 0.55rem; color: #38bdf8; font-family: var(--font-mono); font-weight: 700;">${modeBadgeText}</div>
+                    <div>Today: <span style="color: #cbd5e1; font-family: var(--font-mono); font-weight: 600;">${Number(item.tokens_today).toLocaleString()}</span></div>
                     <div>Sess: <span style="color: ${sessionRem < 20 ? '#f43f5e' : '#10b981'}; font-family: var(--font-mono); font-weight: 600;">${sessionRem}%</span></div>
                   </div>
                 </div>

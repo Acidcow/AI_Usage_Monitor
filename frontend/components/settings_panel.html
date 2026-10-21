@@ -146,10 +146,17 @@
 
       <div class="form-group" style="margin-bottom: 16px;">
         <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">
-          Web Dashboard Refresh Interval (seconds)
+          UI Auto-Refresh Cadence (Anti-Jumpiness: 30s to 5m)
         </label>
-        <input type="number" id="cfg-poll-cadence" min="1" max="60" value="4" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
-        <span style="font-size: 0.74rem; color: var(--text-dim);">Background poll cadence for browser dashboard telemetry.</span>
+        <select id="cfg-ui-refresh-cadence" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
+          <option value="30" selected>⏱ 30 seconds (Max Frequency)</option>
+          <option value="60">⏱ 60 seconds (1 minute)</option>
+          <option value="90">⏱ 90 seconds (1.5 minutes)</option>
+          <option value="120">⏱ 120 seconds (2 minutes)</option>
+          <option value="180">⏱ 180 seconds (3 minutes)</option>
+          <option value="300">⏱ 300 seconds (5 minutes)</option>
+        </select>
+        <span style="font-size: 0.74rem; color: var(--text-dim);">Delay between automatic telemetry refreshes (in 30s increments up to 5 min) to eliminate visual UI jumpiness. Manual refresh buttons are always instant.</span>
       </div>
 
       <div class="form-group" style="margin-bottom: 16px;">
@@ -166,7 +173,8 @@
         </label>
         <select id="cfg-default-view-mode" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
           <option value="balances">📊 Current Balances & Quota Gauges</option>
-          <option value="trends">📈 Telemetry Line Charts & Velocity Trends</option>
+          <option value="trends">📈 Cumulative Total Run (Continuous Curve)</option>
+          <option value="interval">⚡ Discrete Interval Bursts (From Zero Baseline)</option>
         </select>
       </div>
 
@@ -181,6 +189,110 @@
           Status: Ready to probe
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Section: Quota & Allowance Tracking Mode (AIUM-618) -->
+  <div class="glass-card" style="margin-bottom: 24px; border-left: 4px solid var(--accent-cyan); background: linear-gradient(135deg, rgba(6, 182, 212, 0.06), rgba(15, 23, 42, 0.75));">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.3rem;">🎯</span>
+        <h4 style="font-size: 1.05rem; font-weight: 700; color: #fff;">Allowance & Quota Tracking Mode</h4>
+      </div>
+      <span class="badge" id="tracking-mode-active-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">👤 Individual Direct Active</span>
+    </div>
+    
+    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5;">
+      According to official Anthropic Claude documentation and session usage headers, token usage and quotas are reported directly at the <strong>Individual Member Level</strong> (found in your personal <a href="https://claude.ai/settings/usage" target="_blank" style="color: #fbbf24; text-decoration: underline;">claude.ai/settings/usage</a>). Choose how AI Usage Monitor scopes and renders your telemetry:
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 6px;">
+      <!-- Option 1: Individual Member Direct (Recommended) -->
+      <label class="tracking-mode-option" style="display: flex; flex-direction: column; gap: 8px; background: rgba(0, 0, 0, 0.3); border: 2px solid rgba(56, 189, 248, 0.4); border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s ease;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="radio" name="cfg-tracking-mode" id="cfg-tracking-mode-individual" value="individual" checked onchange="window.App.onTrackingModeOptionChange('individual')" style="accent-color: var(--accent-cyan); width: 18px; height: 18px;">
+            <strong style="color: #38bdf8; font-size: 0.92rem;">👤 Individual Member Direct (1:1)</strong>
+          </div>
+          <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.65rem;">Recommended</span>
+        </div>
+        <p style="font-size: 0.76rem; color: #cbd5e1; margin: 0; line-height: 1.4;">
+          Directly monitors your personal session and weekly quotas as reported by the platform. <strong>Streamlines the UI</strong> by removing high-level organizational rollups, estimated department allocations, and artificial conversion rates.
+        </p>
+      </label>
+
+      <!-- Option 2: Team / Shared Allowance Pool -->
+      <label class="tracking-mode-option" style="display: flex; flex-direction: column; gap: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s ease;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="radio" name="cfg-tracking-mode" id="cfg-tracking-mode-team" value="team" onchange="window.App.onTrackingModeOptionChange('team')" style="accent-color: var(--accent-cyan); width: 18px; height: 18px;">
+            <strong style="color: #c084fc; font-size: 0.92rem;">👥 Team Allowance Pool</strong>
+          </div>
+          <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 0.65rem;">Workspace Pool</span>
+        </div>
+        <p style="font-size: 0.76rem; color: var(--text-muted); margin: 0; line-height: 1.4;">
+          Tracks collective workspace and team quotas. Displays multi-scope navigation tabs and expands organizational hierarchy cards (Team, Department, and Enterprise rollups).
+        </p>
+      </label>
+    </div>
+  <!-- Section: Proxy Bridges & Network Ports Configuration (AIUM-707) -->
+  <div class="glass-card" style="margin-bottom: 24px; border-left: 4px solid var(--accent-purple); background: linear-gradient(135deg, rgba(168, 85, 247, 0.06), rgba(15, 23, 42, 0.75));">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.3rem;">🌐</span>
+        <div>
+          <h4 style="font-size: 1.05rem; font-weight: 700; color: #fff;">Proxy Bridges &amp; Network Ports Configuration</h4>
+          <span style="font-size: 0.76rem; color: var(--text-dim);">Configure ports for the secondary Ollama emulator, transparent proxy, and default burst governance policies.</span>
+        </div>
+      </div>
+      <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">Dual Bridge Active</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; background: rgba(0,0,0,0.2); padding: 16px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); margin-bottom: 12px;">
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 4px;">
+          🦙 Ollama API Emulator Port
+        </label>
+        <input type="number" id="cfg-ollama-emulator-port" min="1024" max="65535" value="8989" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; font-family: var(--font-mono); font-weight: 700; padding: 7px 10px; border-radius: 4px; font-size: 0.85rem;">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 3px;">Port for emulated Ollama REST API, OpenAI /v1 routes, and MCP JSON-RPC.</span>
+      </div>
+
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 4px;">
+          🛡️ Transparent Proxy Port
+        </label>
+        <input type="number" id="cfg-transparent-proxy-port" min="1024" max="65535" value="8766" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #34d399; font-family: var(--font-mono); font-weight: 700; padding: 7px 10px; border-radius: 4px; font-size: 0.85rem;">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 3px;">Port for Claude CLI and Gemini transparent interception and live SSE streaming.</span>
+      </div>
+
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 4px;">
+          ⏱️ Default Burst Window (Minutes)
+        </label>
+        <input type="number" id="cfg-default-session-window" min="1" max="1440" value="15" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 7px 10px; border-radius: 4px; font-size: 0.85rem;">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 3px;">Sliding anti-overload window duration applied to unconfigured client machines.</span>
+      </div>
+
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 4px;">
+          ⚡ Default Burst Limit (Tokens)
+        </label>
+        <input type="number" id="cfg-default-session-limit" min="1000" step="5000" value="25000" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; font-weight: 700; padding: 7px 10px; border-radius: 4px; font-size: 0.85rem;">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 3px;">Max tokens a client can consume in the burst window before receiving HTTP 429.</span>
+      </div>
+
+      <div>
+        <label style="font-size: 0.74rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 4px;">
+          📅 Default Daily Quota (Tokens)
+        </label>
+        <input type="number" id="cfg-default-daily-limit" min="1000" step="25000" value="250000" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #c084fc; font-weight: 700; padding: 7px 10px; border-radius: 4px; font-size: 0.85rem;">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 3px;">24-hour rolling daily budget applied to unconfigured client machines.</span>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-muted); background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 4px; border: 1px dashed rgba(255,255,255,0.1);">
+      <span>ℹ️</span>
+      <span>Port changes are saved permanently in Windows DPAPI / SQLite. To rebind active sockets, restart the AI Usage Monitor service. Individual client overrides take precedence over global defaults.</span>
     </div>
   </div>
 

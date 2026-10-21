@@ -4,16 +4,18 @@
       <img src="/assets/mascot/johnny5_inspecting.jpg" alt="Johnny 5 Inspecting Telemetry" style="width: 36px; height: 36px; border-radius: 8px; border: 1px solid rgba(6, 182, 212, 0.4); object-fit: cover; box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);">
       <div>
         <h2 style="font-size: 1.1rem; font-weight: 700;">Recent Agentic Sessions & Tokens</h2>
-        <p style="font-size: 0.8rem; color: var(--text-muted);">Real-time capture via Direct API, Local Transparent Proxy, and CLI monitor.</p>
+        <p style="font-size: 0.8rem; color: var(--text-muted);">Real-time capture across Direct API, Local Transparent Proxy, and CLI monitor with LAN host attribution & duration.</p>
       </div>
     </div>
-    <div style="display: flex; gap: 8px;">
-      <select id="filter-session-provider" style="background: rgba(255,255,255,0.06); color: var(--text-main); border: 1px solid var(--border-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 0.82rem;">
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <input type="text" id="filter-session-search" placeholder="🔍 Search session, IP, host, model..." oninput="window.App.applySessionFilterAndSort()" style="background: rgba(255,255,255,0.06); color: var(--text-main); border: 1px solid var(--border-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 0.82rem; min-width: 220px;">
+      <select id="filter-session-provider" onchange="window.App.applySessionFilterAndSort()" style="background: rgba(255,255,255,0.06); color: var(--text-main); border: 1px solid var(--border-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 0.82rem;">
         <option value="">All Providers</option>
         <option value="claude">Claude</option>
         <option value="copilot">M365 Copilot</option>
         <option value="gemini">Gemini</option>
         <option value="ollama">Ollama</option>
+        <option value="chatgpt">ChatGPT</option>
       </select>
       <button class="btn btn-secondary" onclick="window.App.loadUsageData()">Refresh</button>
     </div>
@@ -22,20 +24,23 @@
   <div class="data-table-container">
     <table class="data-table">
       <thead>
-        <tr>
-          <th>Session ID</th>
-          <th>Provider</th>
-          <th>Model</th>
-          <th>Input Tokens</th>
-          <th>Output Tokens</th>
-          <th>Total Tokens</th>
-          <th>Est. Cost</th>
-          <th>Last Activity</th>
+        <tr style="user-select: none;">
+          <th onclick="window.App.sortSessionsBy('session_id')" style="cursor: pointer;" title="Click to sort">Session ID <span id="sort-icon-session_id"></span></th>
+          <th onclick="window.App.sortSessionsBy('provider')" style="cursor: pointer;" title="Click to sort">Provider <span id="sort-icon-provider"></span></th>
+          <th onclick="window.App.sortSessionsBy('model')" style="cursor: pointer;" title="Click to sort">Model <span id="sort-icon-model"></span></th>
+          <th onclick="window.App.sortSessionsBy('client_ip')" style="cursor: pointer;" title="Click to sort">Client / Host <span id="sort-icon-client_ip"></span></th>
+          <th onclick="window.App.sortSessionsBy('input_tokens')" style="cursor: pointer; text-align: right;" title="Click to sort">Input Tok <span id="sort-icon-input_tokens"></span></th>
+          <th onclick="window.App.sortSessionsBy('output_tokens')" style="cursor: pointer; text-align: right;" title="Click to sort">Output Tok <span id="sort-icon-output_tokens"></span></th>
+          <th onclick="window.App.sortSessionsBy('total_tokens')" style="cursor: pointer; text-align: right;" title="Click to sort">Total Tok <span id="sort-icon-total_tokens"></span></th>
+          <th onclick="window.App.sortSessionsBy('estimated_cost')" style="cursor: pointer; text-align: right;" title="Click to sort">Est. Cost <span id="sort-icon-estimated_cost"></span></th>
+          <th onclick="window.App.sortSessionsBy('first_activity')" style="cursor: pointer;" title="Click to sort">First Activity (Local) <span id="sort-icon-first_activity"></span></th>
+          <th onclick="window.App.sortSessionsBy('last_activity')" style="cursor: pointer;" title="Click to sort">Last Activity (Local) <span id="sort-icon-last_activity"></span></th>
+          <th onclick="window.App.sortSessionsBy('duration')" style="cursor: pointer;" title="Click to sort">Duration <span id="sort-icon-duration"></span></th>
         </tr>
       </thead>
       <tbody id="sessions-table-body">
         <tr>
-          <td colspan="8" style="text-align: center; color: var(--text-dim); padding: 30px;">
+          <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 30px;">
             Loading recent sessions...
           </td>
         </tr>

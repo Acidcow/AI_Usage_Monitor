@@ -9,6 +9,10 @@ window.App = {
   currentScope: 'individual',
   dashboardViewMode: 'balances',
   trendWindow: '24h',
+  chartGranularity: 5,
+  chartMode: 'interval_delta',
+  chartWindow: '24h',
+  refreshCadenceSeconds: 30,
   hierarchyGroupMode: 'all', // 'all' | 'platforms' | 'groups' | 'filtered'
   filteredItemIds: new Set(['claude', 'gemini', 'chatgpt', 'ollama', 'copilot', 'group-production', 'group-development', 'group-research']),
   hiddenChartSeries: {},
@@ -18,6 +22,9 @@ window.App = {
   lastCompData: null,
   lastProvidersData: null,
   appSettings: {},
+  rawSessions: [],
+  sessionSortCol: 'last_activity',
+  sessionSortAsc: false,
   mascotQuotes: [
     "\"Number 5 is alive! No disassemble! Tracking your token telemetry and locking your API keys inside Windows DPAPI with 256-bit encryption. Input! Need more input!\"",
     "\"Hey, laser lips, your API keys are protected by hardware DPAPI! Plaintext credential storage is strictly prohibited!\"",
@@ -50,6 +57,10 @@ window.App = {
     await this.loadAccountProfiles();
     await this.loadHistoricalReport();
     await this.loadCrossPlatformTags();
+    await this.loadManagedNodes();
+    await this.loadClientQuotas();
+    await this.loadDeviceInventory();
+    await this.fetchDetectedAdapters();
 
     const urlParams = new URLSearchParams(window.location.search);
     const requestedTab = urlParams.get("tab");
@@ -57,8 +68,72 @@ window.App = {
       this.switchTab(requestedTab);
     }
 
-    // Start background auto-refresh every 4 seconds
-    this.pollInterval = setInterval(() => this.loadUsageData(), 4000);
+    // Start background auto-refresh respecting user-configured cadence (minimum 30s)
+    this.resetPollingInterval(this.refreshCadenceSeconds || 30);
+  },
+
+  resetPollingInterval(seconds) {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+    const sec = Math.max(30, Math.min(300, parseInt(seconds, 10) || 30));
+    this.refreshCadenceSeconds = sec;
+    this.pollInterval = setInterval(() => this.loadUsageData(), sec * 1000);
+  },
+
+  async changeRefreshCadence(seconds) {
+    const sec = Math.max(30, Math.min(300, parseInt(seconds, 10) || 30));
+    this.resetPollingInterval(sec);
+    const topSelect = document.getElementById("ui-refresh-cadence-select");
+    const cfgSelect = document.getElementById("cfg-ui-refresh-cadence");
+    if (topSelect) topSelect.value = sec;
+    if (cfgSelect) cfgSelect.value = sec;
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { ui_refresh_interval_seconds: sec } })
+      });
+    } catch (e) {
+      console.warn("Failed saving refresh cadence:", e);
+    }
+  },
+
+  changeChartGranularity(val) {
+    this.chartGranularity = parseInt(val, 10) || 5;
+    const gSelect = document.getElementById("chart-granularity-select");
+    const tSelect = document.getElementById("trend-granularity-select");
+    if (gSelect) gSelect.value = this.chartGranularity;
+    if (tSelect) tSelect.value = this.chartGranularity;
+    this.loadUsageData();
+  },
+
+  changeChartMode(mode) {
+    this.chartMode = mode === "cumulative" ? "cumulative" : "interval_delta";
+    const mSelect = document.getElementById("chart-mode-select");
+    const tSelect = document.getElementById("trend-mode-select");
+    if (mSelect) mSelect.value = this.chartMode;
+    if (tSelect) tSelect.value = this.chartMode;
+    this.loadUsageData();
+  },
+
+  changeChartWindow(win) {
+    this.chartWindow = win || "24h";
+    this.trendWindow = this.chartWindow;
+    const wSelect = document.getElementById("chart-window-select");
+    const tSelect = document.getElementById("trend-window-select");
+    if (wSelect) wSelect.value = this.chartWindow;
+    if (tSelect) tSelect.value = this.chartWindow;
+    this.loadUsageData();
+  },
+
+  changeTrendGranularity(val) {
+    this.changeChartGranularity(val);
+  },
+
+  changeTrendMode(mode) {
+    this.changeChartMode(mode);
   },
 
   async loadComponent(containerId, url) {
@@ -135,12 +210,16 @@ window.App = {
       const provSelect = document.getElementById("filter-session-provider");
       const providerParam = provSelect && provSelect.value ? `?provider=${provSelect.value}` : '';
 
-      const [summaryRes, providersRes, sessionsRes, errorsRes, hourlyRes, compRes] = await Promise.all([
+      const bucketMinutes = this.chartGranularity || 5;
+      const chartMode = this.chartMode || "interval_delta";
+      const chartWindow = this.chartWindow || "24h";
+
+      const [summaryRes, providersRes, sessionsRes, errorsRes, timeseriesRes, compRes] = await Promise.all([
         fetch("/api/usage/summary"),
         fetch("/api/providers"),
         fetch(`/api/usage/sessions${providerParam}`),
         fetch("/api/diagnostics/errors?limit=30"),
-        fetch("/api/usage/hourly?hours=24"),
+        fetch(`/api/usage/timeseries?window=${chartWindow}&bucket_minutes=${bucketMinutes}&mode=${chartMode}&scope=${this.currentScope || 'individual'}`),
         fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}&filter_visibility=true`)
       ]);
 
@@ -163,7 +242,8 @@ window.App = {
 
       if (sessionsRes.ok) {
         const sessions = await sessionsRes.json();
-        this.renderSessions(sessions);
+        this.rawSessions = sessions || [];
+        this.applySessionFilterAndSort();
       }
 
       if (errorsRes.ok) {
@@ -171,9 +251,9 @@ window.App = {
         this.renderErrors(errors);
       }
 
-      if (hourlyRes.ok) {
-        const hourly = await hourlyRes.json();
-        this.renderSvgChart(hourly);
+      if (timeseriesRes.ok) {
+        const timeseries = await timeseriesRes.json();
+        this.renderSvgChart(timeseries);
       }
     } catch (err) {
       console.warn("[App] Polling error:", err);
@@ -278,6 +358,26 @@ window.App = {
     };
 
     const hiddenPlatforms = (this.appSettings?.estate_visibility?.hidden_platforms || []).map(p => p.toLowerCase());
+    const trackingMode = this.appSettings?.quota_tracking_mode || comp.tracking_mode || 'individual';
+    const isIndividualMode = (trackingMode === 'individual');
+
+    // Update Usage Scope indicator and buttons to align with Tracking Mode
+    const btnTeam = document.getElementById("scope-btn-team");
+    const btnEnt = document.getElementById("scope-btn-enterprise");
+    const indText = document.getElementById("active-scope-indicator");
+    if (isIndividualMode) {
+      if (btnTeam) btnTeam.style.display = "none";
+      if (btnEnt) btnEnt.style.display = "none";
+      if (indText) {
+        indText.innerHTML = `👤 <strong>Individual Direct Tracking (1:1 Active)</strong> <span style="color: var(--text-dim); margin-left: 6px;">claude.ai/settings/usage</span>`;
+      }
+    } else {
+      if (btnTeam) btnTeam.style.display = "";
+      if (btnEnt) btnEnt.style.display = "";
+      if (indText) {
+        indText.innerText = this.currentScope === 'team' ? "Focused on Shared Team Workspace Pool" : (this.currentScope === 'enterprise' ? "Focused on Organization / Enterprise Rollup" : "Focused on Personal / Individual Limits");
+      }
+    }
     
     const predefinedGroups = [
       { id: "group-production", name: "Production AI (Claude + Gemini)", tag: "Production", icon: "🚀", providers: ["claude", "gemini"] },
@@ -347,7 +447,7 @@ window.App = {
         const sourceDesc = item.source_description || "Standard API";
         const isCalibrated = !!item.is_calibrated;
         const sourceBadge = isCalibrated
-          ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.65rem;" title="Calibrated with web quota from claude.ai/settings/usage">🟡 Calibrated Web Quota</span>`
+          ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.65rem;" title="Calibrated with web quota from claude.ai/settings/usage">🟡 ${isIndividualMode ? '👤 Individual Direct Quota' : '🟡 Calibrated Web Quota'}</span>`
           : `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.65rem;" title="${this.escapeHtml(sourceDesc)}">🟢 Live Real-World API</span>`;
 
         const syncAge = item.last_sync_age_seconds !== undefined ? `${item.last_sync_age_seconds}s ago` : 'just now';
@@ -373,20 +473,40 @@ window.App = {
             </div>
           `;
         } else {
+          const sessBalToks = item.session_tokens_available !== undefined ? item.session_tokens_available : null;
+          const sessLimToks = item.session_tokens_limit || null;
+          const weekBalToks = item.weekly_tokens_available !== undefined ? item.weekly_tokens_available : null;
+          const weekLimToks = item.weekly_tokens_limit || item.weekly_allowance || null;
+
           sessionCellContent = `
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
-                <div class="progress-bar-fill" style="width: ${Math.max(4, sessionPct)}%; background: ${sessionPct < 20 ? 'var(--accent-rose)' : 'linear-gradient(90deg, #10b981, #06b6d4)'};"></div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
+                  <div class="progress-bar-fill" style="width: ${Math.max(4, sessionPct)}%; background: ${sessionPct < 20 ? 'var(--accent-rose)' : 'linear-gradient(90deg, #10b981, #06b6d4)'};"></div>
+                </div>
+                <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${sessionPct}%</span>
               </div>
-              <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${sessionPct}%</span>
+              ${sessLimToks ? `
+                <div style="display: flex; justify-content: space-between; font-size: 0.68rem; color: #94a3b8; font-family: var(--font-mono);">
+                  <span>${Number(sessBalToks !== null ? sessBalToks : 0).toLocaleString()} / ${Number(sessLimToks).toLocaleString()} tok left</span>
+                  ${item.session_reset_str ? `<span style="color: #38bdf8;">🕒 ${item.session_reset_str}</span>` : ''}
+                </div>
+              ` : ''}
             </div>
           `;
           weeklyCellContent = `
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
-                <div class="progress-bar-fill" style="width: ${Math.max(4, weeklyPct)}%; background: ${weeklyPct < 20 ? 'var(--accent-amber)' : 'linear-gradient(90deg, #8b5cf6, #3b82f6)'};"></div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="progress-bar-container" style="flex-grow: 1; height: 6px; margin: 0; background: rgba(255,255,255,0.06);">
+                  <div class="progress-bar-fill" style="width: ${Math.max(4, weeklyPct)}%; background: ${weeklyPct < 20 ? 'var(--accent-amber)' : 'linear-gradient(90deg, #8b5cf6, #3b82f6)'};"></div>
+                </div>
+                <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${weeklyPct}%</span>
               </div>
-              <span style="font-family: var(--font-mono); font-size: 0.75rem; width: 42px; text-align: right; color: #cbd5e1; font-weight: 600;">${weeklyPct}%</span>
+              ${weekLimToks ? `
+                <div style="display: flex; justify-content: space-between; font-size: 0.68rem; color: #94a3b8; font-family: var(--font-mono);">
+                  <span>${Number(weekBalToks !== null ? weekBalToks : 0).toLocaleString()} / ${Number(weekLimToks).toLocaleString()} tok left</span>
+                </div>
+              ` : ''}
             </div>
           `;
         }
@@ -401,8 +521,8 @@ window.App = {
                   <strong style="color: #fff; font-size: 0.9rem;">${displayNames[key]}</strong>
                 </div>
                 ${hasHierarchy ? `
-                  <button class="btn btn-sm" onclick="window.App.toggleHierarchy('${key}')" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-size: 0.68rem; padding: 2px 7px; border-radius: 4px; cursor: pointer;" title="Toggle multi-level hierarchy drill-down">
-                    ${isExpanded ? '▲ Hide' : '▼ Drill-Down'}
+                  <button class="btn btn-sm" onclick="window.App.toggleHierarchy('${key}')" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-size: 0.68rem; padding: 2px 7px; border-radius: 4px; cursor: pointer;" title="Toggle hierarchy details">
+                    ${isExpanded ? '▲ Hide' : (isIndividualMode ? '▼ Details' : '▼ Drill-Down')}
                   </button>
                 ` : ''}
               </div>
@@ -450,7 +570,7 @@ window.App = {
                       Hierarchical Telemetry Drill-Down (${displayNames[key]}):
                     </span>
                     <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">
-                      ${key === 'ollama' ? 'LOCAL HARDWARE INFERENCE' : ('Active View: ' + (comp.active_scope || 'individual').toUpperCase())}
+                      ${key === 'ollama' ? 'LOCAL HARDWARE INFERENCE' : (isIndividualMode ? '1:1 INDIVIDUAL DIRECT TELEMETRY' : ('Active View: ' + (comp.active_scope || 'individual').toUpperCase()))}
                     </span>
                   </div>
                   <div style="display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #94a3b8; font-family: var(--font-mono);">
@@ -560,16 +680,20 @@ window.App = {
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_individual'), '#38bdf8')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                        <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.session_remaining_pct}% remaining</span> (${ind.session_used_pct}% used)
+                        <strong>5h Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${(item.session_tokens_available !== undefined ? item.session_tokens_available : Math.round(((ind.session_remaining_pct ?? 100) / 100) * (item.session_tokens_limit || 200000))).toLocaleString()} tok</span> left (${ind.session_remaining_pct ?? 100}% rem, ${(item.session_tokens_used || 0).toLocaleString()} used)
+                      </div>
+                      <div style="font-size: 0.72rem; color: #38bdf8; margin-bottom: 4px; font-family: var(--font-mono);">
+                        🕒 Resets in: <strong>${item.session_reset_str || ind.session_reset_str || '5h 0m'}</strong> (auto-refills upon expiry)
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                        <strong>Weekly:</strong> <span style="color: #38bdf8; font-weight: 700;">${ind.weekly_remaining_pct}% remaining</span> (${ind.weekly_used_pct}% used)
+                        <strong>Weekly Quota:</strong> <span style="color: #38bdf8; font-weight: 700;">${(item.weekly_tokens_available !== undefined ? item.weekly_tokens_available : Math.round(((ind.weekly_remaining_pct ?? 100) / 100) * (item.weekly_tokens_limit || 1400000))).toLocaleString()} tok</span> left (${ind.weekly_remaining_pct ?? 100}% rem, ${(item.weekly_tokens_used || 0).toLocaleString()} used)
                       </div>
                       <div style="font-size: 0.69rem; color: var(--text-dim); margin-top: 5px;">
-                        Resets: ${ind.weekly_reset_str || 'Mon 3:00 AM'}
+                        Weekly Reset: ${ind.weekly_reset_str || 'Mon 3:00 AM'}
                       </div>
                     </div>
 
+                    ${(isIndividualMode || h.streamlined) ? '' : `
                     <!-- 2. Team Workspace Pool -->
                     <div style="background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px; padding: 10px 12px;">
                       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -638,6 +762,7 @@ window.App = {
                         Centralized Token Telemetry
                       </div>
                     </div>
+                    `}
                   `)}
                 </div>
               </td>
@@ -820,7 +945,7 @@ window.App = {
     }
   },
 
-  renderSvgChart(hourly) {
+  renderSvgChart(timeseriesData) {
     const svg = document.getElementById("token-velocity-chart");
     const peakInfo = document.getElementById("chart-peak-info");
     const singleProvNotice = document.getElementById("chart-single-provider-notice");
@@ -853,62 +978,44 @@ window.App = {
       }
     });
 
-    if (!hourly || hourly.length === 0) {
+    const seriesList = timeseriesData?.series || [];
+    const labels = timeseriesData?.labels || [];
+    const keys = timeseriesData?.keys || [];
+    const bucketMin = timeseriesData?.bucket_minutes || this.chartGranularity || 5;
+    const chartMode = timeseriesData?.mode || this.chartMode || "interval_delta";
+    const totalTokens = timeseriesData?.total_tokens || 0;
+    const numPoints = labels.length;
+
+    if (!timeseriesData || numPoints === 0) {
       svg.innerHTML = `
         <text x="450" y="95" text-anchor="middle" fill="#64748b" font-size="13" font-family="sans-serif">
-          No hourly tokens recorded yet in past 24 hours. Interacting with AI models will plot real-time multi-platform velocity curves here.
+          No usage telemetry recorded yet. Real-time multi-platform velocity curves will appear here when tokens are consumed.
         </text>
       `;
-      if (peakInfo) peakInfo.innerText = "Peak: 0 tokens/hr";
+      if (peakInfo) peakInfo.innerText = "Peak: 0 tokens";
       if (singleProvNotice) singleProvNotice.style.display = "none";
-      platforms.concat(["total"]).forEach(p => {
-        const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
-        if (pill) {
-          let b = pill.querySelector(".legend-token-badge");
-          if (!b) {
-            b = document.createElement("span");
-            b.className = "legend-token-badge";
-            pill.appendChild(b);
-          }
-          b.innerText = "0 t (idle)";
-          b.style.cssText = "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 600; background: rgba(255,255,255,0.05); color: #64748b;";
-        }
-      });
       return;
     }
 
-    // Build timeline of distinct hour keys and 24h totals per platform
-    const hourMap = {};
-    const allHoursSet = new Set();
-    const totals24h = { total: 0 };
-    platforms.forEach(p => totals24h[p] = 0);
-    let maxTokens = 50;
-
-    hourly.forEach(item => {
-      const h = item.hour_key;
-      const prov = (item.provider || "claude").toLowerCase();
-      if (hiddenPlatforms.includes(prov)) {
-        return;
-      }
-      allHoursSet.add(h);
-
-      if (!hourMap[h]) {
-        hourMap[h] = { total: 0 };
-        platforms.forEach(p => hourMap[h][p] = 0);
-      }
-      const tok = Number(item.tokens || 0);
-      hourMap[h][prov] = (hourMap[h][prov] || 0) + tok;
-      hourMap[h].total += tok;
-      totals24h[prov] = (totals24h[prov] || 0) + tok;
-      totals24h.total += tok;
-
-      if (hourMap[h].total > maxTokens) maxTokens = hourMap[h].total;
+    const seriesMap = {};
+    seriesList.forEach(s => {
+      seriesMap[s.id] = s;
     });
 
-    const sortedHours = Array.from(allHoursSet).sort();
-    if (peakInfo) peakInfo.innerText = `Peak: ${maxTokens.toLocaleString()} tokens/hr`;
+    let maxTokens = 50;
+    seriesList.forEach(s => {
+      const pts = s.points || [];
+      pts.forEach(p => {
+        if (p > maxTokens) maxTokens = p;
+      });
+    });
 
-    // Update legend pill badges with exact 24h token numbers
+    if (peakInfo) {
+      const modeSuffix = chartMode === "cumulative" ? "total run" : `/${bucketMin}m`;
+      peakInfo.innerText = `Peak: ${maxTokens.toLocaleString()} tokens ${modeSuffix}`;
+    }
+
+    // Update legend pill badges with exact tokens
     platforms.concat(["total"]).forEach(p => {
       const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
       if (pill) {
@@ -918,7 +1025,8 @@ window.App = {
           b.className = "legend-token-badge";
           pill.appendChild(b);
         }
-        const pTok = totals24h[p] || 0;
+        const s = seriesMap[p];
+        const pTok = s ? (s.total_tokens || 0) : 0;
         if (pTok > 0) {
           b.innerText = pTok >= 1000 ? `${(pTok / 1000).toFixed(1)}k` : `${pTok} t`;
           b.style.cssText = p === "total"
@@ -931,14 +1039,15 @@ window.App = {
       }
     });
 
-    // Check single active platform dominance and inform user
-    const activePlatforms = platforms.filter(p => totals24h[p] > 0);
+    // Check single active platform dominance
+    const activePlatforms = platforms.filter(p => (seriesMap[p]?.total_tokens || 0) > 0);
     if (singleProvNotice) {
-      if (activePlatforms.length === 1 && totals24h.total > 0) {
+      if (activePlatforms.length === 1 && totalTokens > 0) {
         const soleProv = activePlatforms[0];
         const soleName = platformNames[soleProv];
+        const soleToks = seriesMap[soleProv]?.total_tokens || 0;
         singleProvNotice.style.display = "inline-flex";
-        singleProvNotice.innerHTML = `ℹ️ <strong>${soleName}</strong> accounts for 100% of activity (${totals24h[soleProv].toLocaleString()} tokens). Total Combined envelope mirrors ${soleName}. Other platforms idle at 0 baseline.`;
+        singleProvNotice.innerHTML = `ℹ️ <strong>${soleName}</strong> accounts for 100% of activity (${soleToks.toLocaleString()} tokens). Total Combined curve mirrors ${soleName}. Other platforms idle at 0 baseline.`;
       } else {
         singleProvNotice.style.display = "none";
       }
@@ -953,8 +1062,6 @@ window.App = {
     const padB = 30;
     const plotW = width - padL - padR;
     const plotH = height - padT - padB;
-
-    const numPoints = sortedHours.length;
     const step = numPoints > 1 ? plotW / (numPoints - 1) : plotW;
 
     // Grid lines (3 levels: 0%, 50%, 100%)
@@ -968,16 +1075,20 @@ window.App = {
       `;
     });
 
-    // Time axis labels along the bottom
+    // Time axis labels along the bottom (localized to user's timezone)
     let axisHtml = "";
-    sortedHours.forEach((hourStr, idx) => {
-      const x = padL + (idx * step);
-      const label = hourStr.substring(11, 13) + ":00";
-      const showLabel = numPoints <= 12 || idx % Math.ceil(numPoints / 8) === 0 || idx === numPoints - 1;
+    const localLabels = (keys && keys.length === numPoints)
+      ? keys.map(k => this.formatLocalTime(k))
+      : labels;
+
+    const labelInterval = Math.max(1, Math.ceil(numPoints / 10));
+    localLabels.forEach((labelStr, idx) => {
+      const showLabel = (idx % labelInterval === 0) || (idx === numPoints - 1);
       if (showLabel) {
+        const x = padL + (idx * step);
         axisHtml += `
           <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 4}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-          <text x="${x}" y="${height - 8}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${label}</text>
+          <text x="${x}" y="${height - 8}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${labelStr}</text>
         `;
       }
     });
@@ -999,23 +1110,24 @@ window.App = {
     seriesToRender.forEach(seriesKey => {
       const color = platformColors[seriesKey];
       const isTotal = seriesKey === "total";
+      const sObj = seriesMap[seriesKey];
+      const rawPoints = sObj?.points || new Array(numPoints).fill(0);
       const points = [];
 
-      sortedHours.forEach((hourStr, idx) => {
-        const tok = hourMap[hourStr][seriesKey] || 0;
+      rawPoints.forEach((tokVal, idx) => {
+        const tok = Number(tokVal) || 0;
         const x = numPoints > 1 ? (padL + (idx * step)) : (padL + plotW / 2);
         const y = padT + plotH - ((tok / maxTokens) * plotH);
-        points.push({ x, y, tok, hour: hourStr.substring(11, 13) + ":00" });
+        points.push({ x, y, tok, label: localLabels[idx] || labels[idx] });
       });
 
       const hasData = points.some(p => p.tok > 0);
 
       if (!hasData && !isTotal) {
-        // Option A clean zero baseline for idle platforms
         const yZero = padT + plotH;
         linesHtml += `
           <path class="chart-line-path chart-idle-baseline" data-series="${seriesKey}" d="M ${padL} ${yZero} L ${width - padR} ${yZero}" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.25" style="transition: all 0.2s ease;">
-            <title>${platformNames[seriesKey]}: Idle (0 tokens across 24h)</title>
+            <title>${platformNames[seriesKey]}: Idle (0 tokens)</title>
           </path>
         `;
         return;
@@ -1027,7 +1139,6 @@ window.App = {
       });
 
       if (isTotal && hasData) {
-        // Translucent area fill underneath Total curve
         const areaD = `${d} L ${points[points.length - 1].x} ${padT + plotH} L ${points[0].x} ${padT + plotH} Z`;
         areaHtml += `
           <path class="chart-total-area" data-series="total" d="${areaD}" fill="url(#velocity-total-area-grad)" opacity="0.9" pointer-events="none"></path>
@@ -1040,16 +1151,15 @@ window.App = {
 
       linesHtml += `
         <path class="chart-line-path" data-series="${seriesKey}" d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" ${strokeDash} opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round" style="transition: all 0.2s ease;">
-          <title>${platformNames[seriesKey]} Trend</title>
+          <title>${platformNames[seriesKey]}</title>
         </path>
       `;
 
-      // Dots on active points
       points.forEach(pt => {
         if (pt.tok > 0) {
           dotsHtml += `
             <circle class="chart-dot" data-series="${seriesKey}" cx="${pt.x}" cy="${pt.y}" r="${isTotal ? 3 : 4}" fill="${color}" stroke="#0b0f19" stroke-width="1.5" style="cursor: pointer;">
-              <title>${platformNames[seriesKey]}: ${pt.tok.toLocaleString()} tokens at ${pt.hour} UTC</title>
+              <title>${platformNames[seriesKey]}: ${pt.tok.toLocaleString()} tokens at ${pt.label}</title>
             </circle>
           `;
         }
@@ -1073,17 +1183,16 @@ window.App = {
       ${crosshairHtml}
     `;
 
-    // Setup interactive legend click filtering & hover flyout
     this._setupChartLegendInteractivity();
-    this._setupChartHoverCrosshair(sortedHours, hourMap, padL, plotW, step, platforms, platformNames, platformColors);
+    this._setupChartHoverCrosshair(localLabels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin);
   },
 
-  _setupChartHoverCrosshair(sortedHours, hourMap, padL, plotW, step, platforms, platformNames, platformColors) {
+  _setupChartHoverCrosshair(labels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin) {
     const container = document.getElementById("svg-chart-container");
     const svg = document.getElementById("token-velocity-chart");
     const crosshair = document.getElementById("chart-crosshair-line");
     const tooltip = document.getElementById("chart-flyout-tooltip");
-    if (!container || !svg || !crosshair || !tooltip || sortedHours.length === 0) return;
+    if (!container || !svg || !crosshair || !tooltip || !labels || labels.length === 0) return;
 
     container.onmousemove = (e) => {
       const rect = svg.getBoundingClientRect();
@@ -1096,24 +1205,24 @@ window.App = {
         return;
       }
 
-      const numPoints = sortedHours.length;
+      const numPoints = labels.length;
       const idx = Math.max(0, Math.min(numPoints - 1, Math.round((svgX - padL) / (numPoints > 1 ? step : 1))));
-      const hKey = sortedHours[idx];
-      const hData = hourMap[hKey];
-      if (!hData) return;
-
       const ptX = padL + (idx * (numPoints > 1 ? step : 0));
       crosshair.setAttribute("x1", ptX);
       crosshair.setAttribute("x2", ptX);
       crosshair.setAttribute("opacity", "1");
 
-      const label = hKey.substring(11, 13) + ":00 UTC (" + hKey.substring(0, 10) + ")";
+      const timeLabel = labels[idx];
+      const timeKey = keys[idx] || "";
+      const totalTok = seriesMap["total"]?.points?.[idx] || 0;
+      const modeDesc = chartMode === "cumulative" ? "Cumulative Run" : `${bucketMin}m Interval Burst`;
+
       let rowsHtml = "";
       platforms.forEach(p => {
-        const tok = hData[p] || 0;
+        const tok = seriesMap[p]?.points?.[idx] || 0;
         const color = platformColors[p];
         const name = platformNames[p];
-        const pct = hData.total > 0 && tok > 0 ? ` (${Math.round((tok / hData.total) * 100)}%)` : (tok === 0 ? " (idle)" : "");
+        const pct = totalTok > 0 && tok > 0 ? ` (${Math.round((tok / totalTok) * 100)}%)` : (tok === 0 ? " (idle)" : "");
         rowsHtml += `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 3px;">
             <span style="color: ${color}; display: flex; align-items: center; gap: 4px;">
@@ -1129,8 +1238,8 @@ window.App = {
 
       tooltip.innerHTML = `
         <div style="font-size: 0.76rem; font-weight: 700; color: #fff; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
-          <span>⏱️ ${label}</span>
-          <span style="font-family: var(--font-mono); font-size: 0.74rem; color: #06b6d4; font-weight: 800;">${hData.total.toLocaleString()} total</span>
+          <span>⏱️ ${timeKey ? this.formatLocalDateTime(timeKey) : timeLabel} <span style="font-size: 0.65rem; color: #94a3b8; font-weight: 400;">(${modeDesc})</span></span>
+          <span style="font-family: var(--font-mono); font-size: 0.74rem; color: #06b6d4; font-weight: 800;">${totalTok.toLocaleString()} total</span>
         </div>
         <div style="height: 1px; background: rgba(255,255,255,0.1); margin-bottom: 6px;"></div>
         <div style="font-size: 0.72rem;">
@@ -1700,6 +1809,101 @@ window.App = {
     }
   },
 
+  sortSessionsBy(column) {
+    if (this.sessionSortCol === column) {
+      this.sessionSortAsc = !this.sessionSortAsc;
+    } else {
+      this.sessionSortCol = column;
+      if (["session_id", "provider", "model", "client_ip"].includes(column)) {
+        this.sessionSortAsc = true;
+      } else {
+        this.sessionSortAsc = false;
+      }
+    }
+
+    const cols = [
+      "session_id", "provider", "model", "client_ip",
+      "input_tokens", "output_tokens", "total_tokens", "estimated_cost",
+      "first_activity", "last_activity", "duration"
+    ];
+    cols.forEach(c => {
+      const el = document.getElementById("sort-icon-" + c);
+      if (el) {
+        el.innerText = (c === this.sessionSortCol ? (this.sessionSortAsc ? " ▲" : " ▼") : "");
+      }
+    });
+
+    this.applySessionFilterAndSort();
+  },
+
+  applySessionFilterAndSort() {
+    if (!this.rawSessions || !Array.isArray(this.rawSessions)) {
+      this.renderSessions([]);
+      return;
+    }
+
+    const searchInput = document.getElementById("filter-session-search");
+    const searchVal = searchInput ? searchInput.value.trim().toLowerCase() : "";
+
+    const provSelect = document.getElementById("filter-session-provider");
+    const provVal = provSelect ? provSelect.value.trim().toLowerCase() : "";
+
+    let list = this.rawSessions.slice();
+
+    if (provVal) {
+      list = list.filter(s => (s.provider || "").toLowerCase() === provVal);
+    }
+
+    if (searchVal) {
+      list = list.filter(s => {
+        const sid = (s.session_id || "").toLowerCase();
+        const p = (s.provider || "").toLowerCase();
+        const m = (s.model || "").toLowerCase();
+        const ip = (s.client_ip || "").toLowerCase();
+        const alias = (s.client_alias || "").toLowerCase();
+        return sid.includes(searchVal) || p.includes(searchVal) || m.includes(searchVal) || ip.includes(searchVal) || alias.includes(searchVal);
+      });
+    }
+
+    const col = this.sessionSortCol || "last_activity";
+    const asc = !!this.sessionSortAsc;
+
+    list.sort((a, b) => {
+      let vA, vB;
+      if (["input_tokens", "output_tokens", "total_tokens", "estimated_cost"].includes(col)) {
+        vA = Number(a[col] || 0);
+        vB = Number(b[col] || 0);
+        return asc ? vA - vB : vB - vA;
+      } else if (col === "duration") {
+        const getDurSec = (s) => {
+          if (!s.first_activity || !s.last_activity) return 0;
+          let s1 = s.first_activity.endsWith("Z") ? s.first_activity : s.first_activity + "Z";
+          let s2 = s.last_activity.endsWith("Z") ? s.last_activity : s.last_activity + "Z";
+          return Math.max(0, (new Date(s2).getTime() - new Date(s1).getTime()) / 1000);
+        };
+        vA = getDurSec(a);
+        vB = getDurSec(b);
+        return asc ? vA - vB : vB - vA;
+      } else if (["first_activity", "last_activity"].includes(col)) {
+        const getTs = (s, f) => {
+          if (!s[f]) return 0;
+          let str = s[f].endsWith("Z") ? s[f] : s[f] + "Z";
+          const t = new Date(str).getTime();
+          return isNaN(t) ? 0 : t;
+        };
+        vA = getTs(a, col);
+        vB = getTs(b, col);
+        return asc ? vA - vB : vB - vA;
+      } else {
+        vA = String(a[col] || "").toLowerCase();
+        vB = String(b[col] || "").toLowerCase();
+        return asc ? vA.localeCompare(vB) : vB.localeCompare(vA);
+      }
+    });
+
+    this.renderSessions(list);
+  },
+
   renderSessions(sessions) {
     const tbody = document.getElementById("sessions-table-body");
     if (!tbody) return;
@@ -1707,7 +1911,7 @@ window.App = {
     if (!sessions || sessions.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="8" style="text-align: center; color: var(--text-dim); padding: 32px 20px;">
+          <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 32px 20px;">
             <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
               <img src="/assets/mascot/johnny5_inspecting.jpg" alt="Johnny 5 Inspecting" style="width: 76px; height: 76px; border-radius: 14px; border: 2px solid rgba(6, 182, 212, 0.4); box-shadow: 0 0 18px rgba(6, 182, 212, 0.3); object-fit: cover;">
               <div style="color: var(--text-main); font-weight: 700; font-size: 0.95rem;">Johnny 5 is scanning for token traffic...</div>
@@ -1722,22 +1926,38 @@ window.App = {
     }
 
     tbody.innerHTML = sessions.map(s => {
-      const timeStr = s.last_activity ? s.last_activity.replace("T", " ").substring(0, 19) : "-";
       let provBadgeClass = "badge-claude";
       if (s.provider === "copilot") provBadgeClass = "badge-copilot";
       else if (s.provider === "gemini") provBadgeClass = "badge-gemini";
       else if (s.provider === "ollama") provBadgeClass = "badge-ollama";
+      else if (s.provider === "chatgpt") provBadgeClass = "badge-chatgpt";
+
+      const firstTime = this.formatLocalDateTime(s.first_activity);
+      const lastTime = this.formatLocalDateTime(s.last_activity);
+      const durationStr = this.formatDuration(s.first_activity, s.last_activity);
+      const clientIp = s.client_ip || "127.0.0.1";
+      const clientAlias = s.client_alias || "localhost";
 
       return `
         <tr>
           <td><code style="font-family: var(--font-mono); color: var(--accent-cyan); font-size: 0.8rem;">${this.escapeHtml(s.session_id)}</code></td>
           <td><span class="badge ${provBadgeClass}">${this.escapeHtml(s.provider)}</span></td>
           <td style="color: var(--text-muted); font-size: 0.82rem;">${this.escapeHtml(s.model || 'default')}</td>
-          <td style="font-family: var(--font-mono);">${Number(s.input_tokens).toLocaleString()}</td>
-          <td style="font-family: var(--font-mono);">${Number(s.output_tokens).toLocaleString()}</td>
-          <td style="font-family: var(--font-mono); font-weight: 700; color: #fff;">${Number(s.total_tokens).toLocaleString()}</td>
-          <td style="font-family: var(--font-mono); color: var(--accent-emerald);">$${Number(s.estimated_cost).toFixed(4)}</td>
-          <td style="font-size: 0.78rem; color: var(--text-dim);">${timeStr}</td>
+          <td>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-family: var(--font-mono); font-size: 0.8rem; color: #e2e8f0;">${this.escapeHtml(clientIp)}</span>
+              <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.12); color: #38bdf8; width: fit-content;">💻 ${this.escapeHtml(clientAlias)}</span>
+            </div>
+          </td>
+          <td style="font-family: var(--font-mono); text-align: right;">${Number(s.input_tokens).toLocaleString()}</td>
+          <td style="font-family: var(--font-mono); text-align: right;">${Number(s.output_tokens).toLocaleString()}</td>
+          <td style="font-family: var(--font-mono); font-weight: 700; color: #fff; text-align: right;">${Number(s.total_tokens).toLocaleString()}</td>
+          <td style="font-family: var(--font-mono); color: var(--accent-emerald); text-align: right;">$${Number(s.estimated_cost).toFixed(4)}</td>
+          <td style="font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono);">${firstTime}</td>
+          <td style="font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono);">${lastTime}</td>
+          <td>
+            <span class="badge" style="font-size: 0.72rem; font-family: var(--font-mono); background: rgba(255,255,255,0.06); color: #93c5fd;">⏱️ ${durationStr}</span>
+          </td>
         </tr>
       `;
     }).join("");
@@ -1849,6 +2069,13 @@ window.App = {
   openClaudeQuotaModal() {
     const modal = document.getElementById("claude-quota-modal");
     if (modal) {
+      const isTeamMode = (this.appSettings && this.appSettings.quota_tracking_mode === "team") ||
+                         (this.lastCompData && this.lastCompData.tracking_mode === "team");
+      const teamSection = document.getElementById("claude-quota-team-section");
+      if (teamSection) {
+        teamSection.style.display = isTeamMode ? "block" : "none";
+      }
+
       if (this.lastCompData && this.lastCompData.providers && this.lastCompData.providers.claude) {
         const c = this.lastCompData.providers.claude;
         const h = c.hierarchy || {};
@@ -1856,7 +2083,15 @@ window.App = {
         const team = h.team || {};
 
         const scopeSelect = document.getElementById("claude-quota-scope-select");
-        if (scopeSelect && h.scope) scopeSelect.value = h.scope;
+        if (scopeSelect) {
+          if (!isTeamMode) {
+            scopeSelect.value = "individual";
+            scopeSelect.disabled = true;
+          } else {
+            scopeSelect.disabled = false;
+            if (h.scope) scopeSelect.value = h.scope;
+          }
+        }
 
         const indSess = document.getElementById("claude-quota-ind-session-used");
         if (indSess && ind.session_used_pct !== undefined) indSess.value = ind.session_used_pct;
@@ -2671,6 +2906,8 @@ window.App = {
       const showAxisLabels = document.getElementById("cfg-show-axis-labels");
       const themeSelect = document.getElementById("cfg-widget-theme");
       const pollCadence = document.getElementById("cfg-poll-cadence");
+      const refreshCadence = document.getElementById("cfg-ui-refresh-cadence");
+      const topRefreshCadence = document.getElementById("ui-refresh-cadence-select");
       const ollamaSync = document.getElementById("cfg-ollama-sync");
       const viewModeSelect = document.getElementById("cfg-default-view-mode");
 
@@ -2683,6 +2920,13 @@ window.App = {
       }
       if (themeSelect && st.widget_theme) themeSelect.value = st.widget_theme;
       if (pollCadence && st.poll_cadence_seconds) pollCadence.value = st.poll_cadence_seconds;
+      if (st.ui_refresh_interval_seconds) {
+        const intervalSec = Math.max(30, Math.min(300, parseInt(st.ui_refresh_interval_seconds, 10) || 30));
+        if (refreshCadence) refreshCadence.value = intervalSec;
+        if (topRefreshCadence) topRefreshCadence.value = intervalSec;
+        this.refreshCadenceSeconds = intervalSec;
+        this.resetPollingInterval(intervalSec);
+      }
       if (ollamaSync && st.ollama_sync_interval) ollamaSync.value = st.ollama_sync_interval;
       if (viewModeSelect && st.widget_view_mode) viewModeSelect.value = st.widget_view_mode;
 
@@ -2702,6 +2946,40 @@ window.App = {
         const chk = document.getElementById(`vis-chk-${p}`);
         if (chk) chk.checked = !hiddenPlatforms.includes(p);
       });
+
+      // Quota Tracking Mode (AIUM-618)
+      const trackingMode = st.quota_tracking_mode || "individual";
+      const radInd = document.getElementById("cfg-tracking-mode-individual");
+      const radTeam = document.getElementById("cfg-tracking-mode-team");
+      if (radInd && radTeam) {
+        radInd.checked = (trackingMode === "individual");
+        radTeam.checked = (trackingMode === "team");
+      }
+      this.updateTrackingModeBadges(trackingMode);
+
+      // Proxy Bridges & Network Ports Configuration (AIUM-707)
+      const ollamaPortInput = document.getElementById("cfg-ollama-emulator-port");
+      const proxyPortInput = document.getElementById("cfg-transparent-proxy-port");
+      const defWinInput = document.getElementById("cfg-default-session-window");
+      const defSessInput = document.getElementById("cfg-default-session-limit");
+      const defDailyInput = document.getElementById("cfg-default-daily-limit");
+
+      const ollamaPort = st.ollama_emulator_port || 8989;
+      const proxyPort = st.transparent_proxy_port || 8766;
+
+      if (ollamaPortInput) ollamaPortInput.value = ollamaPort;
+      if (proxyPortInput) proxyPortInput.value = proxyPort;
+      if (defWinInput) defWinInput.value = st.default_session_window_minutes || 15;
+      if (defSessInput) defSessInput.value = st.default_session_token_limit || 25000;
+      if (defDailyInput) defDailyInput.value = st.default_daily_token_limit || 250000;
+
+      // Update Live Proxy Bridge endpoints in the guidance ribbon
+      const bridgeOllamaUrl = document.getElementById("bridge-guide-ollama-url");
+      const bridgeOpenAiUrl = document.getElementById("bridge-guide-openai-url");
+      const bridgeProxyUrl = document.getElementById("bridge-guide-proxy-url");
+      if (bridgeOllamaUrl) bridgeOllamaUrl.innerText = `http://127.0.0.1:${ollamaPort}`;
+      if (bridgeOpenAiUrl) bridgeOpenAiUrl.innerText = `http://127.0.0.1:${ollamaPort}/v1`;
+      if (bridgeProxyUrl) bridgeProxyUrl.innerText = `http://127.0.0.1:${proxyPort}`;
     } catch (e) {
       console.warn("Error loading settings:", e);
     }
@@ -2714,6 +2992,7 @@ window.App = {
     const showAxisLabels = document.getElementById("cfg-show-axis-labels");
     const themeSelect = document.getElementById("cfg-widget-theme");
     const pollCadence = document.getElementById("cfg-poll-cadence");
+    const refreshCadence = document.getElementById("cfg-ui-refresh-cadence");
     const ollamaSync = document.getElementById("cfg-ollama-sync");
     const viewModeSelect = document.getElementById("cfg-default-view-mode");
 
@@ -2727,6 +3006,16 @@ window.App = {
       if (chk && !chk.checked) hiddenPlatforms.push(p);
     });
 
+    const trackingModeRad = document.querySelector("input[name='cfg-tracking-mode']:checked");
+    const quotaTrackingMode = trackingModeRad ? trackingModeRad.value : (this.appSettings?.quota_tracking_mode || "individual");
+
+    // Bridge ports & defaults (AIUM-707)
+    const ollamaPortInput = document.getElementById("cfg-ollama-emulator-port");
+    const proxyPortInput = document.getElementById("cfg-transparent-proxy-port");
+    const defWinInput = document.getElementById("cfg-default-session-window");
+    const defSessInput = document.getElementById("cfg-default-session-limit");
+    const defDailyInput = document.getElementById("cfg-default-daily-limit");
+
     const payload = {
       widget_auto_resize: autoResize ? autoResize.checked : true,
       widget_fade_unpinned: fadeUnpinned ? fadeUnpinned.checked : false,
@@ -2735,9 +3024,16 @@ window.App = {
       widget_theme: themeSelect ? themeSelect.value : "obsidian_neon",
       widget_font_size: checkedFont ? checkedFont.value : "standard",
       poll_cadence_seconds: pollCadence ? parseInt(pollCadence.value, 10) || 4 : 4,
+      ui_refresh_interval_seconds: refreshCadence ? Math.max(30, Math.min(300, parseInt(refreshCadence.value, 10) || 30)) : 30,
       ollama_sync_interval: ollamaSync ? parseInt(ollamaSync.value, 10) || 15 : 15,
       widget_view_mode: viewModeSelect ? viewModeSelect.value : "balances",
       pinned_items: pinned,
+      quota_tracking_mode: quotaTrackingMode,
+      ollama_emulator_port: parseInt(ollamaPortInput ? ollamaPortInput.value : "8989", 10) || 8989,
+      transparent_proxy_port: parseInt(proxyPortInput ? proxyPortInput.value : "8766", 10) || 8766,
+      default_session_window_minutes: parseInt(defWinInput ? defWinInput.value : "15", 10) || 15,
+      default_session_token_limit: parseInt(defSessInput ? defSessInput.value : "25000", 10) || 25000,
+      default_daily_token_limit: parseInt(defDailyInput ? defDailyInput.value : "250000", 10) || 250000,
       estate_visibility: {
         hidden_platforms: hiddenPlatforms,
         hidden_accounts: [],
@@ -2758,6 +3054,20 @@ window.App = {
       if (res.ok) {
         const data = await res.json();
         this.appSettings = data.settings || payload;
+        if (payload.ui_refresh_interval_seconds) {
+          this.resetPollingInterval(payload.ui_refresh_interval_seconds);
+          const topSelect = document.getElementById("ui-refresh-cadence-select");
+          if (topSelect) topSelect.value = payload.ui_refresh_interval_seconds;
+        }
+
+        // Live update bridge guidance ribbon endpoints
+        const bridgeOllamaUrl = document.getElementById("bridge-guide-ollama-url");
+        const bridgeOpenAiUrl = document.getElementById("bridge-guide-openai-url");
+        const bridgeProxyUrl = document.getElementById("bridge-guide-proxy-url");
+        if (bridgeOllamaUrl) bridgeOllamaUrl.innerText = `http://127.0.0.1:${payload.ollama_emulator_port}`;
+        if (bridgeOpenAiUrl) bridgeOpenAiUrl.innerText = `http://127.0.0.1:${payload.ollama_emulator_port}/v1`;
+        if (bridgeProxyUrl) bridgeProxyUrl.innerText = `http://127.0.0.1:${payload.transparent_proxy_port}`;
+
         // Also persist to visibility endpoint
         await fetch("/api/settings/visibility", {
           method: "POST",
@@ -2765,10 +3075,32 @@ window.App = {
           body: JSON.stringify(payload.estate_visibility)
         }).catch(() => {});
         alert("✅ Configuration successfully saved and encrypted into Windows DPAPI storage!");
+        this.updateTrackingModeBadges(payload.quota_tracking_mode);
         await this.loadUsageData();
       }
     } catch (e) {
       alert("❌ Error saving settings: " + e.message);
+    }
+  },
+
+  onTrackingModeOptionChange(mode) {
+    this.updateTrackingModeBadges(mode);
+  },
+
+  updateTrackingModeBadges(mode) {
+    const badge = document.getElementById("tracking-mode-active-badge");
+    if (badge) {
+      if (mode === "individual") {
+        badge.innerText = "👤 Individual Direct Active";
+        badge.style.background = "rgba(56, 189, 248, 0.15)";
+        badge.style.color = "#38bdf8";
+        badge.style.borderColor = "rgba(56, 189, 248, 0.3)";
+      } else {
+        badge.innerText = "👥 Team Pool Active";
+        badge.style.background = "rgba(168, 85, 247, 0.15)";
+        badge.style.color = "#c084fc";
+        badge.style.borderColor = "rgba(168, 85, 247, 0.3)";
+      }
     }
   },
 
@@ -3431,7 +3763,7 @@ window.App = {
           ${e.ttft_ms} ms
         </td>
         <td style="padding: 10px 14px; font-size: 0.72rem; color: var(--text-dim);">
-          ${e.recorded_at ? e.recorded_at.substring(0, 19).replace('T', ' ') : 'N/A'}
+          ${this.formatLocalDateTime(e.recorded_at)}
         </td>
       </tr>
     `).join("");
@@ -3505,6 +3837,1188 @@ window.App = {
     }
   },
 
+  // =========================================================================
+  // Remote AI Managed Nodes, Device Inventory & LAN Discovery (AIUM-703, AIUM-704)
+  // =========================================================================
+  _attachedQueryFiles: [],
+  _detectedAdapters: [],
+
+  async fetchDetectedAdapters() {
+    try {
+      const res = await fetch("/api/discovery/adapters");
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.adapters)) {
+        this._detectedAdapters = data.adapters;
+        const presetSelect = document.getElementById("lan-preset-select");
+        const targetSpecInput = document.getElementById("lan-target-spec-input");
+        if (presetSelect && this._detectedAdapters.length > 0) {
+          const nonLoop = this._detectedAdapters.find(a => !a.ip.startsWith("127.")) || this._detectedAdapters[0];
+          const autoOpt = presetSelect.querySelector('option[value="auto"]');
+          if (autoOpt) {
+            autoOpt.innerText = `Auto-Detect (${nonLoop.name}: ${nonLoop.subnet})`;
+          }
+          if (targetSpecInput && (!targetSpecInput.value || targetSpecInput.value === "10.1.7.0/24")) {
+            targetSpecInput.value = nonLoop.subnet;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch network adapters:", e);
+    }
+  },
+
+  onSubnetPresetChange(presetValue) {
+    const input = document.getElementById("lan-target-spec-input");
+    if (!input) return;
+    if (presetValue === "auto") {
+      const nonLoop = (this._detectedAdapters || []).find(a => !a.ip.startsWith("127.")) || (this._detectedAdapters && this._detectedAdapters[0]);
+      input.value = nonLoop ? nonLoop.subnet : "10.1.7.0/24";
+    } else if (presetValue === "custom") {
+      input.focus();
+      input.select();
+    } else {
+      input.value = presetValue;
+    }
+  },
+
+  toggleScanGuidance() {
+    const panel = document.getElementById("lan-scan-guidance-panel");
+    if (panel) {
+      panel.style.display = panel.style.display === "none" ? "block" : "none";
+    }
+  },
+
+  async scanLANAIServices() {
+    const btn = document.getElementById("btn-scan-lan");
+    const box = document.getElementById("lan-scan-results-box");
+    const grid = document.getElementById("lan-discovered-nodes-grid");
+    const statusText = document.getElementById("lan-scan-status-text");
+    const targetSpecInput = document.getElementById("lan-target-spec-input");
+    const secPortsInput = document.getElementById("lan-secondary-ports-input");
+
+    const spec = (targetSpecInput && targetSpecInput.value.trim()) || "10.1.7.0/24";
+
+    const platforms = [];
+    if (document.getElementById("chk-platform-ollama")?.checked) platforms.push("ollama");
+    if (document.getElementById("chk-platform-lmstudio")?.checked) platforms.push("lmstudio");
+    if (document.getElementById("chk-platform-vllm")?.checked) platforms.push("vllm");
+    if (document.getElementById("chk-platform-oobabooga")?.checked) platforms.push("oobabooga");
+    if (document.getElementById("chk-platform-tabby")?.checked) platforms.push("tabby_kobold");
+    if (document.getElementById("chk-platform-openwebui")?.checked) platforms.push("open_webui");
+
+    const secPorts = (secPortsInput && secPortsInput.value.trim())
+      ? secPortsInput.value.split(",").map(p => parseInt(p.trim(), 10)).filter(p => !isNaN(p))
+      : [];
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = "⏳ Scanning Network...";
+    }
+    if (box) box.style.display = "block";
+    if (statusText) statusText.innerText = `Sweeping target range [${spec}] for selected platforms (${platforms.join(", ")})...`;
+    if (grid) grid.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8rem; padding: 10px;">Probing network hosts and fingerprinting AI endpoints... please wait ~2-3 seconds.</div>';
+
+    try {
+      const res = await fetch("/api/discovery/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          range: spec,
+          platforms: platforms,
+          secondary_ports: secPorts,
+          timeout: 0.4
+        })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        const candidates = data.candidates || [];
+        if (statusText) {
+          statusText.innerText = `Scan Complete: Discovered ${candidates.length} exposed AI instance(s) matching selected platforms.`;
+        }
+        if (candidates.length === 0) {
+          if (grid) {
+            grid.innerHTML = `
+              <div style="color: var(--text-muted); font-size: 0.8rem; padding: 10px; grid-column: 1 / -1;">
+                No exposed AI instances detected in range <code>${this.escapeHtml(spec)}</code>.<br>
+                Ensure target devices have their firewall port open and local engines bound to <code>0.0.0.0</code> (e.g. <code>OLLAMA_HOST=0.0.0.0</code> on Windows).
+              </div>
+            `;
+          }
+        } else {
+          if (grid) {
+            grid.innerHTML = candidates.map(c => {
+              const alias = c.alias || c.ip;
+              return `
+                <div style="background: rgba(15,23,42,0.95); border: 1px solid rgba(34,211,238,0.3); border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; justify-content: space-between;">
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <div>
+                        <strong style="color: #fff; font-size: 0.88rem; display: block;">${this.escapeHtml(alias)}</strong>
+                        <code style="font-size: 0.72rem; color: #38bdf8; font-family: var(--font-mono);">${c.ip}:${c.port}</code>
+                      </div>
+                      <span class="badge" style="background: rgba(34,211,238,0.15); color: #22d3ee; font-size: 0.68rem; text-transform: uppercase;">● ${c.engine}</span>
+                    </div>
+                    <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 6px;">
+                      Latency: <span style="color: var(--accent-cyan); font-weight: 600;">${c.latency_ms}ms</span> &bull; Version: ${c.version || 'unknown'}
+                    </div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 10px; max-height: 48px; overflow-y: auto;">
+                      ${(c.models && c.models.length > 0) ? c.models.map(m => `<span style="display: inline-block; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; margin: 2px;">${m.name || m}</span>`).join(' ') : 'No installed models listed'}
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 6px;">
+                    <button class="btn btn-primary btn-sm" style="font-size: 0.74rem; flex: 1;" onclick="window.App.quickRegisterNode('${c.endpoint}', '${this.escapeHtml(alias)} (${c.ip})', '${c.engine}', ${JSON.stringify(c.models || []).replace(/"/g, '&quot;')}, 1, 'Active Compute')">
+                      ➕ Add to Compute Pool
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+        await this.loadDeviceInventory();
+      } else {
+        if (statusText) statusText.innerText = `Scan error: ${data.error || 'Request failed'}`;
+      }
+    } catch (e) {
+      console.error("Scan LAN error:", e);
+      if (statusText) statusText.innerText = "Network scan error: check console logs.";
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = "<span>📡</span> Scan Network";
+      }
+    }
+  },
+
+  async loadDeviceInventory() {
+    const listEl = document.getElementById("lan-device-inventory-list");
+    if (!listEl) return;
+
+    try {
+      const res = await fetch("/api/discovery/inventory");
+      const data = await res.json();
+      const inventory = (data && data.inventory) || [];
+
+      if (inventory.length === 0) {
+        listEl.innerHTML = `
+          <div style="background: rgba(0,0,0,0.15); border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; color: var(--text-dim); font-size: 0.78rem; text-align: center; grid-column: 1 / -1;">
+            No known devices recorded in inventory yet. Click "Scan Network" to sweep your subnet and discover active hosts.
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = inventory.map(dev => {
+        let stateBadge = '';
+        let borderColor = 'var(--border-subtle)';
+        if (dev.state === 'KNOWN_SERVICES') {
+          stateBadge = '<span class="badge" style="background: rgba(34,211,238,0.15); color: #22d3ee; border: 1px solid rgba(34,211,238,0.4); font-size: 0.68rem;">● Known Services</span>';
+          borderColor = 'rgba(34,211,238,0.3)';
+        } else if (dev.state === 'NO_SERVICES') {
+          stateBadge = '<span class="badge" style="background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.4); font-size: 0.68rem;">● No AI Services</span>';
+          borderColor = 'rgba(239,68,68,0.3)';
+        } else {
+          stateBadge = '<span class="badge" style="background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.4); font-size: 0.68rem;">● Pending / Unscanned</span>';
+          borderColor = 'rgba(245,158,11,0.3)';
+        }
+
+        const isTrusted = dev.is_trusted !== 0;
+        const trustBadge = isTrusted
+          ? '<span class="badge" style="background: rgba(16,185,129,0.12); color: #34d399; font-size: 0.66rem;">🛡️ Trusted</span>'
+          : '<span class="badge" style="background: rgba(239,68,68,0.15); color: #f87171; font-size: 0.66rem; font-weight: 700;">🚨 UNTRUSTED</span>';
+
+        const services = dev.discovered_services || [];
+        const servicesHtml = services.length > 0
+          ? services.map(s => `<span style="display: inline-block; background: rgba(34,211,238,0.1); color: #a5f3fc; padding: 1px 6px; border-radius: 3px; margin: 2px; font-size: 0.7rem;">${s.engine} :${s.port}</span>`).join(' ')
+          : '<span style="color: var(--text-muted); font-size: 0.7rem;">No AI ports responsive</span>';
+
+        return `
+          <div style="background: rgba(15,23,42,0.85); border: 1px solid ${borderColor}; border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                <div>
+                  <strong style="color: #fff; font-size: 0.88rem;">${this.escapeHtml(dev.alias)}</strong>
+                  <code style="display: block; font-size: 0.72rem; color: var(--text-dim); font-family: var(--font-mono);">${this.escapeHtml(dev.ip)}</code>
+                </div>
+                ${stateBadge}
+              </div>
+              <div style="display: flex; gap: 6px; align-items: center; margin: 6px 0;">
+                ${trustBadge}
+                <span class="badge" style="background: rgba(255,255,255,0.06); color: var(--text-dim); font-size: 0.66rem;">${this.escapeHtml(dev.compute_group || 'Active Compute')}</span>
+              </div>
+              <div style="margin: 6px 0;">
+                ${servicesHtml}
+              </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px; margin-top: 6px;">
+              <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 6px;" onclick="window.App.toggleDeviceTrust('${this.escapeHtml(dev.alias)}', ${isTrusted ? 1 : 0})">
+                ${isTrusted ? 'Mark Untrusted' : 'Mark Trusted'}
+              </button>
+              ${services.length > 0 ? `
+                <button class="btn btn-primary btn-sm" style="font-size: 0.68rem; padding: 2px 8px;" onclick="window.App.quickRegisterNode('http://${dev.ip}:${services[0].port}', '${this.escapeHtml(dev.alias)}', '${services[0].engine}', ${JSON.stringify(services[0].models || []).replace(/"/g, '&quot;')}, ${isTrusted ? 1 : 0}, '${dev.compute_group || 'Active Compute'}')">
+                  ➕ Add to Pool
+                </button>
+              ` : `
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 6px; color: #f87171;" onclick="window.App.deleteDeviceFromInventory('${this.escapeHtml(dev.alias)}')">
+                  🗑️
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      console.error("Error loading device inventory:", e);
+    }
+  },
+
+  async toggleDeviceTrust(alias, currentTrust) {
+    const newTrust = currentTrust ? 0 : 1;
+    try {
+      const dev = await (await fetch(`/api/discovery/inventory`)).json();
+      const item = (dev.inventory || []).find(d => d.alias === alias);
+      if (!item) return;
+
+      await fetch("/api/discovery/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          alias: alias,
+          ip: item.ip,
+          state: item.state,
+          is_trusted: newTrust,
+          compute_group: newTrust === 0 ? "Quarantined" : (item.compute_group === "Quarantined" ? "Active Compute" : item.compute_group),
+          discovered_services: item.discovered_services || [],
+          notes: item.notes || ""
+        })
+      });
+      await this.loadDeviceInventory();
+      await this.loadManagedNodes();
+    } catch (e) {
+      alert("Error toggling device trust: " + e.message);
+    }
+  },
+
+  async deleteDeviceFromInventory(alias) {
+    if (!confirm(`Remove ${alias} from device inventory?`)) return;
+    try {
+      await fetch(`/api/discovery/inventory?alias=${encodeURIComponent(alias)}`, { method: "DELETE" });
+      await this.loadDeviceInventory();
+    } catch (e) {
+      alert("Error deleting device: " + e.message);
+    }
+  },
+
+  async quickRegisterNode(endpoint, name, engine, models, isTrusted = 1, computeGroup = "Active Compute") {
+    const concurrencyStr = prompt(`Set Max Concurrency for ${name} (requests allowed simultaneously):`, "1");
+    if (concurrencyStr === null) return;
+    const maxConcur = parseInt(concurrencyStr, 10) || 1;
+
+    try {
+      const res = await fetch("/api/discovery/nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name,
+          endpoint: endpoint,
+          engine: engine,
+          max_concurrency: maxConcur,
+          queue_timeout_seconds: 30.0,
+          priority: isTrusted ? 5 : 1,
+          is_trusted: isTrusted,
+          compute_group: isTrusted ? computeGroup : "Quarantined",
+          models: models || []
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        await this.loadManagedNodes();
+        const box = document.getElementById("lan-scan-results-box");
+        if (box) box.style.display = "none";
+      } else {
+        alert(data.error || "Failed to register node");
+      }
+    } catch (e) {
+      console.error("Error registering node:", e);
+      alert("Network error registering node");
+    }
+  },
+
+  async openAddCustomNodeModal() {
+    const endpoint = prompt("Enter Node Endpoint URL (e.g. http://10.1.7.74:11434):", "http://10.1.7.74:11434");
+    if (!endpoint) return;
+    const name = prompt("Enter Friendly Hostname/Name for Node:", "ASUS ROG (Jamese-PC)");
+    if (!name) return;
+    const engine = prompt("Enter Engine (ollama, lmstudio, vllm):", "ollama") || "ollama";
+    const isTrustedChoice = confirm("Mark this device as a TRUSTED resource? (Cancel for Untrusted)");
+    const isTrusted = isTrustedChoice ? 1 : 0;
+    const group = isTrusted ? (prompt("Compute Group ('Active Compute', 'Staging', etc.):", "Active Compute") || "Active Compute") : "Quarantined";
+
+    try {
+      const res = await fetch("/api/discovery/nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name,
+          endpoint: endpoint,
+          engine: engine,
+          max_concurrency: 1,
+          queue_timeout_seconds: 30.0,
+          priority: isTrusted ? 5 : 1,
+          is_trusted: isTrusted,
+          compute_group: group
+        })
+      });
+      if (res.ok) {
+        await this.loadManagedNodes();
+      } else {
+        alert("Failed to add custom node");
+      }
+    } catch (e) {
+      alert("Error adding node: " + e.message);
+    }
+  },
+
+  async loadManagedNodes() {
+    const listEl = document.getElementById("managed-nodes-list");
+    if (!listEl) return;
+
+    try {
+      const [nodesRes, telemRes] = await Promise.all([
+        fetch("/api/discovery/nodes"),
+        fetch("/api/discovery/telemetry")
+      ]);
+      const nodesData = await nodesRes.json();
+      const telemData = await telemRes.json();
+
+      const nodes = (nodesData && nodesData.nodes) || [];
+      const telem = (telemData && telemData.telemetry && telemData.telemetry.nodes) || {};
+
+      this.populateQueryTargetDropdown(nodes);
+
+      if (nodes.length === 0) {
+        listEl.innerHTML = `
+          <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; color: var(--text-dim); font-size: 0.8rem; text-align: center; grid-column: 1 / -1;">
+            No remote compute nodes registered. Click "Scan Network" or "Add Custom Endpoint" to register instances.
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = nodes.map(n => {
+        const nTelem = telem[n.id] || { active_requests: 0, queued_requests: 0, total_tokens_routed: 0 };
+        const statusColor = n.status === 'ONLINE' ? '#34d399' : (n.status === 'BUSY' ? '#fbbf24' : '#f87171');
+        const isTrusted = n.is_trusted !== 0;
+
+        const trustBadge = isTrusted
+          ? '<span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399; font-size: 0.66rem; font-weight: 600;">🛡️ Trusted</span>'
+          : '<span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171; font-size: 0.66rem; font-weight: 700; border: 1px solid #ef4444;">🚨 UNTRUSTED</span>';
+
+        const groupBadge = `<span class="badge" style="background: rgba(6,182,212,0.12); color: var(--accent-cyan); font-size: 0.66rem;">Group: ${this.escapeHtml(n.compute_group || 'Active Compute')}</span>`;
+
+        const engineIcons = {
+          ollama: '🦙 Ollama',
+          lmstudio: '🤖 LM Studio',
+          vllm: '⚡ vLLM / LocalAI',
+          oobabooga: '📜 Text Gen WebUI',
+          tabby_kobold: '🐱 Tabby / Kobold',
+          open_webui: '🌐 Open WebUI'
+        };
+        const engineLabel = engineIcons[n.engine?.toLowerCase()] || `⚡ ${(n.engine || 'ollama').toUpperCase()}`;
+
+        let modelsList = [];
+        try {
+          modelsList = Array.isArray(n.models) ? n.models : JSON.parse(n.models_json || "[]");
+        } catch(e) { modelsList = []; }
+
+        const modelsChips = modelsList.length > 0
+          ? modelsList.map(m => {
+              const mName = typeof m === 'object' ? (m.name || 'model') : String(m);
+              const mParam = (typeof m === 'object' && m.parameter_size) ? ` (${m.parameter_size})` : '';
+              return `<span style="display: inline-flex; align-items: center; background: rgba(34,211,238,0.08); border: 1px solid rgba(34,211,238,0.25); color: #a5f3fc; font-size: 0.67rem; padding: 1px 6px; border-radius: 4px; font-family: var(--font-mono); margin: 2px; cursor: pointer;" title="Click to use in Query Console" onclick="window.App.selectNodeAndModel('${n.id}', '${this.escapeHtml(mName)}')">🏷️ ${this.escapeHtml(mName)}${mParam}</span>`;
+            }).join('')
+          : '<span style="color: var(--text-dim); font-size: 0.68rem; font-style: italic;">No installed models listed</span>';
+
+        const cardBorder = isTrusted ? 'var(--border-subtle)' : '1px solid rgba(239, 68, 68, 0.45)';
+        const firstModel = modelsList.length > 0 ? (typeof modelsList[0] === 'object' ? (modelsList[0].name || '') : String(modelsList[0])) : 'llama3:latest';
+
+        return `
+          <div style="background: rgba(15,23,42,0.92); border: ${cardBorder}; border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <!-- Prominent Alias & IP Header -->
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                <div>
+                  <strong style="color: ${isTrusted ? '#fff' : '#fca5a5'}; font-size: 0.92rem; display: flex; align-items: center; gap: 5px;">
+                    <span>💻</span> ${this.escapeHtml(n.name)}
+                  </strong>
+                  <code style="font-size: 0.72rem; color: #38bdf8; font-family: var(--font-mono);">${this.escapeHtml(n.endpoint)}</code>
+                </div>
+                <div style="display: flex; gap: 4px; align-items: center;">
+                  <span class="badge" style="background: rgba(34,211,238,0.12); color: #22d3ee; font-size: 0.66rem;">${engineLabel}</span>
+                  <span class="badge" style="background: rgba(255,255,255,0.06); color: ${statusColor}; font-size: 0.66rem; border: 1px solid rgba(255,255,255,0.1);">
+                    ● ${n.status}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Badges & Sub-strip -->
+              <div style="display: flex; gap: 5px; margin: 6px 0; font-size: 0.68rem; flex-wrap: wrap;">
+                ${trustBadge}
+                ${groupBadge}
+                <span class="badge" style="background: rgba(255,255,255,0.05); color: #e2e8f0; font-size: 0.66rem;">Priority: ${n.priority || 5}</span>
+                <span class="badge" style="background: rgba(6,182,212,0.1); color: var(--accent-cyan); font-size: 0.66rem;">Max Concur: ${n.max_concurrency}</span>
+              </div>
+
+              <!-- Available Models List (Compact Chip Cluster) -->
+              <div style="margin: 8px 0 6px 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Available Models (${modelsList.length}):</span>
+                  <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.64rem; padding: 1px 5px;" onclick="window.App.selectNodeAndModel('${n.id}', '${this.escapeHtml(firstModel)}')">⚡ Query Node</button>
+                </div>
+                <div style="max-height: 58px; overflow-y: auto; background: rgba(0,0,0,0.25); border-radius: 4px; padding: 4px 6px;">
+                  ${modelsChips}
+                </div>
+              </div>
+
+              <!-- Live High-Density Telemetry Strip -->
+              <div style="display: flex; gap: 8px; margin: 6px 0; font-size: 0.68rem; color: var(--text-dim); border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 6px;">
+                <span>Active: <strong style="color: #67e8f9;">${nTelem.active_requests}</strong></span>
+                <span>Queued: <strong style="color: #fbbf24;">${nTelem.queued_requests}</strong></span>
+                <span>Tokens: <strong style="color: #f1f5f9;">${(nTelem.total_tokens_routed || 0).toLocaleString()}</strong></span>
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 6px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 6px;">
+              <div style="display: flex; gap: 4px;">
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.66rem; padding: 2px 6px;" onclick="window.App.toggleNodeTrust('${n.id}', ${isTrusted ? 1 : 0})">
+                  ${isTrusted ? 'Mark Untrusted' : 'Mark Trusted'}
+                </button>
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.66rem; padding: 2px 6px;" onclick="window.App.changeNodeGroup('${n.id}', '${this.escapeHtml(n.compute_group || 'Active Compute')}')">
+                  Group...
+                </button>
+              </div>
+              <button class="btn btn-secondary btn-sm" style="font-size: 0.66rem; color: #f87171; padding: 2px 6px;" onclick="window.App.deleteManagedNode('${n.id}')">
+                🗑️
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      console.error("Error loading managed nodes:", e);
+    }
+  },
+
+  selectNodeAndModel(nodeId, modelName) {
+    const targetSelect = document.getElementById("query-target-select");
+    const modelInput = document.getElementById("query-model-input");
+    const promptInput = document.getElementById("query-prompt-input");
+
+    if (targetSelect) {
+      targetSelect.value = "node:" + nodeId;
+      this.onQueryTargetChanged(targetSelect.value);
+    }
+    if (modelInput && modelName) {
+      modelInput.value = modelName;
+    }
+    if (promptInput) {
+      promptInput.focus();
+      promptInput.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  },
+
+  // --- Proxy Bridges Guidance & Helper Methods (AIUM-707) ---
+  copyToClipboard(text, btnElement) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        if (btnElement) {
+          const orig = btnElement.innerHTML;
+          btnElement.innerHTML = "✓ Copied!";
+          btnElement.style.color = "#34d399";
+          setTimeout(() => {
+            btnElement.innerHTML = orig;
+            btnElement.style.color = "";
+          }, 2000);
+        }
+      }).catch(() => {
+        this.fallbackCopyText(text, btnElement);
+      });
+    } else {
+      this.fallbackCopyText(text, btnElement);
+    }
+  },
+
+  fallbackCopyText(text, btnElement) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      if (btnElement) {
+        const orig = btnElement.innerHTML;
+        btnElement.innerHTML = "✓ Copied!";
+        btnElement.style.color = "#34d399";
+        setTimeout(() => {
+          btnElement.innerHTML = orig;
+          btnElement.style.color = "";
+        }, 2000);
+      }
+    } catch (err) {
+      console.warn("Fallback copy failed:", err);
+    }
+    document.body.removeChild(ta);
+  },
+
+  switchBridgeGuideTab(tabId) {
+    document.querySelectorAll(".bridge-tab-btn").forEach(btn => {
+      btn.className = "btn btn-sm btn-secondary bridge-tab-btn";
+    });
+    const activeBtn = document.getElementById(`btn-guide-${tabId}`);
+    if (activeBtn) {
+      activeBtn.className = "btn btn-sm btn-primary bridge-tab-btn";
+    }
+
+    document.querySelectorAll(".bridge-guide-pane").forEach(pane => {
+      pane.style.display = "none";
+    });
+    const activePane = document.getElementById(`pane-guide-${tabId}`);
+    if (activePane) {
+      activePane.style.display = "block";
+    }
+  },
+
+  allClients: [],
+  clientFilterQuery: "",
+
+  async loadClientQuotas() {
+    const listEl = document.getElementById("lan-client-quotas-list");
+    if (!listEl) return;
+
+    try {
+      const res = await fetch("/api/discovery/clients");
+      const data = await res.json();
+      const clients = (data && data.clients) || [];
+      this.allClients = clients;
+
+      // Update Aggregate Summary Bar
+      const totalEl = document.getElementById("client-stat-total");
+      const governedEl = document.getElementById("client-stat-governed");
+      const unresEl = document.getElementById("client-stat-unrestricted");
+      const blockedEl = document.getElementById("client-stat-blocked");
+      const bypassEl = document.getElementById("client-stat-bypassed");
+
+      let totalCount = clients.length;
+      let blockedCount = 0;
+      let unresCount = 0;
+      let bypassCount = 0;
+      let governedCount = 0;
+
+      clients.forEach(c => {
+        if (c.is_blocked !== 0) {
+          blockedCount++;
+        } else if (c.is_unrestricted !== 0) {
+          unresCount++;
+        } else if (c.is_bypass_active) {
+          bypassCount++;
+        } else {
+          governedCount++;
+        }
+      });
+
+      if (totalEl) totalEl.innerText = totalCount;
+      if (blockedEl) blockedEl.innerText = blockedCount;
+      if (unresEl) unresEl.innerText = unresCount;
+      if (bypassEl) bypassEl.innerText = bypassCount;
+      if (governedEl) governedEl.innerText = governedCount;
+
+      this.filterClientCards(this.clientFilterQuery);
+    } catch (e) {
+      console.error("Error loading client quotas:", e);
+    }
+  },
+
+  filterClientCards(query) {
+    this.clientFilterQuery = (query || "").trim().toLowerCase();
+    if (!this.allClients) return;
+    if (!this.clientFilterQuery) {
+      this.renderClientCards(this.allClients);
+      return;
+    }
+    const filtered = this.allClients.filter(c => {
+      const ip = (c.client_ip || "").toLowerCase();
+      const alias = (c.alias || "").toLowerCase();
+      const notes = (c.notes || "").toLowerCase();
+      const isBlocked = c.is_blocked !== 0;
+      const isUnres = c.is_unrestricted !== 0;
+      const isBypass = !!c.is_bypass_active;
+      const statusStr = isBlocked ? "blocked" : (isUnres ? "unrestricted" : (isBypass ? "bypass" : "governed"));
+      return ip.includes(this.clientFilterQuery) ||
+             alias.includes(this.clientFilterQuery) ||
+             notes.includes(this.clientFilterQuery) ||
+             statusStr.includes(this.clientFilterQuery);
+    });
+    this.renderClientCards(filtered);
+  },
+
+  renderClientCards(clients) {
+    const listEl = document.getElementById("lan-client-quotas-list");
+    if (!listEl) return;
+
+    if (!clients || clients.length === 0) {
+      listEl.innerHTML = `
+        <div style="background: rgba(0,0,0,0.2); border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; color: var(--text-dim); font-size: 0.78rem; text-align: center; grid-column: 1 / -1;">
+          ${this.clientFilterQuery ? `No connected clients match the search "<strong>${this.escapeHtml(this.clientFilterQuery)}</strong>".` : 'No connecting clients registered yet. As external platforms and IDEs make requests to the Ollama bridge (port 8989) or transparent proxy (port 8766), their IP addresses and hostnames will be automatically discovered and governed here.'}
+        </div>
+      `;
+      return;
+    }
+
+    listEl.innerHTML = clients.map(c => {
+      const isBlocked = c.is_blocked !== 0;
+      const isUnrestricted = c.is_unrestricted !== 0 && !isBlocked;
+      const isBypass = c.is_bypass_active && !isUnrestricted && !isBlocked;
+
+      let statusBadge = '<span class="badge" style="background: rgba(6,182,212,0.15); color: #67e8f9; font-size: 0.66rem;">🛡️ Governed</span>';
+      let cardBorder = 'var(--border-subtle)';
+      let cardBg = 'rgba(15,23,42,0.85)';
+
+      if (isBlocked) {
+        statusBadge = '<span class="badge" style="background: rgba(239,68,68,0.25); color: #f87171; border: 1px solid rgba(239,68,68,0.4); font-size: 0.66rem; font-weight: 700;">🚫 BLOCKED (HTTP 403)</span>';
+        cardBorder = '1px solid rgba(239,68,68,0.5)';
+        cardBg = 'rgba(30,12,16,0.85)';
+      } else if (isUnrestricted) {
+        statusBadge = '<span class="badge" style="background: rgba(16,185,129,0.2); color: #34d399; font-size: 0.66rem; font-weight: 700;">⚡ UNRESTRICTED</span>';
+        cardBorder = '1px solid rgba(16,185,129,0.4)';
+      } else if (isBypass) {
+        statusBadge = '<span class="badge" style="background: rgba(245,158,11,0.2); color: #fbbf24; font-size: 0.66rem; font-weight: 700;">⏳ TEMPORARY BYPASS ACTIVE</span>';
+        cardBorder = '1px solid rgba(245,158,11,0.4)';
+      }
+
+      const sessLimit = c.session_token_limit || 25000;
+      const sessUsed = c.session_tokens_used || 0;
+      const sessPct = Math.min(100, Math.round((sessUsed / sessLimit) * 100));
+
+      const dailyLimit = c.daily_token_limit || 250000;
+      const dailyUsed = c.daily_tokens_used || 0;
+      const dailyPct = Math.min(100, Math.round((dailyUsed / dailyLimit) * 100));
+
+      const sessBarColor = isBlocked ? '#ef4444' : (sessPct > 85 ? 'var(--accent-rose)' : (sessPct > 60 ? 'var(--accent-amber)' : 'var(--accent-cyan)'));
+      const dailyBarColor = isBlocked ? '#ef4444' : (dailyPct > 85 ? 'var(--accent-rose)' : (dailyPct > 60 ? 'var(--accent-amber)' : 'var(--accent-purple)'));
+
+      return `
+        <div style="background: ${cardBg}; border: ${cardBorder}; border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+              <div>
+                <strong style="color: #fff; font-size: 0.88rem; display: block;">💻 ${this.escapeHtml(c.alias || c.client_ip)}</strong>
+                <code style="font-size: 0.72rem; color: #38bdf8; font-family: var(--font-mono);">${this.escapeHtml(c.client_ip)}</code>
+              </div>
+              ${statusBadge}
+            </div>
+
+            <div style="display: flex; gap: 6px; margin: 6px 0; font-size: 0.7rem; color: var(--text-muted); align-items: center; flex-wrap: wrap;">
+              <span class="badge" style="background: rgba(255,255,255,0.06); color: #e2e8f0;">Priority: ${c.priority || 5}</span>
+              <span style="color: var(--text-dim); font-size: 0.68rem;">Window: ${c.session_window_minutes || 15}m</span>
+              ${c.notes ? `<span style="color: var(--text-dim); font-size: 0.68rem; font-style: italic;">• ${this.escapeHtml(c.notes)}</span>` : ''}
+            </div>
+
+            <!-- Session Burst Window Meter -->
+            <div style="margin: 8px 0 6px 0;">
+              <div style="display: flex; justify-content: space-between; font-size: 0.68rem; margin-bottom: 3px;">
+                <span style="color: var(--text-dim);">Session Burst (${c.session_window_minutes || 15}m):</span>
+                <span style="color: ${sessBarColor}; font-weight: 600;">${sessUsed.toLocaleString()} / ${sessLimit.toLocaleString()} tok (${sessPct}%)</span>
+              </div>
+              <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.4); border-radius: 3px; overflow: hidden;">
+                <div style="width: ${sessPct}%; height: 100%; background: ${sessBarColor}; transition: width 0.3s;"></div>
+              </div>
+            </div>
+
+            <!-- Daily Rolling Quota Meter -->
+            <div style="margin-bottom: 8px;">
+              <div style="display: flex; justify-content: space-between; font-size: 0.68rem; margin-bottom: 3px;">
+                <span style="color: var(--text-dim);">Daily Quota (24h):</span>
+                <span style="color: ${dailyBarColor}; font-weight: 600;">${dailyUsed.toLocaleString()} / ${dailyLimit.toLocaleString()} tok (${dailyPct}%)</span>
+              </div>
+              <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.4); border-radius: 3px; overflow: hidden;">
+                <div style="width: ${dailyPct}%; height: 100%; background: ${dailyBarColor}; transition: width 0.3s;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Governance Action Toolbar -->
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; margin-top: 6px; gap: 4px; flex-wrap: wrap;">
+            <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+              <!-- 1-Click Block/Unblock -->
+              ${isBlocked ? `
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 7px; color: #34d399; border-color: rgba(16,185,129,0.3);" onclick="window.App.toggleBlockClient('${this.escapeHtml(c.client_ip)}', false)" title="Unblock this client">🔓 Unblock</button>
+              ` : `
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 7px; color: #f87171; border-color: rgba(239,68,68,0.3);" onclick="window.App.toggleBlockClient('${this.escapeHtml(c.client_ip)}', true)" title="Block client immediately (HTTP 403)">🚫 Block</button>
+              `}
+
+              <!-- 1-Click Unrestrict / Restrict -->
+              ${isUnrestricted ? `
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 7px; color: #38bdf8;" onclick="window.App.toggleUnrestrictClient('${this.escapeHtml(c.client_ip)}', false)" title="Apply standard quota governance">🛡️ Restrict</button>
+              ` : `
+                <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 7px; color: #34d399;" onclick="window.App.toggleUnrestrictClient('${this.escapeHtml(c.client_ip)}', true)" title="Permanently unrestrict client">⚡ Unrestrict</button>
+              `}
+
+              <!-- Quick Temporary Bypasses -->
+              <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 5px;" onclick="window.App.quickSetClientBypass('${this.escapeHtml(c.client_ip)}', 60)" title="Elevate with temporary bypass for 1 hour">+1h</button>
+              <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 5px;" onclick="window.App.quickSetClientBypass('${this.escapeHtml(c.client_ip)}', 240)" title="Elevate with temporary bypass for 4 hours">+4h</button>
+              <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 5px;" onclick="window.App.quickSetClientBypass('${this.escapeHtml(c.client_ip)}', 1440)" title="Elevate with temporary bypass for 24 hours">+24h</button>
+              ${isBypass ? `<button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 5px; color: #f87171;" onclick="window.App.quickSetClientBypass('${this.escapeHtml(c.client_ip)}', 0)" title="Cancel temporary bypass">✕ Clear</button>` : ''}
+            </div>
+
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 6px;" onclick="window.App.openConfigureClientModal('${this.escapeHtml(c.client_ip)}')" title="Configure exact burst limits and window size">⚙️ Edit</button>
+              <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; padding: 2px 6px;" onclick="window.App.resetClientTokens('${this.escapeHtml(c.client_ip)}')" title="Reset burst window and daily token counts">🔄 Reset</button>
+              <button class="btn btn-secondary btn-sm" style="font-size: 0.68rem; color: #f87171; padding: 2px 6px;" onclick="window.App.deleteClientQuota('${this.escapeHtml(c.client_ip)}')" title="Delete custom policy">🗑️</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  },
+
+  async toggleBlockClient(clientIp, shouldBlock) {
+    try {
+      const res = await fetch("/api/discovery/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_ip: clientIp,
+          action: shouldBlock ? "block" : "unblock"
+        })
+      });
+      if (res.ok) {
+        await this.loadClientQuotas();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "Failed to toggle block status");
+      }
+    } catch (e) {
+      alert("Error toggling block: " + e.message);
+    }
+  },
+
+  async toggleUnrestrictClient(clientIp, shouldUnrestrict) {
+    try {
+      const res = await fetch("/api/discovery/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_ip: clientIp,
+          action: shouldUnrestrict ? "unrestrict" : "restrict"
+        })
+      });
+      if (res.ok) {
+        await this.loadClientQuotas();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "Failed to toggle unrestrict status");
+      }
+    } catch (e) {
+      alert("Error toggling unrestrict: " + e.message);
+    }
+  },
+
+  openConfigureClientModal(clientIp = "") {
+    const modal = document.getElementById("client-quota-config-modal");
+    if (!modal) return;
+
+    const ipInput = document.getElementById("client-quota-form-ip");
+    const aliasInput = document.getElementById("client-quota-form-alias");
+    const winInput = document.getElementById("client-quota-form-window");
+    const sessInput = document.getElementById("client-quota-form-session-limit");
+    const dailyInput = document.getElementById("client-quota-form-daily-limit");
+    const prioInput = document.getElementById("client-quota-form-priority");
+    const unresInput = document.getElementById("client-quota-form-unrestricted");
+    const blockedInput = document.getElementById("client-quota-form-blocked");
+    const bypassInput = document.getElementById("client-quota-form-bypass-mins");
+    const notesInput = document.getElementById("client-quota-form-notes");
+
+    if (ipInput) {
+      ipInput.value = clientIp || "192.168.2.";
+      ipInput.disabled = !!clientIp;
+    }
+    if (aliasInput) aliasInput.value = "";
+    if (winInput) winInput.value = "15";
+    if (sessInput) sessInput.value = "25000";
+    if (dailyInput) dailyInput.value = "250000";
+    if (prioInput) prioInput.value = "5";
+    if (unresInput) unresInput.checked = false;
+    if (blockedInput) blockedInput.checked = false;
+    if (bypassInput) bypassInput.value = "0";
+    if (notesInput) notesInput.value = "";
+
+    // If editing existing client, pre-fill values
+    if (clientIp) {
+      fetch("/api/discovery/clients")
+        .then(r => r.json())
+        .then(d => {
+          const match = (d.clients || []).find(c => c.client_ip === clientIp);
+          if (match) {
+            if (aliasInput) aliasInput.value = match.alias || "";
+            if (winInput) winInput.value = match.session_window_minutes || 15;
+            if (sessInput) sessInput.value = match.session_token_limit || 25000;
+            if (dailyInput) dailyInput.value = match.daily_token_limit || 250000;
+            if (prioInput) prioInput.value = match.priority || 5;
+            if (unresInput) unresInput.checked = match.is_unrestricted !== 0;
+            if (blockedInput) blockedInput.checked = match.is_blocked !== 0;
+            if (notesInput) notesInput.value = match.notes || "";
+          }
+        })
+        .catch(() => {});
+    }
+
+    modal.classList.add("active");
+  },
+
+  closeClientQuotaModal() {
+    const modal = document.getElementById("client-quota-config-modal");
+    if (modal) modal.classList.remove("active");
+  },
+
+  async submitClientQuotaForm() {
+    const ipInput = document.getElementById("client-quota-form-ip");
+    const aliasInput = document.getElementById("client-quota-form-alias");
+    const winInput = document.getElementById("client-quota-form-window");
+    const sessInput = document.getElementById("client-quota-form-session-limit");
+    const dailyInput = document.getElementById("client-quota-form-daily-limit");
+    const prioInput = document.getElementById("client-quota-form-priority");
+    const unresInput = document.getElementById("client-quota-form-unrestricted");
+    const blockedInput = document.getElementById("client-quota-form-blocked");
+    const bypassInput = document.getElementById("client-quota-form-bypass-mins");
+    const notesInput = document.getElementById("client-quota-form-notes");
+
+    const clientIp = (ipInput && ipInput.value.trim()) || "";
+    if (!clientIp) {
+      alert("Please enter a valid Client IP address.");
+      return;
+    }
+
+    const payload = {
+      client_ip: clientIp,
+      alias: (aliasInput && aliasInput.value.trim()) || null,
+      session_window_minutes: parseInt(winInput ? winInput.value : "15", 10) || 15,
+      session_token_limit: parseInt(sessInput ? sessInput.value : "25000", 10) || 25000,
+      daily_token_limit: parseInt(dailyInput ? dailyInput.value : "250000", 10) || 250000,
+      priority: parseInt(prioInput ? prioInput.value : "5", 10) || 5,
+      is_unrestricted: (unresInput && unresInput.checked) ? 1 : 0,
+      is_blocked: (blockedInput && blockedInput.checked) ? 1 : 0,
+      notes: (notesInput && notesInput.value.trim()) || ""
+    };
+
+    const bypassMins = parseFloat(bypassInput ? bypassInput.value : "0") || 0;
+    if (bypassMins > 0) {
+      const now = new Date();
+      now.setMinutes(now.getMinutes() + bypassMins);
+      payload.bypass_until = now.toISOString();
+    }
+
+    try {
+      const res = await fetch("/api/discovery/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        this.closeClientQuotaModal();
+        await this.loadClientQuotas();
+      } else {
+        alert(data.error || "Failed to save client quota");
+      }
+    } catch (e) {
+      alert("Error saving client policy: " + e.message);
+    }
+  },
+
+  async quickSetClientBypass(clientIp, minutes) {
+    try {
+      const res = await fetch("/api/discovery/clients/bypass", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_ip: clientIp, duration_minutes: minutes })
+      });
+      if (res.ok) {
+        await this.loadClientQuotas();
+      }
+    } catch (e) {
+      alert("Error updating bypass: " + e.message);
+    }
+  },
+
+  async resetClientTokens(clientIp) {
+    if (!confirm(`Reset token counters for client ${clientIp}? This will clear burst and daily usage.`)) return;
+    try {
+      const res = await fetch(`/api/discovery/clients?client_ip=${encodeURIComponent(clientIp)}&action=reset`, { method: "DELETE" });
+      if (res.ok) {
+        await this.loadClientQuotas();
+      }
+    } catch (e) {
+      alert("Error resetting tokens: " + e.message);
+    }
+  },
+
+  async deleteClientQuota(clientIp) {
+    if (!confirm(`Delete custom quota policy for ${clientIp}? Client will revert to default limits.`)) return;
+    try {
+      const res = await fetch(`/api/discovery/clients?client_ip=${encodeURIComponent(clientIp)}`, { method: "DELETE" });
+      if (res.ok) {
+        await this.loadClientQuotas();
+      }
+    } catch (e) {
+      alert("Error deleting client policy: " + e.message);
+    }
+  },
+
+  async toggleNodeTrust(nodeId, currentTrust) {
+    const newTrust = currentTrust ? 0 : 1;
+    try {
+      await fetch("/api/discovery/nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          node_id: nodeId,
+          is_trusted: newTrust,
+          compute_group: newTrust === 0 ? "Quarantined" : "Active Compute"
+        })
+      });
+      await this.loadManagedNodes();
+    } catch (e) {
+      alert("Error updating node trust: " + e.message);
+    }
+  },
+
+  async changeNodeGroup(nodeId, currentGroup) {
+    const newGroup = prompt(`Assign new compute group for this node (e.g. 'Active Compute', 'Staging', 'Offline'):`, currentGroup);
+    if (!newGroup || newGroup === currentGroup) return;
+
+    try {
+      await fetch("/api/discovery/nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          node_id: nodeId,
+          compute_group: newGroup
+        })
+      });
+      await this.loadManagedNodes();
+    } catch (e) {
+      alert("Error updating compute group: " + e.message);
+    }
+  },
+
+  populateQueryTargetDropdown(nodes) {
+    const select = document.getElementById("query-target-select");
+    if (!select) return;
+
+    const currentVal = select.value;
+    select.innerHTML = `
+      <option value="pool" data-trusted="1">🚀 [Active Compute Pool] Auto-Route to Trusted Nodes (Failover Protected)</option>
+    `;
+
+    nodes.forEach(n => {
+      const isTrusted = n.is_trusted !== 0;
+      const opt = document.createElement("option");
+      opt.value = "node:" + n.id;
+      opt.setAttribute("data-trusted", isTrusted ? "1" : "0");
+      if (isTrusted) {
+        opt.innerText = `🛡️ ${n.name} (${n.endpoint}) [${n.compute_group || 'Active Compute'}]`;
+      } else {
+        opt.innerText = `🚨 [UNTRUSTED] ${n.name} (${n.endpoint}) [Quarantined]`;
+        opt.style.color = "#f87171";
+      }
+      select.appendChild(opt);
+    });
+
+    if (currentVal) {
+      select.value = currentVal;
+    }
+    this.onQueryTargetChanged(select.value);
+  },
+
+  onQueryTargetChanged(targetValue) {
+    const select = document.getElementById("query-target-select");
+    const warningBanner = document.getElementById("query-untrusted-warning-banner");
+    const fileAlert = document.getElementById("query-file-untrusted-alert");
+
+    const selectedOpt = select && select.options[select.selectedIndex];
+    const isTrusted = selectedOpt ? selectedOpt.getAttribute("data-trusted") !== "0" : true;
+
+    if (!isTrusted) {
+      if (warningBanner) warningBanner.style.display = "block";
+      if (fileAlert && (this._attachedQueryFiles || []).length > 0) {
+        fileAlert.style.display = "block";
+      }
+    } else {
+      if (warningBanner) warningBanner.style.display = "none";
+      if (fileAlert) fileAlert.style.display = "none";
+    }
+  },
+
+  handleQueryFilesSelected(files) {
+    if (!files || files.length === 0) return;
+    this._attachedQueryFiles = this._attachedQueryFiles || [];
+
+    Array.from(files).forEach(f => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        this._attachedQueryFiles.push({
+          filename: f.name,
+          size: f.size,
+          content: e.target.result
+        });
+        this.renderAttachedQueryFiles();
+      };
+      reader.readAsText(f);
+    });
+  },
+
+  renderAttachedQueryFiles() {
+    const container = document.getElementById("query-attached-files-container");
+    const fileAlert = document.getElementById("query-file-untrusted-alert");
+    const select = document.getElementById("query-target-select");
+    const selectedOpt = select && select.options[select.selectedIndex];
+    const isTrusted = selectedOpt ? selectedOpt.getAttribute("data-trusted") !== "0" : true;
+
+    if (!container) return;
+
+    if (!this._attachedQueryFiles || this._attachedQueryFiles.length === 0) {
+      container.innerHTML = '<span style="font-size: 0.72rem; color: var(--text-dim); font-style: italic;">No context files attached. Click "Attach Files..." or drag &amp; drop code/text files here.</span>';
+      if (fileAlert) fileAlert.style.display = "none";
+      return;
+    }
+
+    container.innerHTML = this._attachedQueryFiles.map((f, idx) => `
+      <span style="display: inline-flex; align-items: center; gap: 5px; background: rgba(6,182,212,0.15); border: 1px solid rgba(6,182,212,0.3); color: #67e8f9; font-size: 0.72rem; padding: 2px 8px; border-radius: 4px;">
+        <span>📄 ${this.escapeHtml(f.filename)}</span>
+        <span style="color: var(--text-dim); font-size: 0.65rem;">(${Math.round(f.size / 1024 * 10) / 10}KB)</span>
+        <button type="button" onclick="window.App.removeAttachedQueryFile(${idx})" style="background: none; border: none; color: #f87171; cursor: pointer; padding: 0 2px; font-weight: bold;">✕</button>
+      </span>
+    `).join('');
+
+    if (fileAlert) {
+      fileAlert.style.display = !isTrusted ? "block" : "none";
+    }
+  },
+
+  removeAttachedQueryFile(index) {
+    if (this._attachedQueryFiles && this._attachedQueryFiles.length > index) {
+      this._attachedQueryFiles.splice(index, 1);
+      this.renderAttachedQueryFiles();
+    }
+  },
+
+  async executeGovernedQuery() {
+    const select = document.getElementById("query-target-select");
+    const modelInput = document.getElementById("query-model-input");
+    const promptInput = document.getElementById("query-prompt-input");
+    const statusText = document.getElementById("query-run-status-text");
+    const resultBox = document.getElementById("query-result-box");
+    const nodeBadge = document.getElementById("query-result-node-badge");
+    const modelBadge = document.getElementById("query-result-model-badge");
+    const metricsEl = document.getElementById("query-result-metrics");
+    const contentEl = document.getElementById("query-result-content");
+    const btn = document.getElementById("btn-run-query");
+
+    const target = (select && select.value) || "pool";
+    const model = (modelInput && modelInput.value.trim()) || "llama3:latest";
+    const prompt = (promptInput && promptInput.value.trim()) || "";
+
+    if (!prompt) {
+      alert("Please enter a prompt or instruction for the query.");
+      return;
+    }
+
+    const selectedOpt = select && select.options[select.selectedIndex];
+    const isUntrusted = selectedOpt && selectedOpt.getAttribute("data-trusted") === "0";
+
+    if (isUntrusted) {
+      const confirmRun = confirm(
+        "⚠️ CAUTION: You are about to dispatch this query and attached files to an UNTRUSTED compute node.\n\n" +
+        "Untrusted nodes are not verified and should never receive sensitive data or confidential source code.\n\n" +
+        "Do you want to proceed anyway?"
+      );
+      if (!confirmRun) return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = "⏳ Dispatching...";
+    }
+    if (statusText) statusText.innerText = "Routing query through traffic governor queue...";
+    if (resultBox) resultBox.style.display = "none";
+
+    try {
+      const res = await fetch("/api/discovery/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target: target,
+          model: model,
+          prompt: prompt,
+          files: this._attachedQueryFiles || []
+        })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        if (statusText) statusText.innerText = `Query completed successfully in ${data.queue_time_ms}ms.`;
+        if (resultBox) resultBox.style.display = "block";
+        if (nodeBadge) {
+          nodeBadge.innerText = `Node: ${data.node_name || data.node_id}`;
+          nodeBadge.style.color = data.is_untrusted_warning ? "#f87171" : "#67e8f9";
+        }
+        if (modelBadge) modelBadge.innerText = `Model: ${data.model}`;
+        if (metricsEl) {
+          metricsEl.innerText = `Input: ${data.input_tokens} • Output: ${data.output_tokens} • Queue/Latency: ${data.queue_time_ms}ms • Cost: $0.00`;
+        }
+
+        let respHtml = "";
+        if (data.is_untrusted_warning) {
+          respHtml += `<div style="background: rgba(239,68,68,0.2); border-left: 3px solid #ef4444; color: #fca5a5; padding: 6px 10px; margin-bottom: 8px; font-size: 0.74rem;">${this.escapeHtml(data.warning_message)}</div>\n`;
+        }
+        respHtml += this.escapeHtml(data.response || "(Empty response received)");
+        if (contentEl) contentEl.innerHTML = respHtml;
+
+        await this.loadManagedNodes();
+        await this.loadClientQuotas();
+      } else {
+        if (statusText) statusText.innerText = `Query failed: ${data.error || 'Server error'}`;
+        alert(`Error executing query: ${data.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      console.error("Query execution error:", e);
+      if (statusText) statusText.innerText = "Network error: check server logs.";
+      alert("Network error: " + e.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = "<span>🚀</span> Execute Governed Query";
+      }
+    }
+  },
+
+  async deleteManagedNode(nodeId) {
+    if (!confirm("Are you sure you want to remove this node from the managed pool?")) return;
+    try {
+      const res = await fetch(`/api/discovery/nodes?id=${encodeURIComponent(nodeId)}`, { method: "DELETE" });
+      if (res.ok) {
+        await this.loadManagedNodes();
+      }
+    } catch (e) {
+      alert("Error removing node: " + e.message);
+    }
+  },
+
   escapeHtml(str) {
     if (!str) return "";
     return String(str)
@@ -3513,6 +5027,71 @@ window.App = {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  },
+
+  formatLocalDateTime(isoStr) {
+    if (!isoStr) return "-";
+    try {
+      let s = String(isoStr).trim();
+      if (!s) return "-";
+      if (!s.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(s)) {
+        s += "Z";
+      }
+      const d = new Date(s);
+      if (isNaN(d.getTime())) return String(isoStr).replace("T", " ").substring(0, 19);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      const hrs = String(d.getHours()).padStart(2, "0");
+      const mins = String(d.getMinutes()).padStart(2, "0");
+      const secs = String(d.getSeconds()).padStart(2, "0");
+      return `${year}-${month}-${day} ${hrs}:${mins}:${secs}`;
+    } catch (e) {
+      return String(isoStr).replace("T", " ").substring(0, 19);
+    }
+  },
+
+  formatLocalTime(isoStr) {
+    if (!isoStr) return "-";
+    try {
+      let s = String(isoStr).trim();
+      if (!s) return "-";
+      if (!s.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(s)) {
+        s += "Z";
+      }
+      const d = new Date(s);
+      if (isNaN(d.getTime())) return String(isoStr);
+      const hrs = String(d.getHours()).padStart(2, "0");
+      const mins = String(d.getMinutes()).padStart(2, "0");
+      return `${hrs}:${mins}`;
+    } catch (e) {
+      return String(isoStr);
+    }
+  },
+
+  formatDuration(startIso, endIso) {
+    if (!startIso || !endIso) return "-";
+    try {
+      let s1 = String(startIso).trim();
+      let s2 = String(endIso).trim();
+      if (!s1.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(s1)) s1 += "Z";
+      if (!s2.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(s2)) s2 += "Z";
+      const d1 = new Date(s1);
+      const d2 = new Date(s2);
+      const diffSec = Math.max(0, Math.floor((d2.getTime() - d1.getTime()) / 1000));
+      if (diffSec < 60) return `${diffSec}s`;
+      const mins = Math.floor(diffSec / 60);
+      const secs = diffSec % 60;
+      if (mins < 60) return `${mins}m ${secs}s`;
+      const hrs = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      if (hrs < 24) return `${hrs}h ${remMins}m`;
+      const days = Math.floor(hrs / 24);
+      const remHrs = hrs % 24;
+      return `${days}d ${remHrs}h`;
+    } catch (e) {
+      return "-";
+    }
   }
 };
 

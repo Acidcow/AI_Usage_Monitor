@@ -159,6 +159,8 @@ class TestWindowsTray(unittest.TestCase):
         widget.toggle_view_mode()
         self.assertEqual(widget.view_mode, "trends")
         widget.toggle_view_mode()
+        self.assertEqual(widget.view_mode, "interval")
+        widget.toggle_view_mode()
         self.assertEqual(widget.view_mode, "balances")
 
         # 4. Test sparkline generator

@@ -46,9 +46,19 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+
+        if path.startswith("/api/"):
+            return self._handle_api_delete(path, query)
+
+        self.send_error(404, "Endpoint not found")
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -79,6 +89,14 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
         self.send_error(404, "Endpoint not found")
 
+    def _get_client_ip(self) -> str:
+        forwarded = self.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        if hasattr(self, "client_address") and self.client_address:
+            return self.client_address[0]
+        return "127.0.0.1"
+
     def _handle_api_get(self, path: str, query: Dict[str, Any]):
         srv = self.server
 
@@ -93,6 +111,106 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 "providers": prov_snapshots
             }
             return self._send_json(200, resp)
+
+        # AIUM-703, AIUM-704: LAN Discovery, Adapters, Inventory & Node Endpoints
+        if path == "/api/discovery/adapters":
+            scanner = getattr(srv, "scanner", None)
+            if not scanner:
+                from backend.discovery.lan_scanner import LANScanner
+                scanner = LANScanner()
+            adapters = scanner.get_local_adapters_and_subnets()
+            return self._send_json(200, {"success": True, "adapters": adapters})
+
+        if path == "/api/discovery/inventory":
+            state_filter = query.get("state", [None])[0]
+            group_filter = query.get("group", [None])[0] or query.get("compute_group", [None])[0]
+            inv = srv.database.list_device_inventory(state=state_filter, compute_group=group_filter)
+            return self._send_json(200, {"success": True, "inventory": inv})
+
+        if path == "/api/discovery/platforms":
+            from backend.discovery.lan_scanner import PLATFORM_CATALOG
+            return self._send_json(200, {"success": True, "platforms": PLATFORM_CATALOG})
+
+        if path == "/api/discovery/scan":
+            targets_str = query.get("targets", [None])[0] or query.get("range", [None])[0]
+            subnet = query.get("subnet", [None])[0]
+            platforms_param = query.get("platforms", [None])[0]
+            sec_ports_param = query.get("secondary_ports", [None])[0]
+            timeout_val = float(query.get("timeout", [0.4])[0])
+
+            scanner = getattr(srv, "scanner", None)
+            if not scanner:
+                from backend.discovery.lan_scanner import LANScanner
+                scanner = LANScanner()
+
+            platforms_list = [p.strip() for p in platforms_param.split(",") if p.strip()] if platforms_param else None
+            sec_ports_list = [int(p.strip()) for p in sec_ports_param.split(",") if p.strip() and p.strip().isdigit()] if sec_ports_param else None
+
+            spec = targets_str or subnet
+            if spec:
+                ips = scanner.parse_target_spec(spec)
+            else:
+                _, detected_sub = scanner.get_local_subnet_info()
+                ips = scanner.parse_target_spec(detected_sub)
+
+            if "127.0.0.1" not in ips:
+                ips.append("127.0.0.1")
+
+            target_pairs = scanner.build_scan_targets(
+                ips=ips,
+                platforms=platforms_list,
+                secondary_ports=sec_ports_list
+            )
+            candidates = scanner.scan_targets(target_pairs, timeout=timeout_val)
+
+            try:
+                for c in candidates:
+                    alias = c.get("alias") or c.get("ip")
+                    srv.database.upsert_device_inventory(
+                        alias=alias,
+                        ip=c.get("ip"),
+                        state="KNOWN_SERVICES",
+                        discovered_services=[{"engine": c.get("engine"), "port": c.get("port"), "models": c.get("models", []), "endpoint": c.get("endpoint")}],
+                        is_trusted=1,
+                        compute_group="Active Compute"
+                    )
+            except Exception:
+                pass
+
+            return self._send_json(200, {"success": True, "candidates": candidates})
+
+        if path == "/api/discovery/nodes":
+            registry = getattr(srv, "registry", None)
+            if not registry:
+                from backend.discovery.node_registry import NodeRegistry
+                registry = NodeRegistry(database=srv.database)
+            status_filter = query.get("status", [None])[0]
+            engine_filter = query.get("engine", [None])[0]
+            nodes = registry.list_nodes(status=status_filter, engine=engine_filter)
+            return self._send_json(200, {"success": True, "nodes": nodes})
+
+        if path == "/api/discovery/telemetry":
+            governor = getattr(srv, "governor", None)
+            node_id = query.get("node_id", [None])[0]
+            stats = governor.get_telemetry(node_id) if governor else {}
+            return self._send_json(200, {"success": True, "telemetry": stats})
+
+        # AIUM-705: Client Quotas, Burst Windows & Usage Metrics
+        if path == "/api/discovery/clients":
+            quotas = srv.database.list_client_quotas()
+            enriched = []
+            for q in quotas:
+                usage = srv.database.get_client_token_usage(q["client_ip"])
+                q_copy = dict(q)
+                q_copy.update({
+                    "session_tokens_used": usage["session_tokens_used"],
+                    "session_tokens_remaining": usage["session_tokens_remaining"],
+                    "daily_tokens_used": usage["daily_tokens_used"],
+                    "daily_tokens_remaining": usage["daily_tokens_remaining"],
+                    "is_bypass_active": usage["is_bypass_active"]
+                })
+                enriched.append(q_copy)
+            return self._send_json(200, {"success": True, "clients": enriched})
 
         if path == "/api/usage/summary":
             provider = query.get("provider", [None])[0]
@@ -112,7 +230,9 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             return self._send_json(200, hourly)
 
         if path == "/api/usage/comparison":
-            scope = query.get("scope", ["individual"])[0]
+            scope = query.get("scope", [None])[0]
+            if not scope:
+                scope = srv.database.get_quota_tracking_mode()
             filter_vis = query.get("filter_visibility", ["0"])[0] in ("1", "true")
             comp = srv.database.get_comparative_metrics(scope=scope, filter_visibility=filter_vis)
             return self._send_json(200, comp)
@@ -123,6 +243,24 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             scope = query.get("scope", ["individual"])[0]
             trends = srv.database.get_hierarchical_trends(provider=prov, window=window, scope=scope)
             return self._send_json(200, trends)
+
+        if path == "/api/usage/timeseries":
+            provider = query.get("provider", [None])[0]
+            window = query.get("window", ["24h"])[0]
+            try:
+                bucket_minutes = int(query.get("bucket_minutes", [5])[0])
+            except (ValueError, TypeError):
+                bucket_minutes = 5
+            mode = query.get("mode", ["interval_delta"])[0]
+            scope = query.get("scope", ["individual"])[0]
+            timeseries = srv.database.get_granular_timeseries(
+                provider=provider,
+                window=window,
+                bucket_minutes=bucket_minutes,
+                mode=mode,
+                scope=scope
+            )
+            return self._send_json(200, timeseries)
 
         if path == "/api/settings/visibility":
             return self._send_json(200, srv.database.get_estate_visibility())
@@ -345,6 +483,27 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     srv.vault.set_credential("gemini", "project_id", project_id)
             return self._send_json(200, {"success": True, "message": "Google Gemini configuration saved"})
 
+        if path == "/api/providers/gemini/test-probe":
+            gemini_prov = srv.providers.get("gemini")
+            if not gemini_prov:
+                return self._send_json(404, {"error": "Gemini provider not registered"})
+            model = body.get("model", "gemini-2.0-flash")
+            in_tok = int(body.get("input_tokens", 250))
+            out_tok = int(body.get("output_tokens", 85))
+            token_id = body.get("token_id", "tok_gem_flash")
+            evt_id = gemini_prov.ingest_proxy_interaction(
+                model=model,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                token_id=token_id
+            )
+            return self._send_json(200, {
+                "success": True,
+                "event_id": evt_id,
+                "token_id": token_id,
+                "total_tokens": in_tok + out_tok
+            })
+
         if path == "/api/providers/chatgpt/config":
             api_key = body.get("api_key")
             chatgpt_prov = srv.providers.get("chatgpt")
@@ -530,8 +689,21 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         if path == "/api/settings":
             settings_dict = body.get("settings", body)
             if isinstance(settings_dict, dict):
+                if "quota_tracking_mode" in settings_dict:
+                    val = settings_dict["quota_tracking_mode"]
+                    if not isinstance(val, str) or val.strip().lower() not in ("individual", "team"):
+                        return self._send_json(400, {"error": "quota_tracking_mode must be 'individual' or 'team'"})
+
                 for k, v in settings_dict.items():
-                    srv.database.set_setting(k, v)
+                    if k == "quota_tracking_mode":
+                        srv.database.set_quota_tracking_mode(v)
+                    elif k == "ui_refresh_interval_seconds":
+                        try:
+                            srv.database.set_ui_refresh_cadence(int(v))
+                        except Exception:
+                            srv.database.set_setting(k, v)
+                    else:
+                        srv.database.set_setting(k, v)
                 return self._send_json(200, {"success": True, "settings": srv.database.get_all_settings()})
             return self._send_json(400, {"error": "Settings must be a key-value dictionary"})
 
@@ -596,6 +768,240 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             res = engine.run_benchmark_suite(provider=prov, model_name=model, suites=suites)
             return self._send_json(200, {"success": True, "run": res})
 
+        # AIUM-703, AIUM-704: Node Registration, Inventory, Scan, and Query Console
+        if path == "/api/discovery/nodes":
+            registry = getattr(srv, "registry", None)
+            if not registry:
+                from backend.discovery.node_registry import NodeRegistry
+                registry = NodeRegistry(database=srv.database)
+            node = registry.register_node(
+                name=body.get("name", "Remote Node"),
+                endpoint=body.get("endpoint", ""),
+                engine=body.get("engine", "ollama"),
+                max_concurrency=body.get("max_concurrency", 1),
+                queue_timeout_seconds=body.get("queue_timeout_seconds", 30.0),
+                priority=body.get("priority", 5),
+                models=body.get("models", []),
+                metadata=body.get("metadata", {}),
+                node_id=body.get("node_id") or body.get("id"),
+                is_trusted=int(body.get("is_trusted", 1)),
+                compute_group=body.get("compute_group", "Active Compute")
+            )
+            return self._send_json(200, {"success": True, "node": node})
+
+        if path == "/api/discovery/inventory":
+            alias = body.get("alias") or body.get("ip")
+            ip = body.get("ip")
+            state = body.get("state", "PENDING")
+            services = body.get("discovered_services", [])
+            is_trusted = int(body.get("is_trusted", 1))
+            compute_group = body.get("compute_group", "Active Compute")
+            notes = body.get("notes", "")
+            dev = srv.database.upsert_device_inventory(
+                alias=alias,
+                ip=ip,
+                state=state,
+                discovered_services=services,
+                is_trusted=is_trusted,
+                compute_group=compute_group,
+                notes=notes
+            )
+            return self._send_json(200, {"success": True, "device": dev})
+
+        if path == "/api/discovery/scan":
+            spec = body.get("range") or body.get("targets") or body.get("subnet")
+            platforms_list = body.get("platforms")
+            sec_ports_list = body.get("secondary_ports")
+            timeout_val = float(body.get("timeout", 0.4))
+
+            scanner = getattr(srv, "scanner", None)
+            if not scanner:
+                from backend.discovery.lan_scanner import LANScanner
+                scanner = LANScanner()
+
+            if spec:
+                ips = scanner.parse_target_spec(spec)
+            else:
+                _, detected_sub = scanner.get_local_subnet_info()
+                ips = scanner.parse_target_spec(detected_sub)
+
+            if "127.0.0.1" not in ips:
+                ips.append("127.0.0.1")
+
+            target_pairs = scanner.build_scan_targets(
+                ips=ips,
+                platforms=platforms_list,
+                secondary_ports=sec_ports_list
+            )
+            candidates = scanner.scan_targets(target_pairs, timeout=timeout_val)
+
+            try:
+                for c in candidates:
+                    alias = c.get("alias") or c.get("ip")
+                    srv.database.upsert_device_inventory(
+                        alias=alias,
+                        ip=c.get("ip"),
+                        state="KNOWN_SERVICES",
+                        discovered_services=[{"engine": c.get("engine"), "port": c.get("port"), "models": c.get("models", []), "endpoint": c.get("endpoint")}],
+                        is_trusted=1,
+                        compute_group="Active Compute"
+                    )
+            except Exception:
+                pass
+
+            return self._send_json(200, {"success": True, "candidates": candidates})
+
+        # AIUM-705 & AIUM-707: Client Quota Configuration, Blocking & Elevated Bypass
+        if path == "/api/discovery/clients":
+            client_ip = body.get("client_ip") or self._get_client_ip()
+            if not client_ip:
+                return self._send_json(400, {"error": "Missing client_ip in payload"})
+
+            action = body.get("action")
+            is_blocked = int(body.get("is_blocked", 0))
+            is_unrestricted = int(body.get("is_unrestricted", 0))
+            if action == "block":
+                is_blocked = 1
+            elif action == "unblock":
+                is_blocked = 0
+            elif action == "unrestrict":
+                is_unrestricted = 1
+            elif action == "restrict":
+                is_unrestricted = 0
+
+            existing = srv.database.get_client_quota(client_ip)
+            alias = body.get("alias") if "alias" in body else existing.get("alias")
+            win_mins = int(body.get("session_window_minutes", existing.get("session_window_minutes", 15)))
+            sess_limit = int(body.get("session_token_limit", existing.get("session_token_limit", 25000)))
+            daily_limit = int(body.get("daily_token_limit", existing.get("daily_token_limit", 250000)))
+            priority = int(body.get("priority", existing.get("priority", 5)))
+            notes = body.get("notes") if "notes" in body else existing.get("notes", "")
+
+            client = srv.database.upsert_client_quota(
+                client_ip=client_ip,
+                alias=alias,
+                session_window_minutes=win_mins,
+                session_token_limit=sess_limit,
+                daily_token_limit=daily_limit,
+                priority=priority,
+                is_unrestricted=is_unrestricted,
+                is_blocked=is_blocked,
+                bypass_until=body.get("bypass_until", existing.get("bypass_until")),
+                scheduled_start_at=body.get("scheduled_start_at", existing.get("scheduled_start_at")),
+                scheduled_end_at=body.get("scheduled_end_at", existing.get("scheduled_end_at")),
+                allowed_models=body.get("allowed_models", existing.get("allowed_models", [])),
+                blocked_models=body.get("blocked_models", existing.get("blocked_models", [])),
+                allowed_nodes=body.get("allowed_nodes", existing.get("allowed_nodes", [])),
+                blocked_nodes=body.get("blocked_nodes", existing.get("blocked_nodes", [])),
+                notes=notes
+            )
+            return self._send_json(200, {"success": True, "client": client})
+
+        if path == "/api/discovery/clients/bypass":
+            client_ip = body.get("client_ip") or self._get_client_ip()
+            if not client_ip:
+                return self._send_json(400, {"error": "Missing client_ip in payload"})
+            duration_mins = float(body.get("duration_minutes", 60))
+            if duration_mins <= 0:
+                srv.database.clear_client_bypass(client_ip)
+                client = srv.database.get_client_quota(client_ip)
+            else:
+                client = srv.database.set_client_temporary_bypass(client_ip, duration_mins)
+            return self._send_json(200, {"success": True, "client": client})
+
+        if path in ["/api/discovery/query", "/api/query/console"]:
+            governor = getattr(srv, "governor", None)
+            if not governor:
+                return self._send_json(500, {"error": "Traffic governor not initialized"})
+            target = body.get("target", "pool")
+            prompt = body.get("prompt", "")
+            files = body.get("files", [])
+            model = body.get("model", "default")
+            timeout_val = body.get("timeout")
+            client_ip = body.get("client_ip") or self._get_client_ip()
+
+            res = governor.forward_query_with_context(
+                target=target,
+                prompt=prompt,
+                files=files,
+                model=model,
+                timeout=timeout_val,
+                client_ip=client_ip
+            )
+            if res.get("status_code") == 429 or ("Quota Exceeded" in res.get("error", "")):
+                status_code = 429
+            else:
+                status_code = 200 if res.get("success") else (res.get("status_code") or 400)
+            return self._send_json(status_code, res)
+
+        if path in ["/api/discovery/proxy/completion", "/api/proxy/remote/completion"]:
+            governor = getattr(srv, "governor", None)
+            if not governor:
+                return self._send_json(500, {"error": "Traffic governor not initialized"})
+            node_id = body.get("node_id")
+            model = body.get("model", "default")
+            prompt = body.get("prompt", "")
+            stream = body.get("stream", False)
+            extra = body.get("extra_payload")
+            timeout_param = body.get("timeout")
+            client_ip = body.get("client_ip") or self._get_client_ip()
+
+            res = governor.forward_completion(
+                node_id=node_id,
+                model=model,
+                prompt=prompt,
+                stream=stream,
+                extra_payload=extra,
+                timeout=timeout_param,
+                client_ip=client_ip
+            )
+            if res.get("status_code") == 429 or ("Quota Exceeded" in res.get("error", "")):
+                status_code = 429
+            else:
+                status_code = 200 if res.get("success") else (res.get("status_code") or 400)
+            return self._send_json(status_code, res)
+
+        if path == "/api/mcp/rpc":
+            mcp = getattr(srv, "mcp_server", None)
+            if not mcp:
+                return self._send_json(500, {"error": "MCP server not initialized"})
+            resp = mcp.handle_json_rpc(body)
+            return self._send_json(200, resp)
+
+        self._send_json(404, {"error": "API route not found"})
+
+    def _handle_api_delete(self, path: str, query: Dict[str, Any]):
+        srv = self.server
+        if path == "/api/discovery/nodes":
+            node_id = query.get("id", [None])[0] or query.get("node_id", [None])[0]
+            if not node_id:
+                return self._send_json(400, {"error": "Missing node id parameter"})
+            registry = getattr(srv, "registry", None)
+            if registry:
+                deleted = registry.delete_node(node_id)
+                return self._send_json(200, {"success": deleted})
+            return self._send_json(500, {"error": "Registry not initialized"})
+
+        if path == "/api/discovery/inventory":
+            alias = query.get("alias", [None])[0] or query.get("id", [None])[0] or query.get("ip", [None])[0]
+            if not alias:
+                return self._send_json(400, {"error": "Missing alias or ip parameter"})
+            deleted = srv.database.delete_device_inventory(alias)
+            return self._send_json(200, {"success": deleted})
+
+        # AIUM-705: Client Quota Deletion & Token Reset
+        if path == "/api/discovery/clients":
+            client_ip = query.get("client_ip", [None])[0] or query.get("ip", [None])[0]
+            if not client_ip:
+                return self._send_json(400, {"error": "Missing client_ip parameter"})
+            action = query.get("action", ["delete"])[0]
+            if action == "reset":
+                reset_done = srv.database.reset_client_tokens(client_ip)
+                return self._send_json(200, {"success": reset_done})
+            else:
+                deleted = srv.database.delete_client_quota(client_ip)
+                return self._send_json(200, {"success": deleted})
+
         self._send_json(404, {"error": "API route not found"})
 
     def _serve_static(self, req_path: str):
@@ -646,7 +1052,11 @@ class AppHTTPServer:
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
         proxy_port: int = 8766,
-        google_auth_mgr: Optional[Any] = None
+        google_auth_mgr: Optional[Any] = None,
+        scanner: Optional[Any] = None,
+        registry: Optional[Any] = None,
+        governor: Optional[Any] = None,
+        mcp_server: Optional[Any] = None
     ):
         self.database = database
         self.vault = vault
@@ -658,6 +1068,16 @@ class AppHTTPServer:
 
         from backend.security.google_auth import GoogleAuthManager
         self.google_auth_mgr = google_auth_mgr or GoogleAuthManager(vault=self.vault, database=self.database)
+
+        from backend.discovery.lan_scanner import LANScanner
+        from backend.discovery.node_registry import NodeRegistry
+        from backend.discovery.traffic_governor import TrafficGovernor
+        from backend.mcp.server import MCPServer
+
+        self.scanner = scanner or LANScanner()
+        self.registry = registry or NodeRegistry(database=self.database)
+        self.governor = governor or TrafficGovernor(registry=self.registry, database=self.database)
+        self.mcp_server = mcp_server or MCPServer(scanner=self.scanner, registry=self.registry, governor=self.governor)
 
         self._server: Optional[http.server.ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -679,6 +1099,10 @@ class AppHTTPServer:
         self._server.host = self.host
         self._server.port = self.server_port
         self._server.google_auth_mgr = self.google_auth_mgr
+        self._server.scanner = self.scanner
+        self._server.registry = self.registry
+        self._server.governor = self.governor
+        self._server.mcp_server = self.mcp_server
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
