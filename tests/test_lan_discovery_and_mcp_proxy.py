@@ -115,7 +115,7 @@ class TestLANDiscoveryAndMCPProxy(unittest.TestCase):
         self.scanner = LANScanner()
         self.registry = NodeRegistry(database=self.db)
         self.governor = TrafficGovernor(registry=self.registry, database=self.db)
-        self.mcp_server = MCPServer(scanner=self.scanner, registry=self.registry, governor=self.governor)
+        self.mcp_server = MCPServer(scanner=self.scanner, registry=self.registry, governor=self.governor, database=self.db)
 
         # Wire AppHTTPServer with discovery components
         self.app_server = AppHTTPServer(
@@ -352,16 +352,20 @@ class TestLANDiscoveryAndMCPProxy(unittest.TestCase):
         self.assertIn("tools", res["result"]["capabilities"])
 
     def test_mcp_tools_list(self):
-        """Assert tools/list exposes all 5 managed tools with JSON schemas."""
+        """Assert tools/list exposes all 8 managed tools with JSON schemas."""
         req = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
         res = self.mcp_server.handle_json_rpc(req)
         tools = res["result"]["tools"]
         tool_names = [t["name"] for t in tools]
+        self.assertEqual(len(tools), 8)
         self.assertIn("scan_lan_ai_services", tool_names)
         self.assertIn("list_managed_nodes", tool_names)
         self.assertIn("register_managed_node", tool_names)
         self.assertIn("generate_completion", tool_names)
         self.assertIn("get_traffic_telemetry", tool_names)
+        self.assertIn("get_usage_summary", tool_names)
+        self.assertIn("get_provider_quotas", tool_names)
+        self.assertIn("get_proxy_endpoints", tool_names)
 
     def test_mcp_tool_call_scan_lan(self):
         """Assert calling scan_lan_ai_services via MCP tools/call."""
@@ -464,6 +468,71 @@ class TestLANDiscoveryAndMCPProxy(unittest.TestCase):
         self.assertIn("active_requests", stats)
         self.assertIn("total_tokens_routed", stats)
         self.assertEqual(stats["total_tokens_routed"], 28 + 84)
+
+    def test_mcp_tool_call_get_usage_summary(self):
+        """Assert get_usage_summary tool executes through JSON-RPC and returns today's tokens."""
+        self.db.record_usage_event(
+            provider="claude",
+            input_tokens=1500,
+            output_tokens=500,
+            model="claude-3-5-sonnet-20241022"
+        )
+        req = {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "get_usage_summary",
+                "arguments": {"provider": "claude"}
+            }
+        }
+        res = self.mcp_server.handle_json_rpc(req)
+        self.assertFalse(res.get("result", {}).get("isError"))
+        summary = json.loads(res["result"]["content"][0]["text"])
+        self.assertGreaterEqual(summary["input_tokens_today"], 1500)
+        self.assertGreaterEqual(summary["output_tokens_today"], 500)
+
+    def test_mcp_tool_call_get_provider_quotas(self):
+        """Assert get_provider_quotas tool returns active provider snapshots and reset times."""
+        self.db.update_provider_snapshot(
+            provider="claude",
+            plan_type="Pro",
+            session_remaining_pct=85.0,
+            weekly_remaining_pct=92.5
+        )
+        req = {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "get_provider_quotas",
+                "arguments": {"provider": "claude"}
+            }
+        }
+        res = self.mcp_server.handle_json_rpc(req)
+        self.assertFalse(res.get("result", {}).get("isError"))
+        quotas = json.loads(res["result"]["content"][0]["text"])
+        self.assertEqual(quotas["provider"], "claude")
+        self.assertEqual(quotas["session_remaining_pct"], 85.0)
+
+    def test_mcp_tool_call_get_proxy_endpoints(self):
+        """Assert get_proxy_endpoints tool returns all proxy ports and environment variables."""
+        req = {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "get_proxy_endpoints",
+                "arguments": {}
+            }
+        }
+        res = self.mcp_server.handle_json_rpc(req)
+        self.assertFalse(res.get("result", {}).get("isError"))
+        endpoints = json.loads(res["result"]["content"][0]["text"])
+        self.assertEqual(endpoints["transparent_reverse_proxy"], "http://127.0.0.1:8766")
+        self.assertEqual(endpoints["ollama_and_openai_bridge"], "http://127.0.0.1:8989")
+        self.assertIn("ANTHROPIC_BASE_URL", endpoints["env_variables"])
+        self.assertIn("OLLAMA_BASE_URL", endpoints["env_variables"])
 
     # 5. REST API Endpoints Tests
     def test_rest_api_discovery_scan(self):

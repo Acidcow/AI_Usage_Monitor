@@ -552,66 +552,257 @@ print(completion.choices[0].message.content)</pre>
 
         <!-- Pane 3: MCP JSON-RPC Server -->
         <div id="pane-guide-mcp" class="bridge-guide-pane" style="display: none;">
-          <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <strong style="color: #c084fc; font-size: 0.88rem;">3. Model Context Protocol (MCP) Server</strong>
-              <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 0.68rem;">JSON-RPC 2.0</span>
+          <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.1rem;">⚡</span>
+                <strong style="color: #c084fc; font-size: 0.92rem;">Model Context Protocol (MCP) JSON-RPC 2.0 Integration</strong>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 0.68rem;">Stdio &amp; HTTP Dual-Mode</span>
+                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem;">8 Tools Available</span>
+              </div>
             </div>
-            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0; line-height: 1.4;">
-              Autonomous agents and platforms can directly query available tools, trigger multi-node prompt executions, scan LAN devices, and manage client limits programmatically over JSON-RPC 2.0 at <code style="color: #c084fc;">http://127.0.0.1:8765/api/mcp/rpc</code>.
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 12px 0; line-height: 1.45;">
+              Expose live token telemetry, quota limits, reverse proxy endpoints, local/LAN model discovery, and governed multi-node execution directly to autonomous agents running in <strong>Google Antigravity</strong>, <strong>VSCode (Cline / Roo Code / Continue)</strong>, and <strong>Gemini CLI</strong>.
             </p>
 
-            <div style="margin-bottom: 10px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">List Available Tools (cURL):</span>
-                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`curl -X POST http://127.0.0.1:8765/api/mcp/rpc -H 'Content-Type: application/json' -d '{\x22jsonrpc\x22: \x222.0\x22, \x22id\x22: 1, \x22method\x22: \x22tools/list\x22, \x22params\x22: {}}'`, this)">📋 Copy</button>
+            <!-- Guide 3.1: Google Antigravity IDE & Antigravity CLI -->
+            <div style="background: #090e1a; border: 1px solid rgba(192, 132, 252, 0.25); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 0.95rem;">🪐</span>
+                  <strong style="color: #f1f5f9; font-size: 0.82rem;">1. Google Antigravity IDE &amp; Antigravity CLI Integration</strong>
+                </div>
+                <span class="badge" style="background: rgba(192, 132, 252, 0.18); color: #c084fc; font-size: 0.65rem;">Recommended for Pair Programming</span>
               </div>
-              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #c084fc; overflow-x: auto;">curl -X POST http://127.0.0.1:8765/api/mcp/rpc \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}'</pre>
+              <p style="font-size: 0.74rem; color: #94a3b8; margin: 0 0 8px 0; line-height: 1.4;">
+                Add the configuration below to your Antigravity global MCP configuration file at <code style="color: #38bdf8;">~/.gemini/config/mcp_config.json</code> (or workspace <code style="color: #38bdf8;">.agents/mcp_config.json</code>). Antigravity automatically spawns the background stdio process and injects all telemetry &amp; node management tools directly into the agent.
+              </p>
+
+              <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Global Config Path (Windows):</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard('C:\\Users\\JamesEckhardt\\.gemini\\config\\mcp_config.json', this)">📋 Copy Path</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px 8px; margin: 0; font-family: var(--font-mono); font-size: 0.72rem; color: #94a3b8; overflow-x: auto;">C:\Users\JamesEckhardt\.gemini\config\mcp_config.json</pre>
+              </div>
+
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Copy-Paste JSON Configuration:</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`{\n  \x22mcpServers\x22: {\n    \x22ai-usage-monitor\x22: {\n      \x22command\x22: \x22python\x22,\n      \x22args\x22: [\x22-m\x22, \x22backend.mcp.server\x22],\n      \x22env\x22: {\n        \x22PYTHONPATH\x22: \x22c:\\\\AgenticDev\\\\AI_Usage_Monitor\x22\n      }\n    }\n  }\n}`, this)">📋 Copy JSON</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(192, 132, 252, 0.2); border-radius: 4px; padding: 10px; margin: 0; font-family: var(--font-mono); font-size: 0.73rem; color: #e2e8f0; overflow-x: auto;">{
+  "mcpServers": {
+    "ai-usage-monitor": {
+      "command": "python",
+      "args": ["-m", "backend.mcp.server"],
+      "env": {
+        "PYTHONPATH": "c:\\AgenticDev\\AI_Usage_Monitor"
+      }
+    }
+  }
+}</pre>
+              </div>
+
+              <!-- Exposed Tools Pill Box -->
+              <div style="margin-top: 10px; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 8px 10px;">
+                <span style="font-size: 0.69rem; color: var(--text-dim); font-weight: 600; display: block; margin-bottom: 6px;">Exposed Agent Tools (Auto-Discovered by Antigravity):</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.7rem;">
+                  <span style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 3px; padding: 2px 6px;">📊 <code>get_usage_summary</code></span>
+                  <span style="background: rgba(52, 211, 153, 0.12); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.25); border-radius: 3px; padding: 2px 6px;">⏱️ <code>get_provider_quotas</code></span>
+                  <span style="background: rgba(251, 191, 36, 0.12); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.25); border-radius: 3px; padding: 2px 6px;">🌐 <code>get_proxy_endpoints</code></span>
+                  <span style="background: rgba(192, 132, 252, 0.12); color: #c084fc; border: 1px solid rgba(192, 132, 252, 0.25); border-radius: 3px; padding: 2px 6px;">📈 <code>get_traffic_telemetry</code></span>
+                  <span style="background: rgba(244, 63, 94, 0.12); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.25); border-radius: 3px; padding: 2px 6px;">🔍 <code>scan_lan_ai_services</code></span>
+                  <span style="background: rgba(168, 85, 247, 0.12); color: #a855f7; border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 3px; padding: 2px 6px;">💻 <code>list_managed_nodes</code></span>
+                  <span style="background: rgba(14, 165, 233, 0.12); color: #0ea5e9; border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 3px; padding: 2px 6px;">➕ <code>register_managed_node</code></span>
+                  <span style="background: rgba(16, 185, 129, 0.12); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 3px; padding: 2px 6px;">🚀 <code>generate_completion</code></span>
+                </div>
+              </div>
             </div>
 
-            <div>
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Dispatch Prompt Across Compute Pool via Tool Call:</span>
-                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`curl -X POST http://127.0.0.1:8765/api/mcp/rpc -H 'Content-Type: application/json' -d '{\x22jsonrpc\x22: \x222.0\x22, \x22id\x22: 2, \x22method\x22: \x22tools/call\x22, \x22params\x22: {\x22name\x22: \x22prompt_cluster\x22, \x22arguments\x22: {\x22model\x22: \x22llama3:latest\x22, \x22prompt\x22: \x22Analyze data.\x22}}}'`, this)">📋 Copy</button>
+            <!-- Guide 3.2: VSCode (Cline, Roo Code, Continue.dev, Cursor) -->
+            <div style="background: #090e1a; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 0.95rem;">💻</span>
+                  <strong style="color: #f1f5f9; font-size: 0.82rem;">2. VSCode Extensions (Cline / Roo Code / Cursor / Continue.dev)</strong>
+                </div>
+                <span class="badge" style="background: rgba(255, 255, 255, 0.1); color: #cbd5e1; font-size: 0.65rem;">cline_mcp_settings.json</span>
               </div>
-              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #c084fc; overflow-x: auto;">curl -X POST http://127.0.0.1:8765/api/mcp/rpc \
+              <p style="font-size: 0.74rem; color: #94a3b8; margin: 0 0 8px 0; line-height: 1.4;">
+                In VSCode with Cline or Roo Code, click the MCP icon &gt; Edit MCP Settings (<code style="color: #38bdf8;">cline_mcp_settings.json</code>) and add the server definition:
+              </p>
+
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Cline / Roo Code Config:</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`{\n  \x22mcpServers\x22: {\n    \x22ai-usage-monitor\x22: {\n      \x22command\x22: \x22python\x22,\n      \x22args\x22: [\x22-m\x22, \x22backend.mcp.server\x22],\n      \x22env\x22: {\n        \x22PYTHONPATH\x22: \x22c:\\\\AgenticDev\\\\AI_Usage_Monitor\x22\n      },\n      \x22disabled\x22: false,\n      \x22autoApprove\x22: [\x22get_usage_summary\x22, \x22get_provider_quotas\x22, \x22get_traffic_telemetry\x22, \x22get_proxy_endpoints\x22]\n    }\n  }\n}`, this)">📋 Copy JSON</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 4px; padding: 10px; margin: 0; font-family: var(--font-mono); font-size: 0.73rem; color: #cbd5e1; overflow-x: auto;">{
+  "mcpServers": {
+    "ai-usage-monitor": {
+      "command": "python",
+      "args": ["-m", "backend.mcp.server"],
+      "env": {
+        "PYTHONPATH": "c:\\AgenticDev\\AI_Usage_Monitor"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "get_usage_summary",
+        "get_provider_quotas",
+        "get_traffic_telemetry",
+        "get_proxy_endpoints"
+      ]
+    }
+  }
+}</pre>
+              </div>
+
+              <!-- Continue.dev Model Bridge Configuration -->
+              <div style="margin-top: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Continue.dev Model Provider (<code style="color: #38bdf8;">~/.continue/config.json</code>):</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`{\n  \x22title\x22: \x22AI Usage Monitor Bridge\x22,\n  \x22provider\x22: \x22openai\x22,\n  \x22model\x22: \x22llama3:latest\x22,\n  \x22apiBase\x22: \x22http://127.0.0.1:8989/v1\x22,\n  \x22apiKey\x22: \x22aium-governed\x22\n}`, this)">📋 Copy JSON</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.73rem; color: #94a3b8; overflow-x: auto;">{
+  "title": "AI Usage Monitor Bridge",
+  "provider": "openai",
+  "model": "llama3:latest",
+  "apiBase": "http://127.0.0.1:8989/v1",
+  "apiKey": "aium-governed"
+}</pre>
+              </div>
+            </div>
+
+            <!-- Guide 3.3: Direct HTTP JSON-RPC 2.0 (cURL & Python) -->
+            <div style="background: #090e1a; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 0.95rem;">🌐</span>
+                  <strong style="color: #f1f5f9; font-size: 0.82rem;">3. Direct HTTP JSON-RPC 2.0 Endpoints</strong>
+                </div>
+                <span class="badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; font-size: 0.65rem;">Port 8765 &amp; 8989</span>
+              </div>
+              <p style="font-size: 0.74rem; color: #94a3b8; margin: 0 0 8px 0; line-height: 1.4;">
+                CLI scripts, webhooks, or custom tools can query MCP endpoints over standard HTTP POST at <code style="color: #c084fc;">http://127.0.0.1:8765/api/mcp/rpc</code> or secondary port <code style="color: #38bdf8;">http://127.0.0.1:8989/api/mcp/rpc</code>:
+              </p>
+
+              <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Fetch Live Usage Summary (cURL):</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`curl -X POST http://127.0.0.1:8765/api/mcp/rpc -H 'Content-Type: application/json' -d '{\x22jsonrpc\x22: \x222.0\x22, \x22id\x22: 1, \x22method\x22: \x22tools/call\x22, \x22params\x22: {\x22name\x22: \x22get_usage_summary\x22, \x22arguments\x22: {}}}'`, this)">📋 Copy</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px 8px; margin: 0; font-family: var(--font-mono); font-size: 0.72rem; color: #c084fc; overflow-x: auto;">curl -X POST http://127.0.0.1:8765/api/mcp/rpc \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "prompt_cluster", "arguments": {"model": "llama3:latest", "prompt": "Analyze data."}}}'</pre>
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_usage_summary", "arguments": {}}}'</pre>
+              </div>
+
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Fetch Active Provider Quotas &amp; Reset Times (cURL):</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`curl -X POST http://127.0.0.1:8765/api/mcp/rpc -H 'Content-Type: application/json' -d '{\x22jsonrpc\x22: \x222.0\x22, \x22id\x22: 2, \x22method\x22: \x22tools/call\x22, \x22params\x22: {\x22name\x22: \x22get_provider_quotas\x22, \x22arguments\x22: {}}}'`, this)">📋 Copy</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px 8px; margin: 0; font-family: var(--font-mono); font-size: 0.72rem; color: #34d399; overflow-x: auto;">curl -X POST http://127.0.0.1:8765/api/mcp/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "get_provider_quotas", "arguments": {}}}'</pre>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Pane 4: Transparent Reverse Proxy -->
         <div id="pane-guide-proxy" class="bridge-guide-pane" style="display: none;">
-          <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <strong style="color: #fbbf24; font-size: 0.88rem;">4. Transparent Interception for Claude CLI &amp; Gemini</strong>
-              <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.68rem;">Live SSE Interception</span>
+          <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.1rem;">🛡️</span>
+                <strong style="color: #fbbf24; font-size: 0.92rem;">Transparent Reverse Proxy &amp; Traffic Funneling</strong>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.68rem;">Port 8766 Active</span>
+                <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.68rem;">Zero-Latency Passthrough</span>
+              </div>
             </div>
-            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0; line-height: 1.4;">
-              Route outbound traffic from terminal CLIs through <code style="color: #fbbf24;">http://127.0.0.1:8766</code>. Transparently extracts SSE usage chunks, captures token limits, and logs active sessions with zero latency impact.
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 12px 0; line-height: 1.45;">
+              Funnel outbound LLM traffic from <strong>Google Antigravity</strong> terminal tasks, <strong>Google Gemini CLI</strong>, and <strong>Claude Code</strong> through <code style="color: #fbbf24;">http://127.0.0.1:8766</code>. Transparently extracts SSE usage chunks, captures token limits, and logs active sessions with zero latency impact.
             </p>
 
-            <div style="margin-bottom: 10px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Claude CLI Direct Endpoint Override:</span>
-                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard('export ANTHROPIC_BASE_URL=http://127.0.0.1:8766', this)">📋 Copy</button>
+            <!-- Guide 4.1: Google Antigravity & Windows PowerShell Session Funneling -->
+            <div style="background: #090e1a; border: 1px solid rgba(251, 191, 36, 0.25); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 0.95rem;">🪐</span>
+                  <strong style="color: #f1f5f9; font-size: 0.82rem;">1. Funneling Google Antigravity Terminal Sessions</strong>
+                </div>
+                <span class="badge" style="background: rgba(251, 191, 36, 0.18); color: #fbbf24; font-size: 0.65rem;">Primary Target</span>
               </div>
-              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #fbbf24; overflow-x: auto;">export ANTHROPIC_BASE_URL="http://127.0.0.1:8766"</pre>
+              <p style="font-size: 0.74rem; color: #94a3b8; margin: 0 0 8px 0; line-height: 1.4;">
+                To funnel all CLI tools and subagents spawned inside Antigravity terminal sessions through AI Usage Monitor, execute this one-liner in your active PowerShell terminal:
+              </p>
+
+              <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Active Terminal Session (PowerShell):</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`$env:HTTP_PROXY='http://127.0.0.1:8766'; $env:HTTPS_PROXY='http://127.0.0.1:8766'; $env:ANTHROPIC_BASE_URL='http://127.0.0.1:8766'; $env:OLLAMA_BASE_URL='http://127.0.0.1:8989'`, this)">📋 Copy PowerShell</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.73rem; color: #fbbf24; overflow-x: auto;">$env:HTTP_PROXY='http://127.0.0.1:8766'
+$env:HTTPS_PROXY='http://127.0.0.1:8766'
+$env:ANTHROPIC_BASE_URL='http://127.0.0.1:8766'
+$env:OLLAMA_BASE_URL='http://127.0.0.1:8989'</pre>
+              </div>
+
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Make Persistent Across All Future Antigravity Sessions (Run Once):</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`[System.Environment]::SetEnvironmentVariable('HTTP_PROXY', 'http://127.0.0.1:8766', 'User')\n[System.Environment]::SetEnvironmentVariable('HTTPS_PROXY', 'http://127.0.0.1:8766', 'User')\n[System.Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL', 'http://127.0.0.1:8766', 'User')\n[System.Environment]::SetEnvironmentVariable('OLLAMA_BASE_URL', 'http://127.0.0.1:8989', 'User')`, this)">📋 Copy Script</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.73rem; color: #94a3b8; overflow-x: auto;">[System.Environment]::SetEnvironmentVariable("HTTP_PROXY", "http://127.0.0.1:8766", "User")
+[System.Environment]::SetEnvironmentVariable("HTTPS_PROXY", "http://127.0.0.1:8766", "User")
+[System.Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "http://127.0.0.1:8766", "User")
+[System.Environment]::SetEnvironmentVariable("OLLAMA_BASE_URL", "http://127.0.0.1:8989", "User")</pre>
+              </div>
             </div>
 
-            <div>
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">Global Terminal Proxy (PowerShell):</span>
-                <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard('$env:HTTP_PROXY=\'http://127.0.0.1:8766\'; $env:HTTPS_PROXY=\'http://127.0.0.1:8766\'', this)">📋 Copy</button>
+            <!-- Guide 4.2: Google Gemini CLI & Developer Tools -->
+            <div style="background: #090e1a; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 0.95rem;">💎</span>
+                  <strong style="color: #f1f5f9; font-size: 0.82rem;">2. Google Gemini CLI &amp; Python SDK Funneling</strong>
+                </div>
+                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.65rem;">Account-Level Auth Compatible</span>
               </div>
-              <pre style="background: #090d16; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.74rem; color: #fbbf24; overflow-x: auto;">$env:HTTP_PROXY='http://127.0.0.1:8766'
-$env:HTTPS_PROXY='http://127.0.0.1:8766'</pre>
+              <p style="font-size: 0.74rem; color: #94a3b8; margin: 0 0 8px 0; line-height: 1.4;">
+                Route Gemini developer commands through the proxy. AI Usage Monitor attributes calls to your active subscribed account profile (<code style="color: #38bdf8;">acidcow@gmail.com</code>) without exposing plaintext credentials:
+              </p>
+
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Python <code>google-genai</code> Client via Proxy:</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`import os\nos.environ['HTTP_PROXY'] = 'http://127.0.0.1:8766'\nos.environ['HTTPS_PROXY'] = 'http://127.0.0.1:8766'\n# Now invoke standard Gemini SDK or CLI tools`, this)">📋 Copy</button>
+                </div>
+                <pre style="background: #050811; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.73rem; color: #e2e8f0; overflow-x: auto;">import os
+os.environ["HTTP_PROXY"] = "http://127.0.0.1:8766"
+os.environ["HTTPS_PROXY"] = "http://127.0.0.1:8766"
+# Standard google.genai, gemini CLI, or curl requests now funnel through proxy</pre>
+              </div>
+            </div>
+
+            <!-- Guide 4.3: Deduplication & Attribution Engine Notice -->
+            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 10px 12px;">
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                <span style="font-size: 0.95rem;">🔄</span>
+                <strong style="color: #34d399; font-size: 0.78rem;">Deduplication &amp; Zero Double-Accounting Architecture</strong>
+              </div>
+              <p style="font-size: 0.72rem; color: #cbd5e1; margin: 0; line-height: 1.4;">
+                Traffic entering through the reverse proxy is tagged with <code style="color: #34d399;">is_proxied = 1</code> and <code style="color: #34d399;">source = 'proxy'</code>. When direct account sync polling runs, AI Usage Monitor's temporal correlation engine (±60s window matching provider, session, and token count) merges events seamlessly to prevent double-counting while preserving origin attribution.
+              </p>
             </div>
           </div>
         </div>
+
       </div>
     </div>
 

@@ -1102,7 +1102,7 @@ class AppHTTPServer:
         self.scanner = scanner or LANScanner()
         self.registry = registry or NodeRegistry(database=self.database)
         self.governor = governor or TrafficGovernor(registry=self.registry, database=self.database)
-        self.mcp_server = mcp_server or MCPServer(scanner=self.scanner, registry=self.registry, governor=self.governor)
+        self.mcp_server = mcp_server or MCPServer(scanner=self.scanner, registry=self.registry, governor=self.governor, database=self.database)
 
         self._server: Optional[http.server.ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
