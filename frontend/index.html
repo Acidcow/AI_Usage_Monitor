@@ -283,53 +283,26 @@
         <button onclick="window.App.closeConfigureGeminiModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
 
-      <!-- Quick Procurement Guide Banner -->
-      <div class="procure-guide-card" style="border-left: 3px solid var(--gemini-color);">
-        <div class="procure-header">
-          <span class="procure-badge" style="background: rgba(37, 99, 235, 0.2); color: #93c5fd; border-color: rgba(96, 165, 250, 0.4);">Procure Key</span>
-          <span style="font-weight: 600; font-size: 0.88rem;">Need a Google Gemini API Key?</span>
-        </div>
-        <p class="procure-desc">
-          Google AI Studio provides free and pay-as-you-go API keys with instant activation for Gemini 1.5 Pro, Flash, and 2.0.
-        </p>
-        <div class="procure-steps">
-          <div class="step-item"><span class="step-num">1</span> Click <strong>Open Google AI Studio</strong> below.</div>
-          <div class="step-item"><span class="step-num">2</span> Sign in with your Google account and click <strong>"Create API key"</strong>.</div>
-          <div class="step-item"><span class="step-num">3</span> Copy the key and paste it into the field below.</div>
-        </div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini">
-            <span>🚀</span> Open Google AI Studio ↗
-          </a>
-          <a href="https://ai.google.dev/gemini-api/docs" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
-            <span>📚</span> AI Studio Docs ↗
-          </a>
-          <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
-            <span>💰</span> Quotas & Pricing ↗
-          </a>
-          <a href="https://console.cloud.google.com/iam-admin/quotas" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Open Google Cloud Console to inspect project-wide and account-wide API quotas">
-            <span>🌐</span> GCP Quotas Console ↗
-          </a>
-        </div>
-      </div>
-
-      <!-- Google Account Sign-In (OAuth 2.0 PKCE & Account-Level Hierarchy) -->
-      <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+      <!-- 1. PRIMARY: Google Account Sign-In (Gemini Pro Subscription - No API Key Required) -->
+      <div style="background: rgba(59, 130, 246, 0.12); border: 2px solid rgba(59, 130, 246, 0.4); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 16px; box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.2rem;">🌐</span>
-            <strong style="color: #60a5fa; font-size: 0.92rem;">Google Account Single Sign-On (Account-Level View)</strong>
+            <span style="font-size: 1.3rem;">⭐</span>
+            <div>
+              <strong style="color: #60a5fa; font-size: 0.96rem;">Subscribed Gemini Pro Account (acidcow@gmail.com)</strong>
+              <div style="font-size: 0.72rem; color: #93c5fd;">Primary & Recommended: Direct Google Account SSO (No API Keys or prepaid charges)</div>
+            </div>
           </div>
-          <span id="gemini-oauth-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+          <span id="gemini-oauth-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 0.75rem;">
             Connected: acidcow@gmail.com
           </span>
         </div>
-        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
-          Authenticate with your Google account via local OAuth 2.0 loopback. This unlocks an account-level umbrella view with collapsible child tokens for each project and key.
+        <p style="font-size: 0.8rem; color: #cbd5e1; margin-bottom: 12px; line-height: 1.45;">
+          Your subscribed <strong>Gemini Pro</strong> account on <strong>acidcow@gmail.com</strong> connects directly via Google Account authentication. You do not need an AI Studio API key or prepaid credit card.
         </p>
         <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.startGoogleOAuth()" style="border-color: rgba(96, 165, 250, 0.4); color: #93c5fd;">
-            🔐 Sign In with Google (Browser)
+          <button type="button" class="btn btn-primary btn-sm" onclick="window.App.startGoogleOAuth()" style="background: linear-gradient(135deg, #2563eb, #1d4ed8); border: 1px solid #3b82f6;">
+            🔐 Sign In with Google Account
           </button>
           <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.simulateGoogleAccount('acidcow@gmail.com')" style="border-color: rgba(16, 185, 129, 0.4); color: #34d399;">
             ⚡ Fast Connect (acidcow@gmail.com)
@@ -339,6 +312,30 @@
           </button>
         </div>
       </div>
+
+      <!-- 2. Optional / Alternative: Google AI Studio API Keys (Prepaid / Developer) -->
+      <details style="background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px;">
+        <summary style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); cursor: pointer;">
+          Optional / Alternative: Google AI Studio API Keys (Prepaid / Developer)
+        </summary>
+        <div class="procure-guide-card" style="border-left: 3px solid var(--gemini-color); margin-top: 10px;">
+          <div class="procure-header">
+            <span class="procure-badge" style="background: rgba(37, 99, 235, 0.2); color: #93c5fd; border-color: rgba(96, 165, 250, 0.4);">Developer API</span>
+            <span style="font-weight: 600; font-size: 0.85rem;">Google AI Studio API Keys</span>
+          </div>
+          <p class="procure-desc">
+            Use this only if you want to connect dedicated developer API keys or GCP projects alongside your main Gemini Pro Google Account.
+          </p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini btn-sm">
+              <span>🚀</span> Open Google AI Studio ↗
+            </a>
+            <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+              <span>💰</span> Quotas & Pricing ↗
+            </a>
+          </div>
+        </div>
+      </details>
 
       <!-- Child Named API Tokens Registry -->
       <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">

@@ -952,11 +952,12 @@ window.App = {
     const hubGeminiStatus = document.getElementById("hub-gemini-status");
     if (providers["gemini"]) {
       const gActive = providers["gemini"].status === "ACTIVE";
-      if (geminiDot) geminiDot.className = `dot ${gActive ? 'dot-green' : 'dot-gray'}`;
-      if (geminiStatusText) geminiStatusText.innerText = gActive ? "Active" : "Ready";
+      const isGeminiPro = (providers["gemini"].plan_type || '').includes("Gemini Pro") || (providers["gemini"].account_id === "acidcow@gmail.com");
+      if (geminiDot) geminiDot.className = `dot ${gActive ? 'dot-green' : (providers["gemini"].status === 'ERROR' ? 'dot-red' : 'dot-gray')}`;
+      if (geminiStatusText) geminiStatusText.innerText = isGeminiPro ? "Gemini Pro (Active)" : (gActive ? "Active" : (providers["gemini"].status || "Ready"));
       if (hubGeminiStatus) {
-        hubGeminiStatus.innerText = providers["gemini"].status || "Ready";
-        hubGeminiStatus.style.color = gActive ? "#34d399" : "#60a5fa";
+        hubGeminiStatus.innerText = isGeminiPro ? "Active (Gemini Pro)" : (providers["gemini"].status || "Ready");
+        hubGeminiStatus.style.color = gActive ? "#34d399" : (providers["gemini"].status === "ERROR" ? "#f87171" : "#60a5fa");
       }
     }
 

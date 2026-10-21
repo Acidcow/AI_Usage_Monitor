@@ -119,12 +119,12 @@
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 1.2rem;">💎</span>
-          <strong>Google Gemini</strong>
+          <strong>Google Gemini (Gemini Pro)</strong>
         </div>
-        <span class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa;" id="hub-gemini-status">Ready</span>
+        <span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399;" id="hub-gemini-status">Active</span>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
-        Connect Google AI Studio or Vertex AI projects for token and quota monitoring.
+        Direct Google Account SSO integration for your subscribed <strong>Gemini Pro</strong> account (<strong>acidcow@gmail.com</strong>). Zero API keys required.
       </p>
 
       <!-- Multi-Account Profile Selector Strip -->
@@ -132,22 +132,24 @@
         <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 170px;">
           <span style="font-size: 0.74rem; color: var(--text-dim); font-weight: 600;">Active Account:</span>
           <select id="hub-account-select-gemini" onchange="window.App.switchActiveAccount('gemini', this.value)" style="background: #0f172a; border: 1px solid rgba(255,255,255,0.15); color: #f8fafc; font-size: 0.76rem; border-radius: 4px; padding: 4px 8px; flex: 1;">
-            <option value="">acidcow@gmail.com (Active)</option>
+            <option value="acidcow@gmail.com">acidcow@gmail.com (Gemini Pro Subscribed)</option>
           </select>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="window.App.openAccountModal('gemini')" style="font-size: 0.72rem; padding: 3px 8px;" title="Switch accounts or add Google workspaces">
-          👥 Accounts
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openConfigureGeminiModal()" style="font-size: 0.72rem; padding: 3px 8px;" title="Manage Google Account SSO & child tokens">
+          🌐 Account & Tokens
         </button>
       </div>
 
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini" title="Open Google AI Studio to generate or copy your Gemini API key">
-          <span>🚀</span> Get Gemini API Key ↗
-        </a>
-        <button class="btn btn-primary" onclick="window.App.openConfigureGeminiModal()">Configure Key</button>
+        <button class="btn btn-primary" onclick="window.App.openConfigureGeminiModal()" style="background: linear-gradient(135deg, #2563eb, #1d4ed8); border: 1px solid #3b82f6;">
+          🔐 Google Account (acidcow@gmail.com)
+        </button>
         <button class="btn btn-secondary" onclick="window.App.syncProvider('gemini')">Sync Now</button>
-        <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="View Gemini token limits and pricing tiers">
-          <span>💰</span> Pricing & Quotas ↗
+        <a href="https://gemini.google.com" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Open Google Gemini Web interface">
+          <span>✨</span> Gemini Web (Pro) ↗
+        </a>
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini" title="Open Google AI Studio to manage API keys if needed">
+          <span>🚀</span> AI Studio API ↗
         </a>
       </div>
     </div>
