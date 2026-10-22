@@ -100,6 +100,10 @@ class OllamaEmulatorHandler(http.server.BaseHTTPRequestHandler):
         if path in ["/api/mcp/rpc", "/rpc"] or ("jsonrpc" in data and "method" in data):
             if hasattr(self.server, "mcp_server") and self.server.mcp_server:
                 res = self.server.mcp_server.handle_json_rpc(data)
+                if res is None:
+                    self.send_response(204)
+                    self.end_headers()
+                    return
                 return self._send_json(200, res)
             return self._send_json(503, {"error": "MCP server not available on emulator bridge."})
 

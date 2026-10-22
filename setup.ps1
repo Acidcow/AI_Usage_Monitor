@@ -3,8 +3,12 @@
     AI Usage Monitor - Environment Bootstrap & Launch Script
 .DESCRIPTION
     Zero-dependency bootstrap script for Windows.
-    Verifies Python, initializes database, runs test suite, and launches service.
+    Verifies Python, initializes database, registers Windows Auto-Start, runs test suite, and launches service.
 #>
+param(
+    [bool]$InstallStartup = $true,
+    [switch]$BackgroundDaemon
+)
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "  AI Usage Monitor - Windows Environment Bootstrap       " -ForegroundColor Cyan
@@ -29,25 +33,34 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 3. Pre-Flight Test Suite Verification
-Write-Host "`n[STEP 2/3] Running Pre-Flight Unit & Security Test Suite..." -ForegroundColor Yellow
+Write-Host "`n[STEP 2/4] Running Pre-Flight Unit & Security Test Suite..." -ForegroundColor Yellow
 python dev_tools/manage_roadmap.py run-tests
 if ($LASTEXITCODE -ne 0) {
     Write-Error "[FAIL] Pre-flight tests failed. Please investigate test log."
     exit 1
 }
 
+# 3b. Register Windows Logon Auto-Start
+if ($InstallStartup) {
+    Write-Host "`n[STEP 3/4] Registering Windows Auto-Start (HKCU\...\Run -> pythonw.exe --daemon)..." -ForegroundColor Yellow
+    python run_monitor.py --install-startup --widget | Out-Null
+    Write-Host "[OK] Windows Auto-Start registered." -ForegroundColor Green
+}
+
 # 4. Launch Service
-Write-Host "`n[STEP 3/3] Launching AI Usage Monitor Service..." -ForegroundColor Yellow
+Write-Host "`n[STEP 4/4] Launching AI Usage Monitor Service..." -ForegroundColor Yellow
 Write-Host "-> Dashboard: http://127.0.0.1:8765" -ForegroundColor Cyan
 Write-Host "-> Mini Widget: http://127.0.0.1:8765/mini_widget.html" -ForegroundColor Cyan
-Write-Host "-> Claude CLI Proxy: http://127.0.0.1:8766/v1" -ForegroundColor Cyan
+Write-Host "-> Claude & Gemini Proxy: http://127.0.0.1:8766/v1" -ForegroundColor Cyan
+Write-Host "-> Ollama API Emulator: http://127.0.0.1:8989" -ForegroundColor Cyan
 Write-Host "-> Windows System Tray Icon: Active" -ForegroundColor Cyan
 Write-Host "Press Ctrl+C to stop.`n" -ForegroundColor Gray
 
-# Ensure no duplicate background instances are holding ports 8765/8766
-Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*run_monitor.py*" -and $_.ProcessId -ne $PID } | ForEach-Object {
-    Write-Host "[CLEANUP] Stopping previous monitor instance (PID $($_.ProcessId))..." -ForegroundColor DarkGray
-    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-}
+# Ensure no duplicate background instances are holding ports 8765/8766/8989
+python run_monitor.py --service-stop | Out-Null
 
-python run_monitor.py --open-browser --demo --widget
+if ($BackgroundDaemon) {
+    python run_monitor.py --service-start --widget
+} else {
+    python run_monitor.py --open-browser --widget
+}

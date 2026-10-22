@@ -6,19 +6,116 @@
       <div>
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
           <span style="font-size: 1.4rem;">🛡️</span>
-          <h3 style="font-size: 1.1rem; font-weight: 700; color: #fff;">Real-World Telemetry Integrity & Quota Calibration</h3>
+          <h3 style="font-size: 1.1rem; font-weight: 700; color: #fff;">Real-World Telemetry Integrity &amp; Live Quotas</h3>
           <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Windows DPAPI Secured</span>
         </div>
         <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; max-width: 860px;">
-          <strong>Real-World API vs. Web Session Calibration:</strong> Anthropic's public API provides live rate-limit headers for Organization and API key limits (<code style="color: var(--accent-cyan); font-family: var(--font-mono);">anthropic-ratelimit-*</code>), but does not expose private browser-session limits (such as the 5-hour rolling reset on <a href="https://claude.ai/settings/usage" target="_blank" style="color: #fbbf24; text-decoration: underline;">claude.ai/settings/usage</a>).
-          AI Usage Monitor clearly distinguishes between <strong>Live Real-World API Telemetry</strong> (logged via proxy and direct API) and <strong>Calibrated Personal Web Quotas</strong>.
+          <strong>Automatic Live Sync:</strong> AI Usage Monitor automatically discovers and queries live quotas (including 5-hour rolling session reset and 7-day usage limits) directly from authenticated desktop and cloud endpoints with zero manual calibration required.
         </p>
       </div>
-      <div style="display: flex; gap: 8px;">
-        <button class="btn btn-secondary btn-sm" onclick="window.App.openClaudeQuotaModal()" style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;">
-          ⚖️ Calibrate Claude Limits
-        </button>
+    </div>
+  </div>
+
+  <!-- Section 0: Windows Auto-Start & Background Service Lifecycle (AIUM-901) -->
+  <div class="glass-card" id="windows-service-settings-card" style="margin-bottom: 24px; border-left: 4px solid #10b981; background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(15, 23, 42, 0.85));">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.4rem;">🚀</span>
+        <div>
+          <h4 style="font-size: 1.05rem; font-weight: 700; color: #fff;">Windows Auto-Start &amp; Background Service Daemon</h4>
+          <span style="font-size: 0.76rem; color: var(--text-dim);">Run AI Usage Monitor automatically at Windows logon via headless <code>pythonw.exe --daemon</code> while preserving user-scoped Windows DPAPI &amp; System Tray access.</span>
+        </div>
       </div>
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <span class="badge" id="win-service-running-badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">⚡ Service Active</span>
+        <span class="badge" id="win-startup-badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3);">Checking Startup...</span>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 14px;">
+      <div style="background: rgba(0,0,0,0.25); padding: 14px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06);">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="cfg-win-autostart-enabled" onchange="window.App.applyWindowsStartupConfig()" style="width: 18px; height: 18px; margin-top: 2px; accent-color: #10b981;">
+          <div>
+            <strong style="color: #f1f5f9; font-size: 0.88rem;">Start Automatically with Windows</strong>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin: 2px 0 0 0;">
+              Launches the background daemon, transparent proxy, Ollama bridge, and System Tray icon automatically when you sign in to Windows.
+            </p>
+          </div>
+        </label>
+
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="cfg-win-autostart-widget" onchange="window.App.applyWindowsStartupConfig()" style="width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent-cyan);">
+          <div>
+            <strong style="color: #f1f5f9; font-size: 0.85rem;">Auto-Launch Floating Mini Widget on Logon</strong>
+            <p style="font-size: 0.74rem; color: var(--text-muted); margin: 2px 0 0 0;">
+              Appends <code>--widget</code> to the startup command so the desktop mini status widget appears immediately on boot.
+            </p>
+          </div>
+        </label>
+
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="cfg-win-autostart-watchdog" checked onchange="window.App.applyWindowsStartupConfig()" style="width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent-cyan);">
+          <div>
+            <strong style="color: #f1f5f9; font-size: 0.85rem;">Crash-Recovery Watchdog Supervisor</strong>
+            <p style="font-size: 0.74rem; color: var(--text-muted); margin: 2px 0 0 0;">
+              Automatically restarts the background worker with exponential backoff if an unexpected exception occurs.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <div style="background: rgba(0,0,0,0.25); padding: 14px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; justify-content: space-between;">
+        <div>
+          <label style="display: block; font-size: 0.76rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">
+            Windows Startup Registration Mechanism
+          </label>
+          <select id="cfg-win-autostart-method" onchange="window.App.applyWindowsStartupConfig()" class="form-control" style="width: 100%; background: #101726; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 10px; border-radius: 4px; font-size: 0.82rem; margin-bottom: 10px;">
+            <option value="registry" selected>🔑 Registry Run Key (HKCU\...\Run — Zero UAC, Recommended)</option>
+            <option value="task_scheduler">📅 Windows Task Scheduler (ONLOGON Task)</option>
+            <option value="both">🛡️ Dual Registration (Registry Run + Task Scheduler)</option>
+          </select>
+
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; font-size: 0.75rem;">
+            <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px;">
+              <span style="color: var(--text-dim); display: block; font-size: 0.68rem;">ACTIVE PID</span>
+              <strong id="win-svc-pid" style="color: #38bdf8; font-family: var(--font-mono);">--</strong>
+            </div>
+            <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px;">
+              <span style="color: var(--text-dim); display: block; font-size: 0.68rem;">SERVICE UPTIME</span>
+              <strong id="win-svc-uptime" style="color: #34d399; font-family: var(--font-mono);">--</strong>
+            </div>
+            <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px;">
+              <span style="color: var(--text-dim); display: block; font-size: 0.68rem;">SERVICE LOG</span>
+              <strong id="win-svc-log-size" style="color: #cbd5e1; font-family: var(--font-mono);">0 KB</strong>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
+          <button class="btn btn-secondary btn-sm" onclick="window.App.loadWindowsServiceStatus(true)">
+            🔄 Refresh Status
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="window.App.toggleServiceLogViewer()">
+            📜 Service Logs
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="window.App.controlWindowsService('restart')" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">
+            ⚡ Restart Background Daemon
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size: 0.73rem; color: var(--text-dim); background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 4px; font-family: var(--font-mono); overflow-x: auto; white-space: nowrap;">
+      <span style="color: #94a3b8;">Startup Command:</span> <span id="win-svc-cmd" style="color: #38bdf8;">pythonw.exe run_monitor.py --daemon</span>
+    </div>
+
+    <div id="win-service-log-panel" style="display: none; margin-top: 12px; background: #090d16; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 10px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <span style="font-size: 0.75rem; font-weight: 700; color: #94a3b8;">📜 Recent Background Daemon Output (<code>logs/service.log</code>)</span>
+        <button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.7rem;" onclick="window.App.controlWindowsService('clear_logs')">Clear Log</button>
+      </div>
+      <pre id="win-service-log-output" style="margin: 0; max-height: 180px; overflow-y: auto; font-family: var(--font-mono); font-size: 0.72rem; color: #cbd5e1; white-space: pre-wrap;">No daemon log entries yet.</pre>
     </div>
   </div>
 
@@ -178,6 +275,29 @@
         </select>
       </div>
 
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">
+          Default Time-Span Window (Web UI &amp; Mini Widget Sync)
+        </label>
+        <select id="cfg-default-trend-window" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; padding: 8px 12px; border-radius: var(--radius-sm);">
+          <option value="1h">Last 1hr (1h)</option>
+          <option value="3h">Last 3hrs (3h)</option>
+          <option value="6h">Last 6hrs (6h)</option>
+          <option value="12h">Last 12hrs (12h)</option>
+          <option value="24h" selected>Last 24hrs (24h)</option>
+          <option value="48h">Last 48hrs (48h)</option>
+          <option value="3d">Last 3 days (3d)</option>
+          <option value="5d">Last 5 days (5d)</option>
+          <option value="7d">Last 7 days (7d)</option>
+          <option value="10d">Last 10 days (10d)</option>
+          <option value="15d">Last 15 days (15d)</option>
+          <option value="30d">Last 30 days (30d)</option>
+          <option value="3m">Last 3 months (3m)</option>
+          <option value="6m">Last 6 months (6m)</option>
+          <option value="12m">Last 12 months (12m)</option>
+        </select>
+      </div>
+
       <div style="background: rgba(0,0,0,0.25); padding: 12px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); margin-top: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span style="font-size: 0.8rem; color: #cbd5e1;">Test Local Ollama Daemon Connection:</span>
@@ -235,6 +355,8 @@
         </p>
       </label>
     </div>
+  </div>
+
   <!-- Section: Proxy Bridges & Network Ports Configuration (AIUM-707) -->
   <div class="glass-card" style="margin-bottom: 24px; border-left: 4px solid var(--accent-purple); background: linear-gradient(135deg, rgba(168, 85, 247, 0.06), rgba(15, 23, 42, 0.75));">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">

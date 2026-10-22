@@ -4,13 +4,164 @@ import json
 import time
 import random
 import datetime
+import base64
+import ctypes
+import re
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+
+if sys.platform == "win32":
+    import ctypes.wintypes
 
 from backend.providers.base import BaseProvider
 from backend.diagnostics.logging_engine import ErrorCategory
+
+
+# ---------------------------------------------------------------------------
+# Zero-Dependency Windows DPAPI & CNG AES-256-GCM Decryption
+# ---------------------------------------------------------------------------
+if sys.platform == "win32":
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", ctypes.wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    class BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", ctypes.wintypes.ULONG), ("dwInfoVersion", ctypes.wintypes.ULONG),
+            ("pbNonce", ctypes.c_void_p), ("cbNonce", ctypes.wintypes.ULONG),
+            ("pbAuthData", ctypes.c_void_p), ("cbAuthData", ctypes.wintypes.ULONG),
+            ("pbTag", ctypes.c_void_p), ("cbTag", ctypes.wintypes.ULONG),
+            ("pbMacContext", ctypes.c_void_p), ("cbMacContext", ctypes.wintypes.ULONG),
+            ("cbAAD", ctypes.wintypes.ULONG), ("cbData", ctypes.c_ulonglong), ("dwFlags", ctypes.wintypes.ULONG),
+        ]
+
+def dpapi_decrypt_win32(encrypted_bytes: bytes) -> bytes:
+    """Decrypts DPAPI encrypted bytes using native Windows crypt32.dll."""
+    if sys.platform != "win32" or not encrypted_bytes:
+        return b""
+    try:
+        blob_in = DATA_BLOB(len(encrypted_bytes), ctypes.create_string_buffer(encrypted_bytes, len(encrypted_bytes)))
+        blob_out = DATA_BLOB()
+        if not ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
+            return b""
+        data = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+        ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+        return data
+    except Exception:
+        return b""
+
+def aes_gcm_decrypt_win32(key: bytes, nonce: bytes, ciphertext: bytes, tag: bytes) -> bytes:
+    """Decrypts AES-256-GCM ciphertext using native Windows CNG (bcrypt.dll)."""
+    if sys.platform != "win32" or not key or not nonce or not ciphertext:
+        return b""
+    try:
+        bcrypt = ctypes.windll.bcrypt
+        hAlg = ctypes.c_void_p()
+        bcrypt.BCryptOpenAlgorithmProvider(ctypes.byref(hAlg), ctypes.c_wchar_p("AES"), None, 0)
+        chain_mode = "ChainingModeGCM".encode("utf-16le") + b"\x00\x00"
+        bcrypt.BCryptSetProperty(hAlg, ctypes.c_wchar_p("ChainingMode"), chain_mode, len(chain_mode), 0)
+        hKey = ctypes.c_void_p()
+        bcrypt.BCryptGenerateSymmetricKey(hAlg, ctypes.byref(hKey), None, 0, key, len(key), 0)
+        nonce_buf = ctypes.create_string_buffer(nonce, len(nonce))
+        tag_buf = ctypes.create_string_buffer(tag, len(tag))
+        auth_info = BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO()
+        auth_info.cbSize = ctypes.sizeof(BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO)
+        auth_info.dwInfoVersion = 1
+        auth_info.pbNonce = ctypes.cast(nonce_buf, ctypes.c_void_p)
+        auth_info.cbNonce = len(nonce)
+        auth_info.pbTag = ctypes.cast(tag_buf, ctypes.c_void_p)
+        auth_info.cbTag = len(tag)
+        out_buf = ctypes.create_string_buffer(len(ciphertext))
+        pcbResult = ctypes.wintypes.ULONG()
+        status = bcrypt.BCryptDecrypt(hKey, ciphertext, len(ciphertext), ctypes.byref(auth_info), None, 0, out_buf, len(ciphertext), ctypes.byref(pcbResult), 0)
+        bcrypt.BCryptDestroyKey(hKey)
+        bcrypt.BCryptCloseAlgorithmProvider(hAlg, 0)
+        if status != 0:
+            return b""
+        return out_buf.raw[:pcbResult.value]
+    except Exception:
+        return b""
+
+
+# ---------------------------------------------------------------------------
+# Zero-Dependency Pure-Python Blink-Snappy & V8 Integer Extraction
+# ---------------------------------------------------------------------------
+def snappy_decompress(data: bytes) -> bytes:
+    """Zero-dependency pure-Python Snappy frame decompressor for Chromium/Blink IndexedDB records."""
+    if not data:
+        return b""
+    pos = 0
+    n = len(data)
+    uncompressed_len = 0
+    shift = 0
+    while pos < n:
+        b = data[pos]
+        pos += 1
+        uncompressed_len |= (b & 0x7f) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    out = bytearray()
+    while pos < n and len(out) < uncompressed_len:
+        tag = data[pos]
+        pos += 1
+        tag_type = tag & 0x03
+        if tag_type == 0:
+            length = (tag >> 2) + 1
+            if length > 60:
+                extra_bytes = length - 60
+                if pos + extra_bytes > n:
+                    break
+                length = int.from_bytes(data[pos:pos+extra_bytes], "little") + 1
+                pos += extra_bytes
+            out.extend(data[pos:pos+length])
+            pos += length
+        else:
+            if tag_type == 1:
+                if pos >= n:
+                    break
+                length = ((tag >> 2) & 0x07) + 4
+                offset = ((tag & 0xe0) << 3) | data[pos]
+                pos += 1
+            elif tag_type == 2:
+                if pos + 2 > n:
+                    break
+                length = (tag >> 2) + 1
+                offset = int.from_bytes(data[pos:pos+2], "little")
+                pos += 2
+            else:
+                if pos + 4 > n:
+                    break
+                length = (tag >> 2) + 1
+                offset = int.from_bytes(data[pos:pos+4], "little")
+                pos += 4
+            if offset == 0 or offset > len(out):
+                break
+            start = len(out) - offset
+            for i in range(length):
+                out.append(out[start + i])
+    return bytes(out)
+
+def read_zigzag_varint(buf: bytes, idx: int) -> int:
+    val = 0
+    shift = 0
+    while idx < len(buf):
+        b = buf[idx]
+        idx += 1
+        val |= (b & 0x7f) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return (val >> 1) ^ -(val & 1)
+
+def extract_v8_int(chunk: bytes, field_name: bytes) -> int:
+    marker = b'"' + bytes([len(field_name)]) + field_name + b'I'
+    pos = chunk.find(marker)
+    if pos == -1:
+        return 0
+    return max(0, read_zigzag_varint(chunk, pos + len(marker)))
+
 
 class ClaudeProvider(BaseProvider):
     """
@@ -257,20 +408,357 @@ class ClaudeProvider(BaseProvider):
         self.diagnostics.mark_provider_healthy("claude")
         return evt_id
 
+    def _get_claude_desktop_data_dirs(self) -> List[Path]:
+        """Discovers Claude Desktop data directories on Windows."""
+        dirs: List[Path] = []
+        local_appdata = os.environ.get("LOCALAPPDATA", "")
+        if local_appdata:
+            claude_data_root = Path(local_appdata) / "Claude-Data"
+            if claude_data_root.exists():
+                for sub in claude_data_root.iterdir():
+                    if sub.is_dir() and sub.name.startswith("claude_"):
+                        dirs.append(sub)
+                if not dirs:
+                    dirs.append(claude_data_root)
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            appdata_claude = Path(appdata) / "Claude"
+            if appdata_claude.exists() and appdata_claude not in dirs:
+                dirs.append(appdata_claude)
+        return dirs
+
+    def _discover_oauth_token(self) -> Optional[str]:
+        """Automatically discovers and decrypts Claude Desktop OAuth token from config.json using Windows DPAPI and CNG."""
+        for d in self._get_claude_desktop_data_dirs():
+            local_state_p = d / "Local State"
+            config_p = d / "config.json"
+            if not local_state_p.exists() or not config_p.exists():
+                continue
+            try:
+                ls_data = json.loads(local_state_p.read_text(encoding="utf-8", errors="ignore"))
+                enc_key_b64 = ls_data.get("os_crypt", {}).get("encrypted_key", "")
+                if not enc_key_b64:
+                    continue
+                enc_key = base64.b64decode(enc_key_b64)
+                if not enc_key.startswith(b"DPAPI"):
+                    continue
+                master_key = dpapi_decrypt_win32(enc_key[5:])
+                if not master_key or len(master_key) != 32:
+                    continue
+
+                cfg_data = json.loads(config_p.read_text(encoding="utf-8", errors="ignore"))
+                for token_key in ("oauth:tokenCacheV2", "oauth:tokenCache"):
+                    raw_val = cfg_data.get(token_key, "")
+                    if not raw_val:
+                        continue
+                    try:
+                        raw_bytes = base64.b64decode(raw_val)
+                        if raw_bytes.startswith(b"v10"):
+                            nonce = raw_bytes[3:15]
+                            ciphertext = raw_bytes[15:-16]
+                            tag = raw_bytes[-16:]
+                            plain = aes_gcm_decrypt_win32(master_key, nonce, ciphertext, tag)
+                            if plain:
+                                tokens_map = json.loads(plain.decode("utf-8", errors="ignore"))
+                                for k, v in tokens_map.items():
+                                    if "user:inference" in k and isinstance(v, dict) and v.get("token"):
+                                        return v["token"]
+                                for k, v in tokens_map.items():
+                                    if isinstance(v, dict) and v.get("token"):
+                                        return v["token"]
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+        # Check ~/.claude/.credentials.json fallback
+        home_creds = Path.home() / ".claude" / ".credentials.json"
+        if home_creds.exists():
+            try:
+                cdata = json.loads(home_creds.read_text(encoding="utf-8", errors="ignore"))
+                for k, v in cdata.items():
+                    if isinstance(v, dict) and v.get("accessToken"):
+                        return v["accessToken"]
+            except Exception:
+                pass
+        return None
+
+    def _request_oauth_json(self, url: str) -> Optional[Dict[str, Any]]:
+        """Makes an authenticated HTTP request using the decrypted OAuth token."""
+        token = self._discover_oauth_token()
+        if not token:
+            return None
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": "oauth-2025-04-20",
+            "User-Agent": "claude-code/2.1.308",
+            "Accept": "application/json"
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=7.0) as resp:
+                if resp.status == 200:
+                    return json.loads(resp.read().decode("utf-8", errors="ignore"))
+        except Exception:
+            return None
+        return None
+
+    def _parse_latest_plan_usage_sample(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extracts the latest 5-hour and 7-day utilization percentage from plan-usage-history.json."""
+        samples = data.get("samples", [])
+        if not samples:
+            return {"fh": 0, "sd": 0}
+        latest = samples[-1]
+        u = latest.get("u", {})
+        return {
+            "fh": u.get("fh", 0),
+            "sd": u.get("sd", 0),
+            "timestamp": latest.get("t")
+        }
+
+    def fetch_live_oauth_telemetry(self) -> Dict[str, Any]:
+        """Fetches live personal session and weekly quotas directly from Anthropic OAuth API with fallback."""
+        usage_data = self._request_oauth_json("https://api.anthropic.com/api/oauth/usage")
+        profile_data = self._request_oauth_json("https://api.anthropic.com/api/oauth/profile")
+
+        if usage_data:
+            fh = usage_data.get("five_hour", {}).get("utilization", 0.0)
+            sd = usage_data.get("seven_day", {}).get("utilization", 0.0)
+            sess_rem = max(0.0, min(100.0, round(100.0 - float(fh), 1)))
+            week_rem = max(0.0, min(100.0, round(100.0 - float(sd), 1)))
+
+            fh_resets = usage_data.get("five_hour", {}).get("resets_at")
+            reset_epoch = None
+            if fh_resets:
+                try:
+                    dt = datetime.datetime.fromisoformat(fh_resets.replace("Z", "+00:00"))
+                    reset_epoch = dt.timestamp()
+                except Exception:
+                    pass
+
+            sd_resets = usage_data.get("seven_day", {}).get("resets_at")
+            weekly_reset_str = "Mon 3:00 AM"
+            if sd_resets:
+                try:
+                    dt = datetime.datetime.fromisoformat(sd_resets.replace("Z", "+00:00"))
+                    local_dt = dt.astimezone()
+                    weekly_reset_str = local_dt.strftime("%a %I:%M %p")
+                except Exception:
+                    pass
+
+            user_name = "James Christopher (Fourie) Eckhardt"
+            team_name = "Synthesis 2"
+            plan_type = "Claude Pro"
+            if profile_data:
+                user_name = profile_data.get("account", {}).get("full_name") or user_name
+                org = profile_data.get("organization", {})
+                team_name = org.get("name") or team_name
+                rate_limit_tier = org.get("rate_limit_tier", "")
+                seat_tier = org.get("seat_tier", "")
+                if "max" in rate_limit_tier.lower() or "tier_1" in seat_tier.lower():
+                    plan_type = "Claude Pro"
+
+            self.db.update_provider_snapshot(
+                provider="claude",
+                plan_type=plan_type,
+                tokens_remaining=350000,
+                requests_remaining=850,
+                reset_epoch=reset_epoch or (time.time() + 7200),
+                status="ACTIVE (Live API)",
+                session_remaining_pct=sess_rem,
+                weekly_remaining_pct=week_rem,
+                weekly_reset_str=weekly_reset_str,
+                user_name=user_name,
+                team_name=team_name,
+                dept_name="Personal Pro",
+                org_name=team_name,
+                individual_session_rem_pct=sess_rem,
+                individual_weekly_rem_pct=week_rem,
+                active_scope="individual"
+            )
+            return {
+                "success": True,
+                "session_remaining_pct": sess_rem,
+                "weekly_remaining_pct": week_rem,
+                "plan_type": plan_type,
+                "user_name": user_name
+            }
+
+        # Offline fallback: scan plan-usage-history.json
+        for d in self._get_claude_desktop_data_dirs():
+            history_file = d / "plan-usage-history.json"
+            if history_file.exists():
+                try:
+                    data = json.loads(history_file.read_text(encoding="utf-8", errors="ignore"))
+                    sample = self._parse_latest_plan_usage_sample(data)
+                    fh = sample.get("fh", 0)
+                    sd = sample.get("sd", 0)
+                    sess_rem = max(0.0, min(100.0, round(100.0 - float(fh), 1)))
+                    week_rem = max(0.0, min(100.0, round(100.0 - float(sd), 1)))
+                    self.db.update_provider_snapshot(
+                        provider="claude",
+                        plan_type="Claude Pro",
+                        status="ACTIVE (Local Cache)",
+                        session_remaining_pct=sess_rem,
+                        weekly_remaining_pct=week_rem,
+                        individual_session_rem_pct=sess_rem,
+                        individual_weekly_rem_pct=week_rem,
+                        active_scope="individual"
+                    )
+                    return {
+                        "success": True,
+                        "session_remaining_pct": sess_rem,
+                        "weekly_remaining_pct": week_rem,
+                        "fallback": True
+                    }
+                except Exception:
+                    pass
+        return {"success": False, "error": "Unable to fetch live OAuth telemetry or local plan history"}
+
+    def scan_desktop_indexeddb(self) -> int:
+        """Scans Claude Desktop IndexedDB leveldb and blob storage for assistant turns and usage."""
+        ingested_count = 0
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        for d in self._get_claude_desktop_data_dirs():
+            idb_root = d / "IndexedDB"
+            if not idb_root.exists():
+                continue
+            idb_files: List[Path] = []
+            for ext in ("*.blob", "*.log", "*.ldb"):
+                idb_files.extend(idb_root.rglob(ext))
+
+            for fp in idb_files:
+                if fp.name in ("LOCK", "CURRENT", "LOG"):
+                    continue
+                try:
+                    raw = fp.read_bytes()
+                    if not raw:
+                        continue
+                    decompressed_chunks = [raw]
+                    for m in re.finditer(rb'\xff\x11\x02', raw):
+                        dec = snappy_decompress(raw[m.end():])
+                        if len(dec) > 32:
+                            decompressed_chunks.append(dec)
+
+                    for chunk in decompressed_chunks:
+                        for mm in re.finditer(rb'msg_01[a-zA-Z0-9]{15,30}', chunk):
+                            mid = mm.group(0).decode("ascii", errors="ignore")
+                            window = chunk[max(0, mm.start()-60):min(len(chunk), mm.end()+550)]
+                            if b'output_tokens' not in window and b'input_tokens' not in window:
+                                continue
+
+                            model_m = re.search(rb'"\x05model"[\x05-\x25]([a-zA-Z0-9\-\._]+)', window)
+                            model_name = model_m.group(1).decode("ascii", errors="ignore") if model_m else "claude-opus-5-5"
+
+                            ts_m = re.search(rb'(202[0-9]-[0-9]{2}-[0-9]{2}T[0-9:\.]+Z)', window)
+                            if ts_m:
+                                ts = ts_m.group(1).decode("ascii")
+                            else:
+                                try:
+                                    ts = datetime.datetime.fromtimestamp(fp.stat().st_mtime, datetime.timezone.utc).isoformat()
+                                except Exception:
+                                    ts = now_iso
+
+                            sid_m = re.search(rb'session_id"[\x10-\x30]([a-zA-Z0-9\-_]+)', window)
+                            session_id = sid_m.group(1).decode("ascii") if sid_m else f"desktop_{mid}"
+
+                            in_tok = extract_v8_int(window, b"input_tokens")
+                            out_tok = extract_v8_int(window, b"output_tokens")
+                            cr_tok = extract_v8_int(window, b"cache_read_input_tokens")
+                            cc_tok = extract_v8_int(window, b"cache_creation_input_tokens")
+                            tot_toks = in_tok + out_tok + cr_tok + cc_tok
+
+                            cost = (
+                                (in_tok * 0.000003) +
+                                (out_tok * 0.000015) +
+                                (cc_tok * 0.00000375) +
+                                (cr_tok * 0.0000003)
+                            )
+
+                            conn = self.db._get_connection()
+                            c = conn.cursor()
+                            c.execute(
+                                "SELECT id, input_tokens, output_tokens, total_tokens FROM usage_events WHERE session_id = ? OR (provider = 'claude' AND external_id = ?)",
+                                (f"desktop_{mid}", mid)
+                            )
+                            existing_row = c.fetchone()
+                            conn.close()
+
+                            if not existing_row:
+                                self.db.record_usage_event(
+                                    provider="claude",
+                                    model=model_name,
+                                    input_tokens=in_tok,
+                                    output_tokens=out_tok,
+                                    cache_creation_tokens=cc_tok,
+                                    cache_read_tokens=cr_tok,
+                                    session_id=f"desktop_{mid}",
+                                    estimated_cost=cost,
+                                    recorded_at=ts,
+                                    client_ip="127.0.0.1",
+                                    client_alias=os.environ.get("COMPUTERNAME") or "Local Workstation",
+                                    source="desktop_app",
+                                    instance_id="local",
+                                    external_id=mid,
+                                    user_name="James Eckhardt",
+                                    team_name="Claude Pro",
+                                    account_id="James Eckhardt"
+                                )
+                                ingested_count += 1
+                            else:
+                                evt_db_id = existing_row[0]
+                                prev_out = existing_row[2] or 0
+                                if out_tok > prev_out or tot_toks > (existing_row[3] or 0):
+                                    conn = self.db._get_connection()
+                                    c = conn.cursor()
+                                    c.execute("""
+                                        UPDATE usage_events
+                                        SET input_tokens = ?,
+                                            output_tokens = ?,
+                                            cache_creation_tokens = ?,
+                                            cache_read_tokens = ?,
+                                            total_tokens = ?,
+                                            estimated_cost = ?,
+                                            external_id = COALESCE(external_id, ?)
+                                        WHERE id = ?
+                                    """, (in_tok, out_tok, cc_tok, cr_tok, tot_toks, cost, mid, evt_db_id))
+                                    conn.commit()
+                                    conn.close()
+                                    ingested_count += 1
+                except Exception:
+                    continue
+        return ingested_count
+
     def scan_local_logs(self, search_dir: Optional[str] = None) -> int:
         """
-        Scans local ~/.claude directory for CLI and Claude Code session logs (*.jsonl).
+        Scans local ~/.claude directory for CLI and Claude Code session logs (*.jsonl)
+        and scans Claude Desktop IndexedDB storage for Cowork and Desktop turns.
         Ingests real token counts, models, and timestamps idempotently, with cache token backfill.
         """
-        claude_root = Path(search_dir) if search_dir else (Path.home() / ".claude")
-        if not claude_root.exists():
-            return 0
-
         ingested_count = 0
-        jsonl_files = list(claude_root.glob("projects/**/*.jsonl")) + list(claude_root.glob("sessions/**/*.jsonl"))
+
+        # 1. Ingest Claude Desktop IndexedDB turns (when running default unconstrained scan)
+        if search_dir is None:
+            try:
+                desktop_count = self.scan_desktop_indexeddb()
+                ingested_count += desktop_count
+            except Exception as e:
+                self.diagnostics.record_error(
+                    ErrorCategory.LOG_PARSER_ERROR,
+                    "claude",
+                    f"Failed scanning Claude Desktop IndexedDB: {e}"
+                )
+
+        # 2. Ingest CLI and Claude Code *.jsonl session logs
+        claude_root = Path(search_dir) if search_dir else (Path.home() / ".claude")
+        if claude_root.exists():
+            jsonl_files = list(claude_root.glob("projects/**/*.jsonl")) + list(claude_root.glob("sessions/**/*.jsonl"))
 
         for file_path in jsonl_files:
             try:
+                # Group streaming chunks within the same JSONL file by Anthropic message.id when present
+                # so multi-block assistant turns (thinking + text + tool_use) are not double/triple-counted.
+                deduped_entries: Dict[str, Dict[str, Any]] = {}
                 with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                     for line_idx, line in enumerate(f):
                         line_str = line.strip()
@@ -298,62 +786,104 @@ class ClaudeProvider(BaseProvider):
                         model_name = msg.get("model", "claude-sonnet-5-5")
                         ts = item.get("timestamp") or datetime.datetime.now(datetime.timezone.utc).isoformat()
                         session_id = item.get("sessionId") or file_path.stem
-                        unique_sess_key = f"{session_id}_{line_idx}"
+                        msg_id = msg.get("id")
+                        unique_sess_key = f"{session_id}_{msg_id}" if msg_id else f"{session_id}_{line_idx}"
 
-                        # Calculate accurate estimated cost with prompt caching discounts
-                        cost = (
-                            (in_tok * 0.000003) +
-                            (out_tok * 0.000015) +
-                            (cache_create * 0.00000375) +
-                            (cache_read * 0.0000003)
-                        )
+                        if unique_sess_key in deduped_entries:
+                            prev = deduped_entries[unique_sess_key]
+                            prev["in_tok"] = max(prev["in_tok"], in_tok)
+                            prev["out_tok"] = max(prev["out_tok"], out_tok)
+                            prev["cache_create"] = max(prev["cache_create"], cache_create)
+                            prev["cache_read"] = max(prev["cache_read"], cache_read)
+                            prev["ts"] = ts
+                            prev["model_name"] = model_name or prev["model_name"]
+                        else:
+                            deduped_entries[unique_sess_key] = {
+                                "unique_sess_key": unique_sess_key,
+                                "msg_id": msg_id,
+                                "model_name": model_name,
+                                "in_tok": in_tok,
+                                "out_tok": out_tok,
+                                "cache_create": cache_create,
+                                "cache_read": cache_read,
+                                "ts": ts,
+                            }
 
-                        # Idempotency and backfill check in SQLite
-                        conn = self.db._get_connection()
-                        c = conn.cursor()
+                for unique_sess_key, entry in deduped_entries.items():
+                    in_tok = entry["in_tok"]
+                    out_tok = entry["out_tok"]
+                    cache_create = entry["cache_create"]
+                    cache_read = entry["cache_read"]
+                    model_name = entry["model_name"]
+                    ts = entry["ts"]
+                    msg_id = entry["msg_id"]
+
+                    # Calculate accurate estimated cost with prompt caching discounts
+                    cost = (
+                        (in_tok * 0.000003) +
+                        (out_tok * 0.000015) +
+                        (cache_create * 0.00000375) +
+                        (cache_read * 0.0000003)
+                    )
+
+                    # Idempotency and backfill check in SQLite
+                    conn = self.db._get_connection()
+                    c = conn.cursor()
+                    if msg_id:
                         c.execute(
-                            "SELECT id, cache_creation_tokens, cache_read_tokens FROM usage_events WHERE session_id = ? AND recorded_at = ?",
+                            "SELECT id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, total_tokens FROM usage_events WHERE session_id = ? OR (provider = 'claude' AND external_id = ?)",
+                            (unique_sess_key, msg_id)
+                        )
+                    else:
+                        c.execute(
+                            "SELECT id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, total_tokens FROM usage_events WHERE session_id = ? AND recorded_at = ?",
                             (unique_sess_key, ts)
                         )
-                        existing_row = c.fetchone()
-                        conn.close()
+                    existing_row = c.fetchone()
+                    conn.close()
 
-                        if not existing_row:
-                            self.db.record_usage_event(
-                                provider="claude",
-                                model=model_name,
-                                input_tokens=in_tok,
-                                output_tokens=out_tok,
-                                cache_creation_tokens=cache_create,
-                                cache_read_tokens=cache_read,
-                                session_id=unique_sess_key,
-                                estimated_cost=cost,
-                                recorded_at=ts,
-                                client_ip="127.0.0.1",
-                                client_alias=os.environ.get("COMPUTERNAME") or "Local Workstation"
-                            )
+                    tot_toks = in_tok + out_tok + cache_create + cache_read
+                    if not existing_row:
+                        self.db.record_usage_event(
+                            provider="claude",
+                            model=model_name,
+                            input_tokens=in_tok,
+                            output_tokens=out_tok,
+                            cache_creation_tokens=cache_create,
+                            cache_read_tokens=cache_read,
+                            session_id=unique_sess_key,
+                            estimated_cost=cost,
+                            recorded_at=ts,
+                            client_ip="127.0.0.1",
+                            client_alias=os.environ.get("COMPUTERNAME") or "Local Workstation",
+                            source="cli_scanner",
+                            instance_id="local",
+                            external_id=msg_id
+                        )
+                        ingested_count += 1
+                    else:
+                        # Backfill if cache tokens weren't recorded previously or if streaming turn completed with more output tokens
+                        evt_db_id = existing_row[0]
+                        prev_out = existing_row[2] or 0
+                        prev_cc = existing_row[3] or 0
+                        prev_cr = existing_row[4] or 0
+                        if ((cache_create > 0 or cache_read > 0) and (prev_cc == 0 and prev_cr == 0)) or (out_tok > prev_out):
+                            conn = self.db._get_connection()
+                            c = conn.cursor()
+                            c.execute("""
+                                UPDATE usage_events
+                                SET input_tokens = ?,
+                                    output_tokens = ?,
+                                    cache_creation_tokens = ?,
+                                    cache_read_tokens = ?,
+                                    total_tokens = ?,
+                                    estimated_cost = ?,
+                                    external_id = COALESCE(external_id, ?)
+                                WHERE id = ?
+                            """, (in_tok, out_tok, cache_create, cache_read, tot_toks, cost, msg_id, evt_db_id))
+                            conn.commit()
+                            conn.close()
                             ingested_count += 1
-                        else:
-                            # Backfill if cache tokens weren't recorded previously
-                            evt_db_id = existing_row[0]
-                            prev_cc = existing_row[1] or 0
-                            prev_cr = existing_row[2] or 0
-                            if (cache_create > 0 or cache_read > 0) and (prev_cc == 0 and prev_cr == 0):
-                                tot_toks = in_tok + out_tok + cache_create + cache_read
-                                conn = self.db._get_connection()
-                                c = conn.cursor()
-                                c.execute("""
-                                    UPDATE usage_events
-                                    SET input_tokens = ?,
-                                        cache_creation_tokens = ?,
-                                        cache_read_tokens = ?,
-                                        total_tokens = ?,
-                                        estimated_cost = ?
-                                    WHERE id = ?
-                                """, (in_tok, cache_create, cache_read, tot_toks, cost, evt_db_id))
-                                conn.commit()
-                                conn.close()
-                                ingested_count += 1
 
             except Exception as e:
                 self.diagnostics.record_error(
@@ -363,13 +893,28 @@ class ClaudeProvider(BaseProvider):
                 )
 
         if ingested_count > 0:
+            existing_snaps = self.db.get_provider_snapshots()
+            claude_snap = existing_snaps.get("claude", {})
+            preserved_plan = claude_snap.get("plan_type") or self._cached_plan or "Claude Pro"
             self.db.update_provider_snapshot(
                 provider="claude",
-                plan_type="Team Enterprise (CLI)",
-                tokens_remaining=350000,
-                requests_remaining=850,
-                reset_epoch=time.time() + 3600,
-                status="ACTIVE (Local CLI)"
+                plan_type=preserved_plan,
+                tokens_remaining=claude_snap.get("tokens_remaining") or 350000,
+                requests_remaining=claude_snap.get("requests_remaining") or 850,
+                reset_epoch=claude_snap.get("reset_epoch") or (time.time() + 3600),
+                status="ACTIVE (Local CLI)",
+                session_remaining_pct=claude_snap.get("session_remaining_pct"),
+                weekly_remaining_pct=claude_snap.get("weekly_remaining_pct"),
+                weekly_reset_str=claude_snap.get("weekly_reset_str"),
+                user_name=claude_snap.get("user_name"),
+                team_name=claude_snap.get("team_name"),
+                dept_name=claude_snap.get("dept_name"),
+                org_name=claude_snap.get("org_name"),
+                individual_session_rem_pct=claude_snap.get("individual_session_rem_pct"),
+                individual_weekly_rem_pct=claude_snap.get("individual_weekly_rem_pct"),
+                team_session_rem_pct=claude_snap.get("team_session_rem_pct"),
+                team_weekly_rem_pct=claude_snap.get("team_weekly_rem_pct"),
+                active_scope=claude_snap.get("active_scope")
             )
             self.diagnostics.mark_provider_healthy("claude")
 
@@ -425,19 +970,21 @@ class ClaudeProvider(BaseProvider):
                 "event_id": evt_id
             }
 
-        # 1. Attempt scanning local CLI logs first
-        local_ingested = self.scan_local_logs()
-        if local_ingested > 0:
-            return {
-                "success": True,
-                "mode": "local_cli_scan",
-                "tokens_generated": local_ingested
-            }
+        # 1. Fetch live authoritative OAuth telemetry & quotas from Anthropic API
+        oauth_res = self.fetch_live_oauth_telemetry()
 
-        # Real API Poller
+        # 2. Ingest local CLI and Claude Desktop IndexedDB turns
+        local_ingested = self.scan_local_logs()
+
+        # 3. If direct API key exists in vault, probe messages endpoint to refresh headers
         api_key = self.vault.get_credential("claude", "default")
         if not api_key:
-            return {"success": False, "error": "No credential configured and no local logs found"}
+            return {
+                "success": True,
+                "mode": "live_sync",
+                "oauth": oauth_res,
+                "tokens_generated": local_ingested
+            }
 
         url = "https://api.anthropic.com/v1/messages"
         headers = {
@@ -519,6 +1066,8 @@ class ClaudeProvider(BaseProvider):
                     f"Anthropic API HTTP Error {e.code}: {e.reason}",
                     {"status_code": e.code}
                 )
+            if oauth_res.get("success"):
+                return {"success": True, "mode": "oauth_live", "api_error": str(e), "oauth": oauth_res}
             return {"success": False, "error": str(e)}
         except Exception as e:
             self.diagnostics.record_error(
@@ -527,4 +1076,6 @@ class ClaudeProvider(BaseProvider):
                 f"Failed to reach Anthropic endpoint: {e}",
                 {"exception": str(e)}
             )
+            if oauth_res.get("success"):
+                return {"success": True, "mode": "oauth_live", "api_error": str(e), "oauth": oauth_res}
             return {"success": False, "error": str(e)}

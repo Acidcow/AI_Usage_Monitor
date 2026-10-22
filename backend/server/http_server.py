@@ -102,15 +102,36 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/status":
             prov_snapshots = srv.database.get_provider_snapshots()
+            svc_mgr = getattr(srv, "service_manager", None)
+            startup_enabled = svc_mgr.is_startup_enabled() if svc_mgr else False
             resp = {
                 "service": "AI_Usage_Monitor",
                 "version": "0.1.0",
                 "status": "HEALTHY",
                 "proxy_port": srv.proxy_port,
                 "server_port": srv.server_port,
+                "startup_enabled": startup_enabled,
                 "providers": prov_snapshots
             }
             return self._send_json(200, resp)
+
+        # AIUM-901: Windows Auto-Start & Background Service Lifecycle Status
+        if path in ["/api/system/startup", "/api/system/service"]:
+            svc_mgr = getattr(srv, "service_manager", None)
+            if not svc_mgr:
+                from backend.system.windows_service import WindowsServiceManager
+                svc_mgr = WindowsServiceManager()
+            include_logs = query.get("logs", ["true"])[0].lower() in ("1", "true", "yes")
+            status = svc_mgr.get_service_status(include_logs=include_logs)
+            # Since this HTTP request is actively being served by this process, ensure live port/PID visibility
+            if not status.get("running"):
+                import os
+                status["running"] = True
+                status["pid"] = os.getpid()
+                status["mode"] = "interactive"
+            status["port"] = srv.server_port
+            status["proxy_port"] = srv.proxy_port
+            return self._send_json(200, status)
 
         # AIUM-703, AIUM-704: LAN Discovery, Adapters, Inventory & Node Endpoints
         if path == "/api/discovery/adapters":
@@ -252,6 +273,7 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             f_platform = query.get("filter_platform", [None])[0]
             f_instance = query.get("filter_instance", [None])[0]
             f_model = query.get("filter_model", [None])[0]
+            f_project = query.get("filter_project", [None])[0]
             pivot_res = srv.database.get_pivot_metrics(
                 dimensions=dims,
                 window=window,
@@ -259,7 +281,8 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 filter_client=f_client,
                 filter_platform=f_platform,
                 filter_instance=f_instance,
-                filter_model=f_model
+                filter_model=f_model,
+                filter_project=f_project
             )
             return self._send_json(200, pivot_res)
 
@@ -272,14 +295,22 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 bucket_minutes = 5
             mode = query.get("mode", ["interval_delta"])[0]
             scope = query.get("scope", ["individual"])[0]
+            breakdown = query.get("breakdown", ["consolidated"])[0]
+            scope_filter = query.get("scope_filter", ["all"])[0]
             timeseries = srv.database.get_granular_timeseries(
                 provider=provider,
                 window=window,
                 bucket_minutes=bucket_minutes,
                 mode=mode,
-                scope=scope
+                scope=scope,
+                breakdown=breakdown,
+                scope_filter=scope_filter
             )
             return self._send_json(200, timeseries)
+
+        if path == "/api/taxonomy":
+            from backend.storage.taxonomy import get_full_taxonomy_specification
+            return self._send_json(200, get_full_taxonomy_specification())
 
         if path == "/api/settings/visibility":
             return self._send_json(200, srv.database.get_estate_visibility())
@@ -377,6 +408,8 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             source = query.get("source", [None])[0]
             instance_id = query.get("instance_id", [None])[0]
             client_ip = query.get("client_ip", [None])[0]
+            sort_by = query.get("sort_by", [None])[0]
+            sort_dir = query.get("sort_dir", ["desc"])[0]
             fmt = query.get("format", ["json"])[0]
 
             if fmt == "csv":
@@ -388,7 +421,13 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     account_id=acct,
                     team_name=team,
                     user_name=user,
-                    model=model
+                    model=model,
+                    token_id=token,
+                    project_id=proj,
+                    dimension=dim,
+                    source=source,
+                    instance_id=instance_id,
+                    client_ip=client_ip,
                 )
                 payload = csv_data.encode("utf-8")
                 self.send_response(200)
@@ -413,7 +452,9 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 dimension=dim,
                 source=source,
                 instance_id=instance_id,
-                client_ip=client_ip
+                client_ip=client_ip,
+                sort_by=sort_by,
+                sort_dir=sort_dir,
             )
             return self._send_json(200, res)
 
@@ -991,7 +1032,67 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             if not mcp:
                 return self._send_json(500, {"error": "MCP server not initialized"})
             resp = mcp.handle_json_rpc(body)
+            if resp is None:
+                self.send_response(204)
+                self.end_headers()
+                return
             return self._send_json(200, resp)
+
+        # AIUM-901: Windows Auto-Start Registration & Background Service Control
+        if path == "/api/system/startup":
+            svc_mgr = getattr(srv, "service_manager", None)
+            if not svc_mgr:
+                from backend.system.windows_service import WindowsServiceManager
+                svc_mgr = WindowsServiceManager()
+
+            action = str(body.get("action", "")).strip().lower()
+            if action == "toggle":
+                res = svc_mgr.toggle_startup(launch_widget=body.get("launch_widget"))
+                return self._send_json(200, res)
+
+            enabled = bool(body.get("enabled", True))
+            method = str(body.get("method", "registry")).strip().lower()
+            launch_widget = bool(body.get("launch_widget", False))
+            auto_restart = body.get("auto_restart_on_crash")
+            if auto_restart is not None:
+                svc_mgr.save_config({"auto_restart_on_crash": bool(auto_restart)})
+
+            if enabled:
+                res = svc_mgr.install_startup(method=method, launch_widget=launch_widget)
+            else:
+                res = svc_mgr.uninstall_startup(method=body.get("method", "all"))
+            return self._send_json(200, res)
+
+        if path == "/api/system/service":
+            svc_mgr = getattr(srv, "service_manager", None)
+            if not svc_mgr:
+                from backend.system.windows_service import WindowsServiceManager
+                svc_mgr = WindowsServiceManager()
+
+            action = str(body.get("action", "status")).strip().lower()
+            if action == "status":
+                return self._send_json(200, svc_mgr.get_service_status(include_logs=True))
+            elif action == "clear_logs":
+                return self._send_json(200, svc_mgr.clear_service_logs())
+            elif action == "restart":
+                deferred = bool(body.get("deferred", True))
+                res = svc_mgr.restart_background_service(
+                    launch_widget=body.get("launch_widget"),
+                    deferred=deferred
+                )
+                return self._send_json(200, res)
+            elif action == "stop":
+                res = svc_mgr.stop_background_service()
+                return self._send_json(200, res)
+            elif action == "start":
+                res = svc_mgr.start_background_service(
+                    launch_widget=bool(body.get("launch_widget", False)),
+                    host=srv.host,
+                    port=srv.server_port,
+                    proxy_port=srv.proxy_port
+                )
+                return self._send_json(200, res)
+            return self._send_json(400, {"error": f"Unsupported service action: {action}"})
 
         self._send_json(404, {"error": "API route not found"})
 
@@ -1081,7 +1182,8 @@ class AppHTTPServer:
         scanner: Optional[Any] = None,
         registry: Optional[Any] = None,
         governor: Optional[Any] = None,
-        mcp_server: Optional[Any] = None
+        mcp_server: Optional[Any] = None,
+        service_manager: Optional[Any] = None
     ):
         self.database = database
         self.vault = vault
@@ -1098,11 +1200,13 @@ class AppHTTPServer:
         from backend.discovery.node_registry import NodeRegistry
         from backend.discovery.traffic_governor import TrafficGovernor
         from backend.mcp.server import MCPServer
+        from backend.system.windows_service import WindowsServiceManager
 
         self.scanner = scanner or LANScanner()
         self.registry = registry or NodeRegistry(database=self.database)
         self.governor = governor or TrafficGovernor(registry=self.registry, database=self.database)
         self.mcp_server = mcp_server or MCPServer(scanner=self.scanner, registry=self.registry, governor=self.governor, database=self.database)
+        self.service_manager = service_manager or WindowsServiceManager()
 
         self._server: Optional[http.server.ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -1128,6 +1232,7 @@ class AppHTTPServer:
         self._server.registry = self.registry
         self._server.governor = self.governor
         self._server.mcp_server = self.mcp_server
+        self._server.service_manager = self.service_manager
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 

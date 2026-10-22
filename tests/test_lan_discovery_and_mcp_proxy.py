@@ -351,6 +351,27 @@ class TestLANDiscoveryAndMCPProxy(unittest.TestCase):
         self.assertEqual(res["result"]["serverInfo"]["name"], "ai-usage-monitor-proxy")
         self.assertIn("tools", res["result"]["capabilities"])
 
+    def test_mcp_notifications_suppressed(self):
+        """Assert JSON-RPC notifications (without id) return None with zero response."""
+        req1 = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        self.assertIsNone(self.mcp_server.handle_json_rpc(req1))
+
+        req2 = {"jsonrpc": "2.0", "method": "initialized"}
+        self.assertIsNone(self.mcp_server.handle_json_rpc(req2))
+
+        req3 = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "123"}}
+        self.assertIsNone(self.mcp_server.handle_json_rpc(req3))
+
+    def test_mcp_resources_and_prompts_empty_list(self):
+        """Assert resources/list and prompts/list return valid empty lists instead of errors."""
+        res_res = self.mcp_server.handle_json_rpc({"jsonrpc": "2.0", "id": 50, "method": "resources/list"})
+        self.assertEqual(res_res["id"], 50)
+        self.assertEqual(res_res["result"]["resources"], [])
+
+        res_prompts = self.mcp_server.handle_json_rpc({"jsonrpc": "2.0", "id": 51, "method": "prompts/list"})
+        self.assertEqual(res_prompts["id"], 51)
+        self.assertEqual(res_prompts["result"]["prompts"], [])
+
     def test_mcp_tools_list(self):
         """Assert tools/list exposes all 8 managed tools with JSON schemas."""
         req = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}

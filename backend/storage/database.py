@@ -9,11 +9,21 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from backend.config import DB_PATH
+from backend.storage.reporting_engine import ReportingEngineMixin
+from backend.storage.taxonomy import (
+    CANONICAL_TAXONOMY_TIERS,
+    PROVIDER_TERMINOLOGY_MATRIX,
+    classify_node_locality,
+    classify_account_tier,
+    normalize_event_taxonomy,
+    get_full_taxonomy_specification,
+)
 
-class UsageDatabase:
+class UsageDatabase(ReportingEngineMixin):
     """
     Zero-dependency SQLite Time-Series Database for AI Usage and Telemetry.
     Thread-safe connection handling with ACID persistence.
+    Inherits analytical OLAP reporting, pivot, and CSV export methods from ReportingEngineMixin.
     """
 
     def __init__(self, db_path: Optional[str] = None):
@@ -362,14 +372,40 @@ class UsageDatabase:
         # Defaults
         if not user_name:
             user_name = "James Eckhardt"
-        if not team_name and prov_clean == "claude":
-            team_name = "Synthesis2"
-        if not account_id:
-            active_prof = self.get_active_account_profile(prov_clean)
-            if active_prof and active_prof.get("account_id"):
-                account_id = active_prof.get("account_id")
-            else:
-                account_id = "acidcow@gmail.com" if prov_clean == "gemini" else ("Synthesis2" if prov_clean == "claude" else user_name)
+        if instance_clean in ("local", "") and session_id:
+            if session_id.startswith("remote_node_") or session_id.startswith("stream_node_"):
+                prefix_stripped = session_id.replace("remote_", "", 1).replace("stream_", "", 1)
+                parts = prefix_stripped.rsplit("_", 1)
+                if parts[0].startswith("node_"):
+                    instance_clean = parts[0]
+
+        if prov_clean == "claude":
+            active_prof = self.get_active_account_profile("claude")
+            claude_snap = self.get_provider_snapshots().get("claude", {})
+            active_mode = self.get_quota_tracking_mode()
+            snap_plan = str(claude_snap.get("plan_type") or "")
+            is_pro = ("pro" in snap_plan.lower()) or (active_mode == "individual" and snap_plan not in ("Team Enterprise",))
+            if not team_name:
+                if active_prof and active_prof.get("team_name"):
+                    team_name = active_prof.get("team_name")
+                elif is_pro:
+                    team_name = "Claude Pro"
+                else:
+                    team_name = claude_snap.get("team_name") or "Synthesis2"
+            if not account_id:
+                if active_prof and active_prof.get("account_id"):
+                    account_id = active_prof.get("account_id")
+                elif is_pro:
+                    account_id = user_name
+                else:
+                    account_id = "Synthesis2"
+        else:
+            if not account_id:
+                active_prof = self.get_active_account_profile(prov_clean)
+                if active_prof and active_prof.get("account_id"):
+                    account_id = active_prof.get("account_id")
+                else:
+                    account_id = "acidcow@gmail.com" if prov_clean == "gemini" else user_name
 
         # Client IP & Alias Network Attribution
         if not client_ip:
@@ -696,14 +732,18 @@ class UsageDatabase:
         window: str = "24h",
         bucket_minutes: int = 5,
         mode: str = "interval_delta",
-        scope: str = "individual"
+        scope: str = "individual",
+        breakdown: str = "consolidated",
+        scope_filter: str = "all"
     ) -> Dict[str, Any]:
         """
         Returns granular time-series data aggregated into discrete time buckets (1, 5, 10, 15, 30, 60 minutes)
-        for arbitrary sliding windows (1h, 6h, 24h, 7d, 30d).
+        for arbitrary sliding windows (1h..12m).
         Supports:
           - 'interval_delta': token consumption strictly within each bucket interval (idle = 0 baseline)
           - 'cumulative': monotonically non-decreasing running total over the window
+          - 'breakdown': 'consolidated' | 'locality' | 'tenant_account' | 'workspace_pool' | 'compute_node' | 'client_host' | 'access_route' | 'model'
+          - 'scope_filter': 'all' | 'personal_only' | 'team_only' | 'local_only' | 'remote_only'
         """
         valid_buckets = (1, 5, 10, 15, 30, 60)
         try:
@@ -712,16 +752,37 @@ class UsageDatabase:
             bucket_min = 5
 
         mode_val = "cumulative" if str(mode).lower() == "cumulative" else "interval_delta"
+        breakdown_val = str(breakdown or "consolidated").strip().lower()
+        scope_filter_val = str(scope_filter or "all").strip().lower()
 
         window_map = {
             "1h": 60,
+            "3h": 180,
             "6h": 360,
+            "12h": 720,
             "24h": 1440,
+            "48h": 2880,
+            "3d": 4320,
+            "5d": 7200,
             "7d": 10080,
-            "30d": 43200
+            "10d": 14400,
+            "15d": 21600,
+            "30d": 43200,
+            "90d": 129600,
+            "3m": 129600,
+            "180d": 259200,
+            "6m": 259200,
+            "365d": 525600,
+            "12m": 525600,
+            "1y": 525600,
         }
-        win_mins = window_map.get(str(window).lower(), 1440)
-        num_bins = max(1, win_mins // bucket_min)
+        win_key = str(window).strip().lower()
+        win_mins = window_map.get(win_key, 1440)
+        # Keep exact bucket_min for <=24h; scale effective bucket for multi-day/month windows to cap bins <= 288
+        effective_bucket_min = bucket_min
+        if win_mins > 1440 and (win_mins // bucket_min) > 288:
+            effective_bucket_min = max(bucket_min, win_mins // 120)
+        num_bins = max(1, win_mins // effective_bucket_min)
 
         now = datetime.datetime.now(datetime.timezone.utc)
         cutoff = now - datetime.timedelta(minutes=win_mins)
@@ -732,29 +793,41 @@ class UsageDatabase:
         bin_start_timestamps = []
 
         for i in range(num_bins - 1, -1, -1):
-            t_bin = now - datetime.timedelta(minutes=i * bucket_min)
+            t_bin = now - datetime.timedelta(minutes=i * effective_bucket_min)
+            t_local = t_bin.astimezone()
             bin_start_timestamps.append(t_bin)
             keys.append(t_bin.strftime("%Y-%m-%dT%H:%M"))
             if win_mins <= 60:
-                labels.append(t_bin.strftime("%H:%M"))
+                labels.append(t_local.strftime("%H:%M"))
             elif win_mins <= 1440:
-                labels.append(t_bin.strftime("%H:%M"))
+                labels.append(t_local.strftime("%H:%M"))
+            elif win_mins <= 43200:
+                labels.append(t_local.strftime("%b %d %H:%M") if win_mins <= 7200 else t_local.strftime("%b %d"))
             else:
-                labels.append(t_bin.strftime("%b %d %H:%M"))
+                labels.append(t_local.strftime("%Y-%m-%d"))
 
-        # Query events within the window
+        # Query events and managed_nodes within the window
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
+            cursor.execute("SELECT id, name, endpoint, engine, compute_group FROM managed_nodes")
+            nodes_map = {r["id"]: dict(r) for r in cursor.fetchall()}
+
             query = """
                 SELECT 
                     recorded_at,
                     provider,
                     COALESCE(model, '') as model,
+                    COALESCE(session_id, '') as session_id,
                     COALESCE(token_id, '') as token_id,
                     COALESCE(user_name, '') as user_name,
                     COALESCE(team_name, '') as team_name,
                     COALESCE(account_id, '') as account_id,
+                    COALESCE(instance_id, 'local') as instance_id,
+                    COALESCE(source, 'direct') as source,
+                    COALESCE(client_ip, '127.0.0.1') as client_ip,
+                    COALESCE(client_alias, '') as client_alias,
+                    COALESCE(is_proxied, 0) as is_proxied,
                     total_tokens,
                     estimated_cost
                 FROM usage_events
@@ -770,17 +843,50 @@ class UsageDatabase:
             conn.close()
 
         cutoff_epoch = cutoff.timestamp()
-        bucket_secs = bucket_min * 60
+        bucket_secs = effective_bucket_min * 60
 
         total_pts = [0] * num_bins
         total_cost = 0.0
         prov_buckets: Dict[str, List[int]] = {}
         child_buckets: Dict[str, List[int]] = {}
+        disagg_buckets: Dict[str, Dict[str, Any]] = {}
+        dynamic_breakdown_buckets: Dict[str, Dict[str, Any]] = {}
+
+        def _add_disagg(s_id: str, s_name: str, s_color: str, bin_idx: int, val: int, meta: Optional[Dict[str, Any]] = None):
+            if s_id not in disagg_buckets:
+                disagg_buckets[s_id] = {
+                    "id": s_id,
+                    "key": s_id,
+                    "name": s_name,
+                    "label": s_name,
+                    "color": s_color,
+                    "pts": [0] * num_bins,
+                    "meta": meta or {}
+                }
+            disagg_buckets[s_id]["pts"][bin_idx] += val
+
+        def _add_dynamic(s_id: str, s_name: str, s_color: str, bin_idx: int, val: int, meta: Optional[Dict[str, Any]] = None):
+            if s_id not in dynamic_breakdown_buckets:
+                dynamic_breakdown_buckets[s_id] = {
+                    "id": s_id,
+                    "key": s_id,
+                    "name": s_name,
+                    "label": s_name,
+                    "color": s_color,
+                    "pts": [0] * num_bins,
+                    "meta": meta or {}
+                }
+            dynamic_breakdown_buckets[s_id]["pts"][bin_idx] += val
+
+        dynamic_palette = [
+            "#f59e0b", "#8b5cf6", "#06b6d4", "#10b981", "#ec4899",
+            "#3b82f6", "#f43f5e", "#a855f7", "#14b8a6", "#eab308"
+        ]
 
         for r in rows:
             rec_str = r["recorded_at"]
             try:
-                dt = datetime.datetime.fromisoformat(rec_str)
+                dt = datetime.datetime.fromisoformat(rec_str.replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=datetime.timezone.utc)
                 else:
@@ -796,6 +902,21 @@ class UsageDatabase:
             if idx >= num_bins:
                 idx = num_bins - 1
 
+            row_dict = dict(r)
+            tax = normalize_event_taxonomy(row_dict, nodes_map=nodes_map)
+            locality = tax["locality"]
+            acct_tier = tax["account_tier"]
+
+            # Apply scope_filter
+            if scope_filter_val == "personal_only" and acct_tier == "team_org":
+                continue
+            elif scope_filter_val == "team_only" and acct_tier != "team_org":
+                continue
+            elif scope_filter_val == "local_only" and locality != "local":
+                continue
+            elif scope_filter_val == "remote_only" and locality != "remote_lan":
+                continue
+
             toks = int(r["total_tokens"])
             cost = float(r["estimated_cost"] or 0.0)
             total_pts[idx] += toks
@@ -809,6 +930,24 @@ class UsageDatabase:
                     child_buckets.setdefault("individual", [0] * num_bins)[idx] += toks
                 if r["team_name"]:
                     child_buckets.setdefault("team", [0] * num_bins)[idx] += toks
+                if acct_tier == "personal_pro":
+                    _add_disagg(
+                        "claude_personal_pro",
+                        "Claude Pro — Personal Account",
+                        "#f59e0b",
+                        idx,
+                        toks,
+                        {"provider": "claude", "account_tier": "personal_pro", "locality": "cloud"}
+                    )
+                else:
+                    _add_disagg(
+                        "claude_team_org",
+                        f"Claude — Team/Org Pool ({tax['workspace_pool']})",
+                        "#fb7185",
+                        idx,
+                        toks,
+                        {"provider": "claude", "account_tier": "team_org", "locality": "cloud"}
+                    )
             elif prov == "gemini":
                 t_id = r["token_id"] or "tok_gem_flash"
                 child_buckets.setdefault(t_id, [0] * num_bins)[idx] += toks
@@ -816,6 +955,70 @@ class UsageDatabase:
                 m_name = r["model"] or "llama3:latest"
                 child_buckets.setdefault(m_name, [0] * num_bins)[idx] += toks
                 child_buckets.setdefault(f"ollama_model_{m_name}", [0] * num_bins)[idx] += toks
+                if locality == "remote_lan":
+                    _add_disagg(
+                        "ollama_remote_lan",
+                        f"Ollama — Remote LAN ({tax['compute_node']})",
+                        "#06b6d4",
+                        idx,
+                        toks,
+                        {"provider": "ollama", "locality": "remote_lan", "node_id": tax["instance_id"]}
+                    )
+                else:
+                    _add_disagg(
+                        "ollama_local_node",
+                        f"Ollama — {tax['compute_node']}",
+                        "#8b5cf6",
+                        idx,
+                        toks,
+                        {"provider": "ollama", "locality": "local", "node_id": tax["instance_id"]}
+                    )
+
+            # Populate dynamic breakdown series according to `breakdown_val`
+            if breakdown_val == "locality":
+                if prov == "ollama":
+                    b_key = f"ollama_{locality}"
+                    b_lbl = f"Ollama · {tax['locality_label']} ({tax['compute_node']})"
+                    b_col = "#06b6d4" if locality == "remote_lan" else "#8b5cf6"
+                elif prov == "claude":
+                    b_key = f"claude_{acct_tier}"
+                    b_lbl = f"Claude · {tax['account_tier_label']}"
+                    b_col = "#f59e0b" if acct_tier == "personal_pro" else "#fb7185"
+                else:
+                    b_key = f"{prov}_{locality}"
+                    b_lbl = f"{prov.capitalize()} · {tax['locality_label']}"
+                    b_col = "#3b82f6"
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "locality": locality})
+            elif breakdown_val == "tenant_account":
+                b_key = f"acct_{prov}_{tax['tenant_account']}".replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['tenant_account']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "tenant_account": tax["tenant_account"]})
+            elif breakdown_val == "workspace_pool":
+                b_key = f"pool_{prov}_{tax['workspace_pool']}".replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['workspace_pool']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "workspace_pool": tax["workspace_pool"]})
+            elif breakdown_val == "compute_node":
+                b_key = f"node_{prov}_{tax['instance_id']}".replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['compute_node']} [{tax['locality_label']}]"
+                b_col = "#06b6d4" if locality == "remote_lan" else ("#8b5cf6" if locality == "local" else "#f59e0b")
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "instance_id": tax["instance_id"], "locality": locality})
+            elif breakdown_val == "client_host":
+                b_key = f"client_{prov}_{tax['client_ip']}".replace(".", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['client_host']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "client_ip": tax["client_ip"]})
+            elif breakdown_val == "access_route":
+                b_key = f"route_{prov}_{tax['access_route']}".replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['access_route_label']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "access_route": tax["access_route"]})
+            elif breakdown_val == "model":
+                b_key = f"mdl_{prov}_{tax['model']}".replace(":", "_").replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['model']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "model": tax["model"]})
 
         def _apply_mode(pts: List[int]) -> List[int]:
             if mode_val == "cumulative":
@@ -875,17 +1078,74 @@ class UsageDatabase:
                 "max_tokens": max(pts_m) if pts_m else 0
             })
 
+        # Append disaggregated locality & account-tier series
+        existing_ids = {s["id"] for s in series}
+        for d_id, d_obj in disagg_buckets.items():
+            pts_m = _apply_mode(d_obj["pts"])
+            if d_id not in existing_ids:
+                series.append({
+                    "id": d_id,
+                    "key": d_id,
+                    "name": d_obj["name"],
+                    "label": d_obj["label"],
+                    "color": d_obj["color"],
+                    "points": pts_m,
+                    "total_tokens": sum(d_obj["pts"]),
+                    "max_tokens": max(pts_m) if pts_m else 0,
+                    "group": "disaggregated",
+                    **d_obj.get("meta", {})
+                })
+                existing_ids.add(d_id)
+
+        # Build dedicated breakdown_series list for UI Curve Disaggregation modes
+        breakdown_series = []
+        if breakdown_val == "consolidated":
+            for p_name, p_pts in prov_buckets.items():
+                pts_m = _apply_mode(p_pts)
+                breakdown_series.append({
+                    "id": p_name,
+                    "key": p_name,
+                    "name": p_name.capitalize(),
+                    "label": p_name.capitalize(),
+                    "color": colors.get(p_name, "#94a3b8"),
+                    "points": pts_m,
+                    "total_tokens": sum(p_pts),
+                    "max_tokens": max(pts_m) if pts_m else 0
+                })
+        else:
+            for b_id, b_obj in dynamic_breakdown_buckets.items():
+                pts_m = _apply_mode(b_obj["pts"])
+                b_entry = {
+                    "id": b_id,
+                    "key": b_id,
+                    "name": b_obj["name"],
+                    "label": b_obj["label"],
+                    "color": b_obj["color"],
+                    "points": pts_m,
+                    "total_tokens": sum(b_obj["pts"]),
+                    "max_tokens": max(pts_m) if pts_m else 0,
+                    "group": breakdown_val,
+                    **b_obj.get("meta", {})
+                }
+                breakdown_series.append(b_entry)
+                if b_id not in existing_ids:
+                    series.append(b_entry)
+                    existing_ids.add(b_id)
+
         return {
             "success": True,
             "window": window,
             "bucket_minutes": bucket_min,
             "mode": mode_val,
+            "breakdown": breakdown_val,
+            "scope_filter": scope_filter_val,
             "labels": labels,
             "keys": keys,
             "num_bins": num_bins,
             "total_tokens": sum(total_pts),
             "total_cost": round(total_cost, 4),
-            "series": series
+            "series": series,
+            "breakdown_series": breakdown_series
         }
 
     get_timeseries_analytics = get_granular_timeseries
@@ -1405,40 +1665,84 @@ class UsageDatabase:
 
             is_calibrated = bool(prov == "claude" and snap.get("individual_session_rem_pct") is not None)
 
-            # Accounts breakdown
-            prov_accts = [
-                {
-                    "account_id": r["account_id"],
-                    "tokens_today": int(r["tokens_today"]),
-                    "cost_today_usd": round(float(r["cost_today"]), 4)
-                }
-                for r in today_acct_rows if r["provider"].lower() == prov
-            ]
+            # Fetch managed nodes map for locality resolution
+            conn_n = self._get_connection()
+            cur_n = conn_n.cursor()
+            cur_n.execute("SELECT id, name, endpoint, engine, compute_group FROM managed_nodes")
+            nodes_map = {r["id"]: dict(r) for r in cur_n.fetchall()}
+            conn_n.close()
+
+            # Accounts breakdown enriched with canonical account_tier
+            prov_accts = []
+            for r in today_acct_rows:
+                if r["provider"].lower() == prov:
+                    tier_code, tier_lbl = classify_account_tier(
+                        provider=prov,
+                        account_id=r["account_id"],
+                        team_name=snap.get("team_name") or "",
+                        plan_type=snap.get("plan_type") or ""
+                    )
+                    prov_accts.append({
+                        "account_id": r["account_id"],
+                        "account_tier": tier_code,
+                        "account_tier_label": tier_lbl,
+                        "tokens_today": int(r["tokens_today"]),
+                        "cost_today_usd": round(float(r["cost_today"]), 4)
+                    })
             if not prov_accts and tokens_today > 0:
+                default_acct = snap.get("account_id") or (snap.get("user_name") if prov == "claude" else "default")
+                tier_code, tier_lbl = classify_account_tier(
+                    provider=prov,
+                    account_id=default_acct,
+                    team_name=snap.get("team_name") or "",
+                    plan_type=snap.get("plan_type") or ""
+                )
                 prov_accts = [{
-                    "account_id": snap.get("account_id") or "default",
+                    "account_id": default_acct,
+                    "account_tier": tier_code,
+                    "account_tier_label": tier_lbl,
                     "tokens_today": tokens_today,
                     "cost_today_usd": round(td.get("cost_today", 0.0), 4)
                 }]
 
-            # Instances breakdown
-            prov_insts = [
-                {
-                    "instance_id": r["instance_id"],
-                    "tokens_today": int(r["tokens_today"]),
-                    "cost_today_usd": round(float(r["cost_today"]), 4)
-                }
-                for r in today_inst_rows if r["provider"].lower() == prov
-            ]
+            # Instances breakdown enriched with locality (local vs remote_lan vs cloud)
+            prov_insts = []
+            locality_bd = {"local": 0, "remote_lan": 0, "cloud": 0}
+            for r in today_inst_rows:
+                if r["provider"].lower() == prov:
+                    inst_id = r["instance_id"]
+                    n_meta = nodes_map.get(inst_id, {})
+                    loc_code, loc_lbl = classify_node_locality(
+                        provider=prov,
+                        instance_id=inst_id,
+                        node_endpoint=n_meta.get("endpoint") or ""
+                    )
+                    tok_cnt = int(r["tokens_today"])
+                    locality_bd[loc_code] = locality_bd.get(loc_code, 0) + tok_cnt
+                    prov_insts.append({
+                        "instance_id": inst_id,
+                        "node_name": n_meta.get("name") or inst_id,
+                        "endpoint": n_meta.get("endpoint") or ("http://127.0.0.1:11434" if prov == "ollama" else ""),
+                        "locality": loc_code,
+                        "locality_label": loc_lbl,
+                        "tokens_today": tok_cnt,
+                        "cost_today_usd": round(float(r["cost_today"]), 4)
+                    })
             if not prov_insts and tokens_today > 0:
+                loc_code, loc_lbl = classify_node_locality(provider=prov, instance_id="local")
+                locality_bd[loc_code] = locality_bd.get(loc_code, 0) + tokens_today
                 prov_insts = [{
                     "instance_id": "local",
+                    "node_name": "Local Node (This PC)" if prov == "ollama" else f"{prov.capitalize()} Cloud API",
+                    "endpoint": "http://127.0.0.1:11434" if prov == "ollama" else "",
+                    "locality": loc_code,
+                    "locality_label": loc_lbl,
                     "tokens_today": tokens_today,
                     "cost_today_usd": round(td.get("cost_today", 0.0), 4)
                 }]
 
             # Source breakdown
-            src_bd = {"direct": 0, "proxy": 0, "emulator": 0, "log_scanner": 0}
+            src_bd = {"direct": 0, "proxy": 0, "emulator": 0, "log_scanner": 0, "cli_scanner": 0}
             for r in today_source_rows:
                 if r["provider"].lower() == prov:
                     s_key = r["source"] or "direct"
@@ -1479,7 +1783,9 @@ class UsageDatabase:
                 "hierarchy": hierarchy,
                 "accounts": prov_accts,
                 "instances": prov_insts,
-                "source_breakdown": src_bd
+                "locality_breakdown": locality_bd,
+                "source_breakdown": src_bd,
+                "taxonomy_mapping": PROVIDER_TERMINOLOGY_MATRIX.get(prov, {})
             }
 
         # Local Model (Ollama) Cost Savings Calculation
@@ -1512,7 +1818,8 @@ class UsageDatabase:
             "total_tokens_today": total_tokens_today_all,
             "total_tokens_week": total_tokens_week_all,
             "providers": providers_comparison,
-            "local_savings": local_savings
+            "local_savings": local_savings,
+            "taxonomy": get_full_taxonomy_specification()
         }
 
     def get_estate_visibility(self) -> Dict[str, Any]:
@@ -1564,94 +1871,122 @@ class UsageDatabase:
         """
         prov_key = provider.lower()
         now = datetime.datetime.now(datetime.timezone.utc)
+        win_norm = (window or "24h").strip().lower()
 
-        if window == "1h":
-            num_bins = 12
-            step_min = 5
-            cutoff = now - datetime.timedelta(hours=1)
-            labels = []
-            keys = []
-            for i in range(num_bins - 1, -1, -1):
-                t = now - datetime.timedelta(minutes=i * step_min)
-                labels.append(t.strftime("%H:%M"))
-                keys.append(t.strftime("%Y-%m-%dT%H:%M")[:15])
-            window_label = "Last 1 Hour"
-        elif window == "7d":
-            num_bins = 7
-            cutoff = now - datetime.timedelta(days=7)
-            labels = []
-            keys = []
-            for i in range(num_bins - 1, -1, -1):
-                t = now - datetime.timedelta(days=i)
-                labels.append(t.strftime("%a %d"))
-                keys.append(t.strftime("%Y-%m-%d"))
-            window_label = "Last 7 Days"
-        elif window == "30d":
-            num_bins = 30
-            cutoff = now - datetime.timedelta(days=30)
-            labels = []
-            keys = []
-            for i in range(num_bins - 1, -1, -1):
-                t = now - datetime.timedelta(days=i)
-                labels.append(t.strftime("%b %d"))
-                keys.append(t.strftime("%Y-%m-%d"))
-            window_label = "Last 30 Days"
+        window_specs = {
+            "1h": (12, 5, "Last 1 Hour", "%H:%M"),
+            "3h": (18, 10, "Last 3 Hours", "%H:%M"),
+            "6h": (12, 30, "Last 6 Hours", "%H:%M"),
+            "12h": (12, 60, "Last 12 Hours", "%H:00"),
+            "24h": (24, 60, "Last 24 Hours", "%H:00"),
+            "48h": (24, 120, "Last 48 Hours", "%b %d %H:00"),
+            "3d": (12, 360, "Last 3 Days", "%a %H:00"),
+            "5d": (10, 720, "Last 5 Days", "%a %d %H:00"),
+            "7d": (7, 1440, "Last 7 Days", "%a %d"),
+            "10d": (10, 1440, "Last 10 Days", "%b %d"),
+            "15d": (15, 1440, "Last 15 Days", "%b %d"),
+            "30d": (30, 1440, "Last 30 Days", "%b %d"),
+            "3m": (15, 8640, "Last 3 Months", "%b %d"),
+            "90d": (15, 8640, "Last 3 Months", "%b %d"),
+            "6m": (12, 21600, "Last 6 Months", "%b %d"),
+            "180d": (12, 21600, "Last 6 Months", "%b %d"),
+            "12m": (12, 43800, "Last 12 Months", "%b '%y"),
+            "365d": (12, 43800, "Last 12 Months", "%b '%y"),
+            "1y": (12, 43800, "Last 12 Months", "%b '%y"),
+        }
+
+        if win_norm in window_specs:
+            window = win_norm
+            num_bins, step_min, window_label, lbl_fmt = window_specs[win_norm]
         else:
             window = "24h"
-            num_bins = 24
-            cutoff = now - datetime.timedelta(hours=24)
-            labels = []
-            keys = []
-            for i in range(num_bins - 1, -1, -1):
-                t = now - datetime.timedelta(hours=i)
-                labels.append(t.strftime("%H:00"))
+            num_bins, step_min, window_label, lbl_fmt = window_specs["24h"]
+
+        total_mins = num_bins * step_min
+        cutoff = now - datetime.timedelta(minutes=total_mins)
+        labels = []
+        keys = []
+        for i in range(num_bins - 1, -1, -1):
+            t = now - datetime.timedelta(minutes=i * step_min)
+            t_local = t.astimezone()
+            labels.append(t_local.strftime(lbl_fmt))
+            if step_min < 60:
+                keys.append(t.strftime("%Y-%m-%dT%H:%M")[:15])
+            elif step_min < 1440:
                 keys.append(t.strftime("%Y-%m-%dT%H"))
-            window_label = "Last 24 Hours"
+            else:
+                keys.append(t.strftime("%Y-%m-%d"))
 
         key_to_idx = {k: idx for idx, k in enumerate(keys)}
+        cutoff_epoch = cutoff.timestamp()
+        bucket_secs = step_min * 60
 
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
-            if window in ("7d", "30d"):
-                group_expr = "substr(recorded_at, 1, 10)"
-            elif window == "1h":
-                group_expr = "substr(recorded_at, 1, 15)"
-            else:
-                group_expr = "substr(recorded_at, 1, 13)"
-
-            cursor.execute(f"""
+            cursor.execute("SELECT id, name, endpoint, engine, compute_group FROM managed_nodes")
+            nodes_map = {r["id"]: dict(r) for r in cursor.fetchall()}
+            cursor.execute("""
                 SELECT 
-                    {group_expr} as time_key,
+                    recorded_at,
+                    provider,
                     COALESCE(model, '') as model,
+                    COALESCE(session_id, '') as session_id,
                     COALESCE(token_id, '') as token_id,
                     COALESCE(user_name, '') as user_name,
                     COALESCE(team_name, '') as team_name,
                     COALESCE(account_id, '') as account_id,
-                    SUM(total_tokens) as tokens
+                    COALESCE(instance_id, 'local') as instance_id,
+                    COALESCE(source, 'direct') as source,
+                    COALESCE(client_ip, '127.0.0.1') as client_ip,
+                    COALESCE(client_alias, '') as client_alias,
+                    COALESCE(is_proxied, 0) as is_proxied,
+                    total_tokens as tokens
                 FROM usage_events
                 WHERE provider = ? AND recorded_at >= ?
-                GROUP BY time_key, model, token_id, user_name, team_name, account_id
             """, (prov_key, cutoff.isoformat()))
             rows = cursor.fetchall()
             conn.close()
 
         total_points = [0] * num_bins
         child_buckets: Dict[str, List[int]] = {}
+        locality_buckets: Dict[str, List[int]] = {
+            "local": [0] * num_bins,
+            "remote_lan": [0] * num_bins,
+        }
+        node_buckets: Dict[str, Dict[str, Any]] = {}
+        claude_tier_buckets: Dict[str, List[int]] = {
+            "personal_pro": [0] * num_bins,
+            "team_org": [0] * num_bins,
+        }
 
         for r in rows:
-            tk = r["time_key"]
-            idx = key_to_idx.get(tk)
+            rec_str = r["recorded_at"] or ""
+            idx = None
+            try:
+                dt = datetime.datetime.fromisoformat(rec_str.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                else:
+                    dt = dt.astimezone(datetime.timezone.utc)
+                delta_secs = dt.timestamp() - cutoff_epoch
+                if delta_secs >= 0:
+                    idx = min(num_bins - 1, int(delta_secs // bucket_secs))
+            except Exception:
+                idx = None
+
             if idx is None:
                 for k, ki in key_to_idx.items():
-                    if tk.startswith(k[:13]):
+                    if rec_str.startswith(k[:10]):
                         idx = ki
                         break
             if idx is None or idx < 0 or idx >= num_bins:
                 continue
 
-            toks = int(r["tokens"])
+            toks = int(r["tokens"] or 0)
             total_points[idx] += toks
+            row_dict = dict(r)
+            tax = normalize_event_taxonomy(row_dict, nodes_map=nodes_map)
 
             if prov_key == "claude":
                 user = r["user_name"]
@@ -1660,12 +1995,30 @@ class UsageDatabase:
                     child_buckets.setdefault("individual", [0] * num_bins)[idx] += toks
                 if team:
                     child_buckets.setdefault("team", [0] * num_bins)[idx] += toks
+                tier = tax["account_tier"]
+                if tier == "personal_pro":
+                    claude_tier_buckets["personal_pro"][idx] += toks
+                else:
+                    claude_tier_buckets["team_org"][idx] += toks
             elif prov_key == "gemini":
                 tok_id = r["token_id"] or "tok_gem_flash"
                 child_buckets.setdefault(tok_id, [0] * num_bins)[idx] += toks
             elif prov_key == "ollama":
                 m_name = r["model"] or "llama3:latest"
                 child_buckets.setdefault(m_name, [0] * num_bins)[idx] += toks
+                loc = tax["locality"]
+                if loc == "remote_lan":
+                    locality_buckets["remote_lan"][idx] += toks
+                else:
+                    locality_buckets["local"][idx] += toks
+                inst_key = tax["instance_id"]
+                if inst_key not in node_buckets:
+                    node_buckets[inst_key] = {
+                        "label": f"{tax['compute_node']} [{tax['locality_label']}]",
+                        "locality": loc,
+                        "pts": [0] * num_bins
+                    }
+                node_buckets[inst_key]["pts"][idx] += toks
             else:
                 child_buckets.setdefault(f"{prov_key}_main", [0] * num_bins)[idx] += toks
 
@@ -1682,22 +2035,22 @@ class UsageDatabase:
                 "total_tokens": sum(total_points)
             })
 
-            ind_pts = child_buckets.get("individual")
+            ind_pts = claude_tier_buckets["personal_pro"] if sum(claude_tier_buckets["personal_pro"]) > 0 else child_buckets.get("individual")
             if not ind_pts or sum(ind_pts) == 0:
                 ind_pts = [int(p * 0.6) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
             series.append({
                 "id": "claude_individual",
                 "key": "claude_individual",
-                "name": "Individual Member (You)",
-                "label": "Individual Member (You)",
+                "name": "Personal Account (Claude Pro)",
+                "label": "Personal Account (Claude Pro)",
                 "color": "#60a5fa",
                 "points": ind_pts,
                 "total_tokens": sum(ind_pts)
             })
 
-            team_pts = child_buckets.get("team")
-            if not team_pts or sum(team_pts) == 0:
-                team_pts = [int(p * 0.9) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+            team_pts = claude_tier_buckets["team_org"] if sum(claude_tier_buckets["team_org"]) > 0 else child_buckets.get("team")
+            if not team_pts:
+                team_pts = [0] * num_bins
             series.append({
                 "id": "claude_team",
                 "key": "claude_team",
@@ -1792,12 +2145,47 @@ class UsageDatabase:
             series.append({
                 "id": "ollama_total",
                 "key": "ollama_total",
-                "name": "Local Hardware Total",
-                "label": "Local Hardware Total",
+                "name": "On-Premise Ollama Total (All Nodes)",
+                "label": "On-Premise Ollama Total (All Nodes)",
                 "color": "#a855f7",
                 "points": total_points,
                 "total_tokens": sum(total_points)
             })
+
+            # Explicit Local vs. Remote LAN Node separation
+            series.append({
+                "id": "ollama_local_node",
+                "key": "ollama_local_node",
+                "name": "Local Node (This PC · 127.0.0.1)",
+                "label": "Local Node (This PC · 127.0.0.1)",
+                "color": "#8b5cf6",
+                "points": locality_buckets["local"],
+                "total_tokens": sum(locality_buckets["local"]),
+                "locality": "local"
+            })
+            series.append({
+                "id": "ollama_remote_lan",
+                "key": "ollama_remote_lan",
+                "name": "Remote LAN Nodes (Non-Local)",
+                "label": "Remote LAN Nodes (Non-Local)",
+                "color": "#22d3ee",
+                "points": locality_buckets["remote_lan"],
+                "total_tokens": sum(locality_buckets["remote_lan"]),
+                "locality": "remote_lan"
+            })
+
+            for n_id, n_info in node_buckets.items():
+                if n_id != "local":
+                    series.append({
+                        "id": f"ollama_node_{n_id}",
+                        "key": f"ollama_node_{n_id}",
+                        "name": f"Node: {n_info['label']}",
+                        "label": f"Node: {n_info['label']}",
+                        "color": "#14b8a6" if n_info["locality"] == "remote_lan" else "#c084fc",
+                        "points": n_info["pts"],
+                        "total_tokens": sum(n_info["pts"]),
+                        "locality": n_info["locality"]
+                    })
 
             model_palette = {
                 "llama3:latest": ("Llama 3 (8B)", "#38bdf8"),
@@ -1871,356 +2259,8 @@ class UsageDatabase:
             "series": series
         }
 
-    def get_pivot_metrics(
-        self,
-        dimensions: Union[str, List[str]],
-        window: str = "24h",
-        filter_source: Optional[str] = None,
-        filter_client: Optional[str] = None,
-        filter_platform: Optional[str] = None,
-        filter_instance: Optional[str] = None,
-        filter_model: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Dynamically aggregates usage telemetry across specified pivot dimensions:
-        'platform' (or 'provider'), 'model', 'source', 'client' (client_ip, client_alias),
-        'account' (or 'account_id'), 'instance' (or 'instance_id').
-        Supports sliding windows ('1h', '6h', '24h', '7d', '30d', 'all') and multi-attribute filtering.
-        """
-        if isinstance(dimensions, str):
-            dim_list = [d.strip().lower() for d in dimensions.split(",") if d.strip()]
-        elif isinstance(dimensions, list):
-            dim_list = [str(d).strip().lower() for d in dimensions if str(d).strip()]
-        else:
-            dim_list = ["platform"]
-
-        dim_cols_map = {
-            "platform": ["provider"],
-            "provider": ["provider"],
-            "model": ["model"],
-            "source": ["source"],
-            "client": ["client_ip", "client_alias"],
-            "account": ["account_id"],
-            "account_id": ["account_id"],
-            "instance": ["instance_id"],
-            "instance_id": ["instance_id"]
-        }
-
-        selected_cols = []
-        for d in dim_list:
-            if d in dim_cols_map:
-                for col in dim_cols_map[d]:
-                    if col not in selected_cols:
-                        selected_cols.append(col)
-
-        if not selected_cols:
-            selected_cols = ["provider"]
-
-        now = datetime.datetime.now(datetime.timezone.utc)
-        where_clauses = []
-        params = []
-
-        # Window cutoff
-        if window != "all":
-            window_deltas = {
-                "1h": datetime.timedelta(hours=1),
-                "6h": datetime.timedelta(hours=6),
-                "24h": datetime.timedelta(hours=24),
-                "7d": datetime.timedelta(days=7),
-                "30d": datetime.timedelta(days=30)
-            }
-            delta = window_deltas.get(window, datetime.timedelta(hours=24))
-            cutoff_iso = (now - delta).isoformat()
-            where_clauses.append("recorded_at >= ?")
-            params.append(cutoff_iso)
-
-        if filter_source:
-            where_clauses.append("source = ?")
-            params.append(filter_source.lower())
-        if filter_client:
-            where_clauses.append("(client_ip = ? OR client_alias = ?)")
-            params.extend([filter_client, filter_client])
-        if filter_platform:
-            where_clauses.append("provider = ?")
-            params.append(filter_platform.lower())
-        if filter_instance:
-            where_clauses.append("instance_id = ?")
-            params.append(filter_instance)
-        if filter_model:
-            where_clauses.append("model = ?")
-            params.append(filter_model)
-
-        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-        select_dims_sql = ", ".join(selected_cols)
-        group_by_sql = ", ".join(selected_cols)
-
-        query = f"""
-            SELECT 
-                {select_dims_sql},
-                COALESCE(SUM(input_tokens), 0) as input_tokens,
-                COALESCE(SUM(output_tokens), 0) as output_tokens,
-                COALESCE(SUM(total_tokens), 0) as total_tokens,
-                COALESCE(SUM(estimated_cost), 0.0) as estimated_cost,
-                COUNT(*) as request_count
-            FROM usage_events
-            {where_sql}
-            GROUP BY {group_by_sql}
-            ORDER BY total_tokens DESC
-        """
-
-        with self._lock:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            raw_rows = [dict(r) for r in cursor.fetchall()]
-            conn.close()
-
-        total_tok = sum(int(r["total_tokens"]) for r in raw_rows)
-        rows = []
-        for r in raw_rows:
-            t_tok = int(r["total_tokens"])
-            pct = round((t_tok / total_tok * 100), 2) if total_tok > 0 else 0.0
-            row_dict = dict(r)
-            row_dict["total_tokens"] = t_tok
-            row_dict["input_tokens"] = int(r["input_tokens"])
-            row_dict["output_tokens"] = int(r["output_tokens"])
-            row_dict["percentage_share"] = pct
-            row_dict["estimated_cost"] = round(float(row_dict["estimated_cost"]), 4)
-            if "client_ip" in row_dict and not row_dict.get("client_alias"):
-                ip = row_dict["client_ip"]
-                row_dict["client_alias"] = self.resolve_client_alias(ip)
-            rows.append(row_dict)
-
-        totals = {
-            "total_tokens": total_tok,
-            "input_tokens": sum(int(r["input_tokens"]) for r in raw_rows),
-            "output_tokens": sum(int(r["output_tokens"]) for r in raw_rows),
-            "estimated_cost": round(sum(float(r["estimated_cost"]) for r in raw_rows), 4),
-            "request_count": sum(int(r["request_count"]) for r in raw_rows)
-        }
-
-        return {
-            "success": True,
-            "dimensions": dim_list,
-            "window": window,
-            "rows": rows,
-            "totals": totals
-        }
-
-    def query_historical_report(
-        self,
-        group_by: str = "day",
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        provider: Optional[str] = None,
-        account_id: Optional[str] = None,
-        team_name: Optional[str] = None,
-        user_name: Optional[str] = None,
-        token_id: Optional[str] = None,
-        model: Optional[str] = None,
-        project_id: Optional[str] = None,
-        dimension: Optional[str] = None,
-        limit: int = 500,
-        source: Optional[str] = None,
-        instance_id: Optional[str] = None,
-        client_ip: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Executes multi-dimensional historical analytics across time periods and operational dimensions.
-        """
-        if group_by == "hour":
-            time_expr = "strftime('%Y-%m-%d %H:00', recorded_at)"
-        elif group_by == "week":
-            time_expr = "strftime('%Y-W%W', recorded_at)"
-        elif group_by == "month":
-            time_expr = "strftime('%Y-%m', recorded_at)"
-        elif group_by == "year":
-            time_expr = "strftime('%Y', recorded_at)"
-        else: # default day
-            time_expr = "strftime('%Y-%m-%d', recorded_at)"
-
-        conditions = ["1=1"]
-        params = []
-
-        if start_date:
-            conditions.append("recorded_at >= ?")
-            params.append(start_date)
-        if end_date:
-            conditions.append("recorded_at <= ?")
-            params.append(end_date)
-        if provider:
-            conditions.append("LOWER(provider) = ?")
-            params.append(provider.lower())
-        if account_id:
-            conditions.append("account_id = ?")
-            params.append(account_id)
-        if team_name:
-            conditions.append("team_name = ?")
-            params.append(team_name)
-        if user_name:
-            conditions.append("user_name = ?")
-            params.append(user_name)
-        if token_id:
-            conditions.append("token_id = ?")
-            params.append(token_id)
-        if model:
-            conditions.append("model LIKE ?")
-            params.append(f"%{model}%")
-        if project_id:
-            conditions.append("project_id = ?")
-            params.append(project_id)
-        if source:
-            conditions.append("source = ?")
-            params.append(source.lower())
-        if instance_id:
-            conditions.append("instance_id = ?")
-            params.append(instance_id)
-        if client_ip:
-            conditions.append("(client_ip = ? OR client_alias = ?)")
-            params.extend([client_ip, client_ip])
-
-        where_clause = " AND ".join(conditions)
-
-        valid_dims = {"provider", "account_id", "team_name", "user_name", "model", "project_id", "source", "instance_id", "client_ip", "client_alias"}
-        dim_col = dimension if dimension in valid_dims else None
-
-        if dim_col:
-            select_group = f"{time_expr} AS period, {dim_col} AS dimension_value, provider"
-            group_by_clause = f"GROUP BY {time_expr}, {dim_col}, provider ORDER BY period ASC, total_tokens DESC"
-        else:
-            select_group = f"{time_expr} AS period, provider, account_id, team_name, user_name, model"
-            group_by_clause = f"GROUP BY {time_expr}, provider, account_id, team_name, user_name, model ORDER BY period ASC"
-
-        query_sql = f'''
-            SELECT
-                {select_group},
-                SUM(input_tokens) AS input_tokens,
-                SUM(output_tokens) AS output_tokens,
-                SUM(COALESCE(cache_creation_tokens, 0)) AS cache_creation_tokens,
-                SUM(COALESCE(cache_read_tokens, 0)) AS cache_read_tokens,
-                SUM(total_tokens) AS total_tokens,
-                SUM(estimated_cost) AS total_cost_usd,
-                SUM(request_count) AS request_count,
-                COUNT(id) AS event_count,
-                COUNT(DISTINCT session_id) AS session_count
-            FROM usage_events
-            WHERE {where_clause}
-            {group_by_clause}
-            LIMIT ?
-        '''
-        params.append(limit)
-
-        with self._lock:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(query_sql, params)
-            rows = cursor.fetchall()
-            conn.close()
-
-        records = []
-        tot_tok = 0
-        tot_in = 0
-        tot_out = 0
-        tot_cache_create = 0
-        tot_cache_read = 0
-        tot_cost = 0.0
-        tot_events = 0
-
-        for r in rows:
-            d = dict(r)
-            d["total_cost_usd"] = round(float(d.get("total_cost_usd") or 0.0), 4)
-            group_key = d.get("dimension_value") or d.get("account_id") or d.get("team_name") or d.get("user_name") or d.get("provider") or "All"
-            d["group_key"] = group_key
-            d["estimated_cost"] = d["total_cost_usd"]
-            d["input_tokens"] = int(d.get("input_tokens") or 0)
-            d["output_tokens"] = int(d.get("output_tokens") or 0)
-            d["cache_creation_tokens"] = int(d.get("cache_creation_tokens") or 0)
-            d["cache_read_tokens"] = int(d.get("cache_read_tokens") or 0)
-            tot_tok += int(d.get("total_tokens") or 0)
-            tot_in += d["input_tokens"]
-            tot_out += d["output_tokens"]
-            tot_cache_create += d["cache_creation_tokens"]
-            tot_cache_read += d["cache_read_tokens"]
-            tot_cost += float(d.get("total_cost_usd") or 0.0)
-            tot_events += int(d.get("event_count") or 0)
-            records.append(d)
-
-        summary = {
-            "total_tokens": tot_tok,
-            "input_tokens": tot_in,
-            "output_tokens": tot_out,
-            "cache_creation_tokens": tot_cache_create,
-            "cache_read_tokens": tot_cache_read,
-            "total_estimated_cost": round(tot_cost, 4),
-            "total_cost_usd": round(tot_cost, 4),
-            "total_events": tot_events,
-            "distinct_dimensions": len(set(r.get("group_key") for r in records))
-        }
-
-        return {
-            "group_by": group_by,
-            "dimension": dim_col,
-            "filters": {
-                "start_date": start_date,
-                "end_date": end_date,
-                "provider": provider,
-                "account_id": account_id,
-                "team_name": team_name,
-                "user_name": user_name,
-                "model": model,
-                "project_id": project_id
-            },
-            "record_count": len(records),
-            "totals": summary,
-            "summary": summary,
-            "records": records,
-            "rows": records
-        }
-
-    def export_historical_csv(
-        self,
-        group_by: str = "day",
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        provider: Optional[str] = None,
-        account_id: Optional[str] = None,
-        team_name: Optional[str] = None,
-        user_name: Optional[str] = None,
-        model: Optional[str] = None
-    ) -> str:
-        """Exports historical report as RFC-4180 compliant CSV string."""
-        report = self.query_historical_report(
-            group_by=group_by,
-            start_date=start_date,
-            end_date=end_date,
-            provider=provider,
-            account_id=account_id,
-            team_name=team_name,
-            user_name=user_name,
-            model=model,
-            limit=2000
-        )
-        lines = [
-            "Period,Provider,Account,Team,User,Model,Input Tokens,Output Tokens,Cache Create Tokens,Cache Read Tokens,Total Tokens,Total Cost (USD),Sessions,Events"
-        ]
-        for r in report.get("records", []):
-            period = r.get("period", "")
-            prov = r.get("provider", "")
-            acct = r.get("account_id") or ""
-            team = r.get("team_name") or ""
-            user = r.get("user_name") or ""
-            mdl = r.get("model") or ""
-            in_t = r.get("input_tokens", 0)
-            out_t = r.get("output_tokens", 0)
-            cc_t = r.get("cache_creation_tokens", 0)
-            cr_t = r.get("cache_read_tokens", 0)
-            tot_t = r.get("total_tokens", 0)
-            cost = r.get("total_cost_usd", 0.0)
-            sess = r.get("session_count", 0)
-            evt = r.get("event_count", 0)
-            lines.append(f'"{period}","{prov}","{acct}","{team}","{user}","{mdl}",{in_t},{out_t},{cc_t},{cr_t},{tot_t},{cost:.4f},{sess},{evt}')
-
-        return "\r\n".join(lines)
+    # Historical Reporting, Pivot & CSV Export methods are provided by ReportingEngineMixin
+    # (see backend/storage/reporting_engine.py)
 
     # -------------------------------------------------------------
     # App Settings & Preferences
@@ -2284,6 +2324,10 @@ class UsageDatabase:
             "widget_auto_resize": True,
             "widget_fade_unpinned": False,
             "widget_view_mode": "balances",
+            "active_trend_window": "24h",
+            "default_trend_window": "24h",
+            "active_chart_granularity": 5,
+            "active_chart_mode": "interval_delta",
             "poll_cadence_seconds": 4,
             "refresh_cadence_seconds": 4,
             "ui_refresh_interval_seconds": 30,

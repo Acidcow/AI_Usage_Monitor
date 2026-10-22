@@ -18,6 +18,8 @@ class WindowsTrayManager:
         on_sync_now: Optional[Callable] = None,
         on_exit: Optional[Callable] = None,
         on_open_settings: Optional[Callable] = None,
+        on_toggle_startup: Optional[Callable] = None,
+        is_startup_enabled: Optional[Callable[[], bool]] = None,
         icon_type: str = "johnny5"
     ):
         self.app_name = app_name
@@ -26,6 +28,8 @@ class WindowsTrayManager:
         self.on_sync_now = on_sync_now
         self.on_exit = on_exit
         self.on_open_settings = on_open_settings
+        self.on_toggle_startup = on_toggle_startup
+        self.is_startup_enabled = is_startup_enabled
         self.icon_type = icon_type
 
         self.is_windows = sys.platform == "win32"
@@ -180,6 +184,7 @@ class WindowsTrayManager:
             CMD_SYNC = 1003
             CMD_SETTINGS = 1004
             CMD_EXIT = 1005
+            CMD_TOGGLE_STARTUP = 1006
 
             LRESULT = getattr(wintypes, 'LRESULT', ctypes.c_ssize_t)
             user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
@@ -196,12 +201,27 @@ class WindowsTrayManager:
                         # Show Right-click Context Menu
                         hmenu = user32.CreatePopupMenu()
                         MF_STRING = 0x00000000
+                        MF_CHECKED = 0x00000008
                         MF_SEPARATOR = 0x00000800
+
+                        startup_checked = False
+                        if self.is_startup_enabled:
+                            try:
+                                startup_checked = bool(self.is_startup_enabled())
+                            except Exception:
+                                startup_checked = False
 
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_DASHBOARD, "⚡ Open AI Usage Dashboard")
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_WIDGET, "🪟 Launch Mini Status Widget")
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_SETTINGS, "⚙ Settings & Configuration")
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_SYNC, "🔄 Sync Quota Now")
+                        user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
+                        user32.AppendMenuW(
+                            hmenu,
+                            MF_STRING | (MF_CHECKED if startup_checked else 0),
+                            CMD_TOGGLE_STARTUP,
+                            "🚀 Start Automatically with Windows",
+                        )
                         user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
                         user32.AppendMenuW(hmenu, MF_STRING, CMD_EXIT, "❌ Exit AI Usage Monitor")
 
@@ -230,6 +250,9 @@ class WindowsTrayManager:
                     elif cmd_id == CMD_SETTINGS:
                         if self.on_open_settings:
                             self.on_open_settings()
+                    elif cmd_id == CMD_TOGGLE_STARTUP:
+                        if self.on_toggle_startup:
+                            self.on_toggle_startup()
                     elif cmd_id == CMD_EXIT:
                         if self.on_exit:
                             self.on_exit()

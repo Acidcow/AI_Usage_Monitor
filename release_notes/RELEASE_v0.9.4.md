@@ -1,49 +1,29 @@
-# Release Notes - Version v0.9.4
-**Date**: 2026-10-19
+# Release Notes - v0.9.4 (AIUM-904)
 
-## Summary
-Initial release of AI Usage Monitor featuring zero-dependency Python backend, Windows DPAPI encryption, native Windows Tray, modern web dashboard, and Claude multi-mode usage tracking.
+**Release Date**: 2026-10-22  
+**Ticket ID**: `AIUM-904`  
+**Title**: Claude Pro Plan Alignment, Local vs. Remote Node Disaggregation & Canonical Unified Telemetry Taxonomy  
 
-## Completed Features & Tickets
+---
 
-- **[AIUM-101] Windows Native DPAPI Security Vault** (Feature): Zero-dependency native encryption using crypt32.dll for secure credential storage.
-- **[AIUM-102] Proactive Redacted Diagnostics & Logging Engine** (Feature): Structured error tracker with automated token/key sanitization and 1-click diagnostic export.
-- **[AIUM-103] Core SQLite Usage Time-Series Storage** (Feature): Local database tracking provider tokens, sessions, costs, rate limits, and hourly/daily trends.
-- **[AIUM-104] Claude Multi-Mode Usage Provider** (Feature): Anthropic API poller, Transparent Local Proxy, CLI log scanner, and mock fallback.
-- **[AIUM-105] Multi-Provider Framework (Gemini, Ollama, M365 Copilot)** (Feature): Pluggable provider architecture with initial interfaces and coming soon indicators.
-- **[AIUM-106] Zero-Dependency HTTP Server & REST API** (Feature): ThreadingHTTPServer serving REST API and canonical SPA web components.
-- **[AIUM-107] Web UI Dashboard & Canonical Components** (Feature): Stunning dark-mode glassmorphic dashboard with live token gauges and session timeline.
-- **[AIUM-108] Windows System Tray & Mini Status Bar Widget** (Feature): Shell_NotifyIconW native tray icon and compact status bar widget view.
-- **[AIUM-109] End-to-End TDD Verification & Release v0.1.0** (Task): Comprehensive unit tests (>=20), 100% error-free pass rate, and release compilation.
-- **[AIUM-201] Claude Local Code & CLI Session Scanner** (Feature): Scan ~/.claude/projects/ and sessions for real tokens, cache read/write metrics, models, and timestamps.
-- **[AIUM-202] Transparent Proxy SSE Streaming & Token Extraction** (Feature): Add Server-Sent Events stream chunk passthrough and real-time delta usage extraction for live CLI coding tools.
-- **[AIUM-203] Live Ollama Model Monitor & Local Inference Ingestor** (Feature): Query running models, parameter sizes, and family details directly from localhost:11434 with health badge.
-- **[AIUM-204] Google Gemini Live Provider with DPAPI Vault** (Feature): Support Google AI Studio API key storage and model quota interrogation.
-- **[AIUM-205] Corporate Telemetry Importer & Manual Session Logger** (Feature): Allow uploading sanitized session json/jsonl/csv files or manual logging for restricted enterprise environments.
-- **[AIUM-206] Dashboard Real Data Mode & Live SVG Analytics Chart** (Feature): Interactive pure SVG time-series analytics chart with toggle between Real Local Data and Demo Simulation.
-- **[AIUM-207] Verification & Test Expansion to >=35 Tests** (Task): Unit and integration tests for scanner, streaming proxy, and Ollama integration with 100% pass.
-- **[AIUM-301] Automated API Key Procurement Buttons & Step-by-Step Guides** (feature): Interactive 1-click launch buttons and visual procurement steps for Gemini (AI Studio), Claude (Console), ChatGPT (OpenAI Platform), Copilot (M365 Admin), and Ollama (Download & Models).
-- **[AIUM-302] Gemini & ChatGPT DPAPI Endpoint Wiring & Active Interrogation** (feature): Wire /api/providers/gemini/config and /api/providers/chatgpt/config to DPAPI vault and test model interrogation.
-- **[AIUM-401] Standalone Edge App Mode Desktop Widget Launcher** (feature): Launch chromeless standalone desktop mini-widget using built-in Windows Edge app mode and screen resolution detection.
-- **[AIUM-402] Win32 Taskbar Snapping & Draggable Header Controls** (feature): Add draggable window header, bottom-right taskbar snapping, provider cycle button, and Tray menu integration.
-- **[AIUM-501] Johnny 5 Mascot, Dual Icons & Quote Engine Integration** (Feature): Incorporate high-res Johnny 5 headshot and Cyber Shield icons, contextual UI mascots for dashboard banner, session inspection, and health status, plus quote engine and customizer modal.
-- **[AIUM-502] Fix ctypes WNDPROC LOWORD AttributeError on Tray Menu Command** (Bug): Replace non-existent wintypes.LOWORD with bitwise (wparam & 0xFFFF) in windows_tray.py and ensure unique window class names per instance.
-- **[AIUM-601] Multi-Account Dual-Bar Widget & Local AI Cost Savings** (Feature): Dual bar widget displaying session and weekly remaining %, weather-style hover flyout, comparative dashboard metrics, local model ROI savings, and multi-key account aggregation
-- **[AIUM-602] Zero-Browser Native Taskbar Widget & Identifiable Tray Icons** (Feature): Native Tkinter taskbar floating widget eliminating browser dependency, pixel-perfect Johnny 5 and Cyber Shield tray icons, and multi-platform SVG velocity line charts
-- **[AIUM-603] Claude Team Quota Calibration, Widget Port Probing & Scaled Hover Flyout** (Feature): Calibrate Claude rolling session/weekly limits, auto-probe active port in widget pop-out, prevent test orphan processes, and scale hover flyouts with custom scrollbar
-- **[AIUM-604] Multi-Scope Usage Hierarchy (Individual, Team, Dept, Enterprise Drill-Down)** (Feature): Provide scoped separation and interactive drill-down between Individual User, Team Pool, Department, and Enterprise usage thresholds and quotas
-- **[AIUM-608] Multi-Account Profiles and Multi-Tenant Aggregation** (Feature): Cater for multiple concurrent accounts per service/platform (e.g. personal vs corporate accounts, multi-tenant orgs) with active profile toggling and consolidated operational telemetry.
-- **[AIUM-609] Model Benchmarking, Quality Evals & Security Testing Suite** (Feature): Automated test harness for evaluating model accuracy, TTFT latency, output token throughput, prompt injection defense, and schema adherence across platforms.
-- **[AIUM-610] Estate Throughput, Burst Performance & Capacity Analytics** (Feature): Telemetry-based usage analytics engine computing rolling averages, burst velocity spikes, sustained throughput, predictive quota exhaustion (TTE), and estate optimization recommendations.
-- **[AIUM-611] Interactive Multi-Series Overlaid Trend Lines & Drill-Down Charts in Dashboard** (Feature): Multi-series historical trend charts replacing placeholder sparklines with overlaid child lines, interactive legend toggles, hover glow effects, time window badge, and configurable X/Y axis labels.
-- **[AIUM-612] Mini Widget Multi-Plot Overlays, Nested Branch Charts & Parent Visibility Toggle** (Feature): Overlaid child line plots in mini widget trend view, nested branch charts upon expanding child sections, color swatch blocks left of headers, and config toggle to hide/keep parent chart on expand.
-- **[AIUM-613] Dynamic Hierarchy View Modes, Group Tagging & Platform Visibility Settings** (Feature): Hierarchy view mode switcher (All, Platforms only, Groups only, Filtered multi-select panel) across Dashboard and Mini Widget with fine-grained visibility configuration to hide/show platforms by default.
-- **[AIUM-614] Real Telemetry Trend Curves, Normalized Legend Mapping & Zero-Data Sparklines** (Feature): Eliminate modulo saw-tooth fallbacks, normalize series id/name to key/label in chart legend, and implement Option A across table rows and child cards.
-- **[AIUM-615] Multi-Platform Velocity Chart Clarification, Idle Zero Baselines & Cache Token Metrics** (Feature): Disambiguate overlapping curves in 24h velocity chart with platform token badges and idle baselines, and add cache creation/read token metrics for ccusage parity
-- **[AIUM-616] Strict Platform Visibility Enforcement & Unpinned Widget Focus-Loss Fade** (Bug): Enforce strict visibility toggling across Web Dashboard (cards, pills, 24h velocity chart) and Native/Web Mini Widgets. Ensure hidden platforms are never rendered regardless of pin status. Ensure unpinned items fade out of view on loss of focus when fade_unpinned is enabled.
-- **[AIUM-208] Adaptive Ollama Log Scanner & Dynamic Model Ingestor** (Feature): Continuously parse Ollama server logs, dynamically adapt to active model switches (gemma, llama, qwen, etc.), extract prompt/eval tokens, and update database and trend charts.
-- **[AIUM-617] Multi-Granularity Time-Series Aggregation, Interval Delta Widget Mode, Cadence Control & Gemini Proxy Ingestion** (Feature): Support 1-60m discrete bucket aggregation in backend time-series API, configurable UI refresh cadence (30s-300s) to eliminate visual jumpiness, 3rd widget mode for interval/delta token usage from zero baseline, and transparent proxy ingestion for Google Gemini API.
-- **[AIUM-703] LAN Service Discovery, Governed Proxy MCP Server & Multi-Node Traffic Manager** (Feature): Zero-dependency LAN scanner discovering remote Ollama/OpenAI/vLLM instances, multi-node managed pool registry, concurrency/rate traffic governor with queue protection, JSON-RPC 2.0 MCP server for agents, and full usage telemetry ingestion.
-- **[AIUM-704] Configurable LAN Discovery, Alias-Based Device Inventory, Ambient Scanning, Trusted Compute Groups & Query Console** (Feature): Fix /24 mask assumption (use real adapter masks), editable IP ranges/CIDRs/aliases with presets and guidance, persistent alias-keyed device inventory (ARP, NetBIOS, rDNS, mDNS), platform catalog with checkboxes, secondary ports, ambient passive/active scanning, colour-coded device states, trusted/untrusted nodes, compute groups with active-pool rules, pool routing with failover, and a query console with file attachments and untrusted-resource warnings.
-- **[AIUM-618] Individual vs. Team Allowance Tracking Mode Toggle & Hierarchy Streamlining** (Feature): System setting toggle between Individual Direct Tracking and Team Allowance Pool, removing higher-level hierarchy views/cards and artificial conversions when in individual tracking mode to align with official individual-level Claude quota reporting.
-- **[AIUM-705] Per-Client Token Limits, Burst Windows, Temporary Elevated Bypass & Compact Node Pool Display** (Feature): Overhaul Managed Compute Pool UI with prominent Alias/IP headers, multi-platform badges, and compact model chips. Implement per-client token limits, short burst session windows, daily budgets, and temporary/scheduled elevated bypass for trusted worker nodes.
+## 1. Summary of Changes
+
+1. **Canonical 8-Tier Cross-Platform Telemetry Taxonomy (`backend/storage/taxonomy.py`)**:
+   - Defined `CANONICAL_TAXONOMY_TIERS` (`L1: Platform`, `L2: Tenant / Account Tier`, `L3: Workspace / Pool`, `L4: Principal / Seat`, `L5: Compute Node & Locality`, `L6: Client / Workstation`, `L7: Access / Traffic Route`, `L8: Model & Session`) and `PROVIDER_TERMINOLOGY_MATRIX` mapping Claude, Ollama, Gemini, ChatGPT, and M365 Copilot terminology to a single unified structure.
+   - Implemented deterministic classifiers (`classify_node_locality()`, `classify_account_tier()`, `normalize_event_taxonomy()`) that classify Local vs. Remote LAN vs. Cloud compute nodes and Personal Pro vs. Team/Enterprise vs. On-Premise account tiers.
+   - Exposed `GET /api/taxonomy` on `backend/server/http_server.py` and rendered an interactive **Unified Cross-Platform Terminology Mapping** reference drawer (`#unified-taxonomy-drawer`) directly inside the dashboard chart header.
+
+2. **Claude Pro Plan Upgrade & Streaming Log Deduplication (`backend/providers/claude.py`, `backend/storage/database.py`, `run_monitor.py`)**:
+   - Updated `ClaudeProvider.scan_local_logs()` to deduplicate multi-block streaming chunks within `.jsonl` files that share the same Anthropic `message.id` (`msg_01...`), preventing 3x-5x token inflation on multi-tool turns while preserving line-index fallback when `message.id` is absent.
+   - Preserved calibrated `Claude Pro` plan metadata during local CLI `.jsonl` scanning so personal Pro accounts are never overwritten back to `Team Enterprise (CLI)`.
+   - Disabled lingering background demo simulation mode (`claude.enable_simulation_mode(False)`) after initial `--demo` seed ticks in `run_monitor.py` and cleansed synthetic company-wide (`Synthesis2`) demo rows from `usage_history.db`.
+
+3. **Local vs. Remote LAN Compute Node & Account Tier Disaggregation (`backend/storage/database.py`, `backend/storage/reporting_engine.py`, `frontend/js/app.js`)**:
+   - Updated `UsageDatabase.record_usage_event()` to extract `instance_clean = "node_..."` from `remote_node_<id>_<epoch>` session IDs so remote LAN Ollama instances (`JamesE-PC @ 10.1.7.74:11434`) are never conflated with the local workstation (`DESKTOP-C9FNLB9 @ 127.0.0.1:11434`).
+   - Enhanced `UsageDatabase.get_granular_timeseries()` and `GET /api/usage/timeseries` with `breakdown` (`consolidated`, `locality`, `tenant_account`, `workspace_pool`, `compute_node`, `client_host`, `access_route`, `model`) and `scope_filter` (`all`, `personal_only`, `team_only`, `local_only`, `remote_only`), emitting explicit disaggregated series (`claude_personal_pro`, `claude_team_org`, `ollama_local_node`, `ollama_remote_lan`, and `breakdown_series`).
+   - Added **Series View** (`#chart-breakdown-select`) and **Scope Filter** (`#chart-scope-filter-select`) controls to the Token Velocity & Multi-Platform Telemetry Curves header, plus **Node Locality**, **Account Tier**, and **Compute Node** columns/pivots to the Historical Usage Reports grid.
+
+---
+
+## 2. Verification & Test Coverage
+- **Unit Test Suite**: Added 20 unit tests in `tests/test_unified_taxonomy_claude_pro_and_node_locality.py` (`386/386` total tests passing).

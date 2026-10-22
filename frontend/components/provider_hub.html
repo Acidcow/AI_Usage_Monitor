@@ -63,7 +63,6 @@
           <span>🚀</span> Get Anthropic Key ↗
         </a>
         <button class="btn btn-primary" onclick="window.App.openConfigureClaudeModal()">Configure API Key</button>
-        <button class="btn btn-secondary" onclick="window.App.openClaudeQuotaModal()" style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;" title="Calibrate Claude Team/Pro session and weekly limits to match claude.ai">⚖️ Calibrate Limits</button>
         <button class="btn btn-secondary" onclick="window.App.triggerClaudeSimulation()">Simulate Usage (Demo)</button>
         <button class="btn btn-secondary" onclick="window.App.syncProvider('claude')">Sync Now</button>
         <a href="https://console.anthropic.com/settings/cost" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Open Anthropic Console to inspect monthly billing and limits">
@@ -753,14 +752,19 @@ $env:ANTHROPIC_BASE_URL='http://127.0.0.1:8766'
 $env:OLLAMA_BASE_URL='http://127.0.0.1:8989'</pre>
               </div>
 
+              <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px;">
+                <div style="font-size: 0.72rem; color: #f87171; font-weight: 600; margin-bottom: 2px;">⚠️ Important Safety Warning:</div>
+                <div style="font-size: 0.7rem; color: #cbd5e1; line-height: 1.35;">
+                  <strong>Never</strong> set <code style="color: #fca5a5;">HTTP_PROXY</code> or <code style="color: #fca5a5;">HTTPS_PROXY</code> persistently in the Windows User environment (via <code>[System.Environment]::SetEnvironmentVariable</code>). Doing so forces all OS and IDE HTTPS traffic (including Google Antigravity authentication and extension downloads) through the AI proxy, breaking IDE connectivity. For persistence, only set provider-specific base URLs below.
+                </div>
+              </div>
+
               <div>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Make Persistent Across All Future Antigravity Sessions (Run Once):</span>
-                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`[System.Environment]::SetEnvironmentVariable('HTTP_PROXY', 'http://127.0.0.1:8766', 'User')\n[System.Environment]::SetEnvironmentVariable('HTTPS_PROXY', 'http://127.0.0.1:8766', 'User')\n[System.Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL', 'http://127.0.0.1:8766', 'User')\n[System.Environment]::SetEnvironmentVariable('OLLAMA_BASE_URL', 'http://127.0.0.1:8989', 'User')`, this)">📋 Copy Script</button>
+                  <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: 600;">Safe Persistent Base URLs Across All Sessions (Run Once):</span>
+                  <button class="btn btn-secondary btn-sm" style="font-size: 0.65rem; padding: 1px 6px;" onclick="window.App.copyToClipboard(`[System.Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL', 'http://127.0.0.1:8766', 'User')\n[System.Environment]::SetEnvironmentVariable('OLLAMA_BASE_URL', 'http://127.0.0.1:8989', 'User')`, this)">📋 Copy Script</button>
                 </div>
-                <pre style="background: #050811; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.73rem; color: #94a3b8; overflow-x: auto;">[System.Environment]::SetEnvironmentVariable("HTTP_PROXY", "http://127.0.0.1:8766", "User")
-[System.Environment]::SetEnvironmentVariable("HTTPS_PROXY", "http://127.0.0.1:8766", "User")
-[System.Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "http://127.0.0.1:8766", "User")
+                <pre style="background: #050811; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 8px 10px; margin: 0; font-family: var(--font-mono); font-size: 0.73rem; color: #94a3b8; overflow-x: auto;">[System.Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "http://127.0.0.1:8766", "User")
 [System.Environment]::SetEnvironmentVariable("OLLAMA_BASE_URL", "http://127.0.0.1:8989", "User")</pre>
               </div>
             </div>

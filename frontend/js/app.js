@@ -12,6 +12,8 @@ window.App = {
   chartGranularity: 5,
   chartMode: 'interval_delta',
   chartWindow: '24h',
+  chartBreakdown: 'locality',
+  chartScopeFilter: 'all',
   refreshCadenceSeconds: 30,
   hierarchyGroupMode: 'all', // 'all' | 'platforms' | 'groups' | 'filtered'
   filteredItemIds: new Set(['claude', 'gemini', 'chatgpt', 'ollama', 'copilot', 'group-production', 'group-development', 'group-research']),
@@ -102,34 +104,90 @@ window.App = {
 
   changeChartGranularity(val) {
     this.chartGranularity = parseInt(val, 10) || 5;
+    this._lastLocalWindowUpdateTs = Date.now();
     const gSelect = document.getElementById("chart-granularity-select");
     const tSelect = document.getElementById("trend-granularity-select");
     if (gSelect) gSelect.value = this.chartGranularity;
     if (tSelect) tSelect.value = this.chartGranularity;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_chart_granularity: this.chartGranularity } })
+    }).catch(() => {});
     this.loadUsageData();
   },
 
   changeChartMode(mode) {
     this.chartMode = mode === "cumulative" ? "cumulative" : "interval_delta";
+    this._lastLocalWindowUpdateTs = Date.now();
     const mSelect = document.getElementById("chart-mode-select");
     const tSelect = document.getElementById("trend-mode-select");
     if (mSelect) mSelect.value = this.chartMode;
     if (tSelect) tSelect.value = this.chartMode;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_chart_mode: this.chartMode } })
+    }).catch(() => {});
     this.loadUsageData();
   },
 
   changeChartWindow(win) {
     this.chartWindow = win || "24h";
     this.trendWindow = this.chartWindow;
+    this.cachedHierarchicalTrends = {};
+    this._lastLocalWindowUpdateTs = Date.now();
     const wSelect = document.getElementById("chart-window-select");
     const tSelect = document.getElementById("trend-window-select");
+    const cfgWinSelect = document.getElementById("cfg-default-trend-window");
     if (wSelect) wSelect.value = this.chartWindow;
     if (tSelect) tSelect.value = this.chartWindow;
+    if (cfgWinSelect) cfgWinSelect.value = this.chartWindow;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        settings: {
+          active_trend_window: this.chartWindow,
+          default_trend_window: this.chartWindow
+        }
+      })
+    }).catch(() => {});
     this.loadUsageData();
   },
 
   changeTrendGranularity(val) {
     this.changeChartGranularity(val);
+  },
+
+  changeChartBreakdown(val) {
+    this.chartBreakdown = val || 'locality';
+    const bSel = document.getElementById("chart-breakdown-select");
+    if (bSel) bSel.value = this.chartBreakdown;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_chart_breakdown: this.chartBreakdown } })
+    }).catch(() => {});
+    this.loadUsageData();
+  },
+
+  changeChartScopeFilter(val) {
+    this.chartScopeFilter = val || 'all';
+    const sSel = document.getElementById("chart-scope-filter-select");
+    if (sSel) sSel.value = this.chartScopeFilter;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_chart_scope_filter: this.chartScopeFilter } })
+    }).catch(() => {});
+    this.loadUsageData();
+  },
+
+  toggleTaxonomyDrawer() {
+    const drawer = document.getElementById("unified-taxonomy-drawer");
+    if (!drawer) return;
+    drawer.style.display = drawer.style.display === "none" ? "block" : "none";
   },
 
   changeTrendMode(mode) {
@@ -207,19 +265,67 @@ window.App = {
 
   async loadUsageData() {
     try {
+      // Bidirectional alignment with Mini Widget settings (AIUM-903)
+      if (!this._lastLocalWindowUpdateTs || (Date.now() - this._lastLocalWindowUpdateTs > 2500)) {
+        try {
+          const stRes = await fetch("/api/settings");
+          if (stRes && stRes.ok) {
+            const st = await stRes.json();
+            this.appSettings = st;
+            const remoteWin = st.active_trend_window || st.default_trend_window;
+            if (remoteWin && remoteWin !== this.chartWindow) {
+              this.chartWindow = remoteWin;
+              this.trendWindow = remoteWin;
+              this.cachedHierarchicalTrends = {};
+              const wSel = document.getElementById("chart-window-select");
+              const tSel = document.getElementById("trend-window-select");
+              const cfgWinSel = document.getElementById("cfg-default-trend-window");
+              if (wSel) wSel.value = remoteWin;
+              if (tSel) tSel.value = remoteWin;
+              if (cfgWinSel) cfgWinSel.value = remoteWin;
+            }
+            if (st.active_chart_granularity && Number(st.active_chart_granularity) !== Number(this.chartGranularity)) {
+              this.chartGranularity = parseInt(st.active_chart_granularity, 10) || 5;
+              const gSel = document.getElementById("chart-granularity-select");
+              const tgSel = document.getElementById("trend-granularity-select");
+              if (gSel) gSel.value = this.chartGranularity;
+              if (tgSel) tgSel.value = this.chartGranularity;
+            }
+            if (st.active_chart_mode && st.active_chart_mode !== this.chartMode) {
+              this.chartMode = st.active_chart_mode;
+              const mSel = document.getElementById("chart-mode-select");
+              const tmSel = document.getElementById("trend-mode-select");
+              if (mSel) mSel.value = this.chartMode;
+              if (tmSel) tmSel.value = this.chartMode;
+            }
+            if (st.widget_view_mode && (st.widget_view_mode === "balances" || st.widget_view_mode === "trends") && st.widget_view_mode !== this.dashboardViewMode) {
+              this.dashboardViewMode = st.widget_view_mode;
+              const btnBal = document.getElementById("view-mode-btn-balances");
+              const btnTrd = document.getElementById("view-mode-btn-trends");
+              const trendWinCtrl = document.getElementById("trend-window-control");
+              if (btnBal) btnBal.className = this.dashboardViewMode === "balances" ? "btn btn-sm btn-primary" : "btn btn-sm btn-secondary";
+              if (btnTrd) btnTrd.className = this.dashboardViewMode === "trends" ? "btn btn-sm btn-primary" : "btn btn-sm btn-secondary";
+              if (trendWinCtrl) trendWinCtrl.style.display = this.dashboardViewMode === "trends" ? "flex" : "none";
+            }
+          }
+        } catch (_syncErr) {}
+      }
+
       const provSelect = document.getElementById("filter-session-provider");
       const providerParam = provSelect && provSelect.value ? `?provider=${provSelect.value}` : '';
 
       const bucketMinutes = this.chartGranularity || 5;
       const chartMode = this.chartMode || "interval_delta";
       const chartWindow = this.chartWindow || "24h";
+      const chartBreakdown = this.chartBreakdown || "locality";
+      const chartScopeFilter = this.chartScopeFilter || "all";
 
       const [summaryRes, providersRes, sessionsRes, errorsRes, timeseriesRes, compRes] = await Promise.all([
         fetch("/api/usage/summary"),
         fetch("/api/providers"),
         fetch(`/api/usage/sessions${providerParam}`),
         fetch("/api/diagnostics/errors?limit=30"),
-        fetch(`/api/usage/timeseries?window=${chartWindow}&bucket_minutes=${bucketMinutes}&mode=${chartMode}&scope=${this.currentScope || 'individual'}`),
+        fetch(`/api/usage/timeseries?window=${chartWindow}&bucket_minutes=${bucketMinutes}&mode=${chartMode}&scope=${this.currentScope || 'individual'}&breakdown=${encodeURIComponent(chartBreakdown)}&scope_filter=${encodeURIComponent(chartScopeFilter)}`),
         fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}&filter_visibility=true`)
       ]);
 
@@ -1003,11 +1109,15 @@ window.App = {
     const svg = document.getElementById("token-velocity-chart");
     const peakInfo = document.getElementById("chart-peak-info");
     const singleProvNotice = document.getElementById("chart-single-provider-notice");
+    const legendContainer = document.getElementById("chart-legend-container");
     if (!svg) return;
 
     const hiddenPlatforms = (this.appSettings?.estate_visibility?.hidden_platforms || []).map(p => p.toLowerCase());
     const allKnownPlatforms = ["claude", "gemini", "chatgpt", "ollama", "copilot"];
-    const platforms = allKnownPlatforms.filter(p => !hiddenPlatforms.includes(p));
+    const activeBreakdown = timeseriesData?.breakdown || this.chartBreakdown || "locality";
+    const breakdownSeries = Array.isArray(timeseriesData?.breakdown_series) ? timeseriesData.breakdown_series : [];
+
+    let platforms = allKnownPlatforms.filter(p => !hiddenPlatforms.includes(p));
     const platformColors = {
       claude: "#f59e0b",
       gemini: "#3b82f6",
@@ -1025,14 +1135,51 @@ window.App = {
       total: "Total Combined"
     };
 
-    allKnownPlatforms.forEach(p => {
-      const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
-      if (pill) {
-        pill.style.display = hiddenPlatforms.includes(p) ? "none" : "inline-flex";
-      }
+    const seriesList = timeseriesData?.series || [];
+    const seriesMap = {};
+    seriesList.forEach(s => {
+      seriesMap[s.id] = s;
+    });
+    breakdownSeries.forEach(s => {
+      seriesMap[s.id] = s;
     });
 
-    const seriesList = timeseriesData?.series || [];
+    if (activeBreakdown !== "consolidated" && breakdownSeries.length > 0) {
+      platforms = [];
+      breakdownSeries.forEach(bs => {
+        const prov = String(bs.provider || "").toLowerCase();
+        if (prov && hiddenPlatforms.includes(prov)) return;
+        platforms.push(bs.id);
+        platformColors[bs.id] = bs.color || "#38bdf8";
+        platformNames[bs.id] = bs.label || bs.name || bs.id;
+      });
+    }
+
+    if (legendContainer) {
+      const renderPillsList = [...platforms, "total"];
+      legendContainer.innerHTML = renderPillsList.map(pKey => {
+        const col = platformColors[pKey] || "#38bdf8";
+        const name = platformNames[pKey] || pKey;
+        const s = seriesMap[pKey];
+        const pTok = s ? (s.total_tokens || 0) : 0;
+        const tokText = pTok > 0 ? (pTok >= 1000 ? `${(pTok / 1000).toFixed(1)}k` : `${pTok} t`) : "0 t (idle)";
+        const isTot = pKey === "total";
+        const badgeStyle = isTot
+          ? "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(6, 182, 212, 0.25); color: #06b6d4;"
+          : (pTok > 0
+            ? "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(255, 255, 255, 0.15); color: #f8fafc;"
+            : "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 600; background: rgba(255, 255, 255, 0.05); color: #64748b;");
+        const borderStyle = isTot ? `1px dashed ${col}` : `1px solid ${col}55`;
+        return `
+          <div class="chart-legend-pill" data-platform="${this.escapeHtml(pKey)}" style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #f8fafc; cursor: pointer; padding: 2px 8px; border-radius: 4px; background: rgba(15, 23, 42, 0.7); border: ${borderStyle};">
+            <span style="display: inline-block; width: 14px; height: 3px; background: ${col}; border-radius: 2px;"></span>
+            <strong>${this.escapeHtml(name)}</strong>
+            <span class="legend-token-badge" style="${badgeStyle}">${tokText}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
     const labels = timeseriesData?.labels || [];
     const keys = timeseriesData?.keys || [];
     const bucketMin = timeseriesData?.bucket_minutes || this.chartGranularity || 5;
@@ -1051,11 +1198,6 @@ window.App = {
       return;
     }
 
-    const seriesMap = {};
-    seriesList.forEach(s => {
-      seriesMap[s.id] = s;
-    });
-
     let maxTokens = 50;
     seriesList.forEach(s => {
       const pts = s.points || [];
@@ -1068,30 +1210,6 @@ window.App = {
       const modeSuffix = chartMode === "cumulative" ? "total run" : `/${bucketMin}m`;
       peakInfo.innerText = `Peak: ${maxTokens.toLocaleString()} tokens ${modeSuffix}`;
     }
-
-    // Update legend pill badges with exact tokens
-    platforms.concat(["total"]).forEach(p => {
-      const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
-      if (pill) {
-        let b = pill.querySelector(".legend-token-badge");
-        if (!b) {
-          b = document.createElement("span");
-          b.className = "legend-token-badge";
-          pill.appendChild(b);
-        }
-        const s = seriesMap[p];
-        const pTok = s ? (s.total_tokens || 0) : 0;
-        if (pTok > 0) {
-          b.innerText = pTok >= 1000 ? `${(pTok / 1000).toFixed(1)}k` : `${pTok} t`;
-          b.style.cssText = p === "total"
-            ? "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(6, 182, 212, 0.25); color: #06b6d4;"
-            : "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(255, 255, 255, 0.15); color: #f8fafc;";
-        } else {
-          b.innerText = "0 t (idle)";
-          b.style.cssText = "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 600; background: rgba(255, 255, 255, 0.05); color: #64748b;";
-        }
-      }
-    });
 
     // Check single active platform dominance
     const activePlatforms = platforms.filter(p => (seriesMap[p]?.total_tokens || 0) > 0);
@@ -1777,13 +1895,30 @@ window.App = {
   },
 
   changeTrendWindow(windowPeriod) {
-    this.trendWindow = windowPeriod;
+    this.trendWindow = windowPeriod || "24h";
+    this.chartWindow = this.trendWindow;
     this.cachedHierarchicalTrends = {};
+    this._lastLocalWindowUpdateTs = Date.now();
     const sel = document.getElementById("trend-window-select");
-    if (sel) sel.value = windowPeriod;
+    const cSel = document.getElementById("chart-window-select");
+    const cfgWinSel = document.getElementById("cfg-default-trend-window");
+    if (sel) sel.value = this.trendWindow;
+    if (cSel) cSel.value = this.trendWindow;
+    if (cfgWinSel) cfgWinSel.value = this.trendWindow;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        settings: {
+          active_trend_window: this.trendWindow,
+          default_trend_window: this.trendWindow
+        }
+      })
+    }).catch(() => {});
     if (this.lastCompData && window._lastProviders) {
       this.renderComparison(this.lastCompData, window._lastProviders);
     }
+    this.loadUsageData();
   },
 
   switchHierarchyGroupMode(mode) {
@@ -2134,105 +2269,6 @@ window.App = {
   closeConfigureClaudeModal() {
     const modal = document.getElementById("claude-config-modal");
     if (modal) modal.classList.remove("active");
-  },
-
-  // Claude Quota & Limit Calibration
-  openClaudeQuotaModal() {
-    const modal = document.getElementById("claude-quota-modal");
-    if (modal) {
-      const isTeamMode = (this.appSettings && this.appSettings.quota_tracking_mode === "team") ||
-                         (this.lastCompData && this.lastCompData.tracking_mode === "team");
-      const teamSection = document.getElementById("claude-quota-team-section");
-      if (teamSection) {
-        teamSection.style.display = isTeamMode ? "block" : "none";
-      }
-
-      if (this.lastCompData && this.lastCompData.providers && this.lastCompData.providers.claude) {
-        const c = this.lastCompData.providers.claude;
-        const h = c.hierarchy || {};
-        const ind = h.individual || {};
-        const team = h.team || {};
-
-        const scopeSelect = document.getElementById("claude-quota-scope-select");
-        if (scopeSelect) {
-          if (!isTeamMode) {
-            scopeSelect.value = "individual";
-            scopeSelect.disabled = true;
-          } else {
-            scopeSelect.disabled = false;
-            if (h.scope) scopeSelect.value = h.scope;
-          }
-        }
-
-        const indSess = document.getElementById("claude-quota-ind-session-used");
-        if (indSess && ind.session_used_pct !== undefined) indSess.value = ind.session_used_pct;
-
-        const indWeek = document.getElementById("claude-quota-ind-weekly-used");
-        if (indWeek && ind.weekly_used_pct !== undefined) indWeek.value = ind.weekly_used_pct;
-
-        const teamSess = document.getElementById("claude-quota-team-session-used");
-        if (teamSess && team.session_used_pct !== undefined) teamSess.value = team.session_used_pct;
-
-        const teamWeek = document.getElementById("claude-quota-team-weekly-used");
-        if (teamWeek && team.weekly_used_pct !== undefined) teamWeek.value = team.weekly_used_pct;
-
-        const weekReset = document.getElementById("claude-quota-weekly-reset-str");
-        if (weekReset && ind.weekly_reset_str) weekReset.value = ind.weekly_reset_str;
-      }
-      modal.classList.add("active");
-    }
-  },
-  closeClaudeQuotaModal() {
-    const modal = document.getElementById("claude-quota-modal");
-    if (modal) modal.classList.remove("active");
-  },
-  async saveClaudeQuotaCalibration() {
-    const scopeSelect = document.getElementById("claude-quota-scope-select");
-    const planSelect = document.getElementById("claude-quota-plan");
-    const indSessUsedInput = document.getElementById("claude-quota-ind-session-used");
-    const indWeekUsedInput = document.getElementById("claude-quota-ind-weekly-used");
-    const teamSessUsedInput = document.getElementById("claude-quota-team-session-used");
-    const teamWeekUsedInput = document.getElementById("claude-quota-team-weekly-used");
-    const sessMinsInput = document.getElementById("claude-quota-session-reset-mins");
-    const weekResetInput = document.getElementById("claude-quota-weekly-reset-str");
-
-    const scope = scopeSelect ? scopeSelect.value : "individual";
-    const planType = planSelect ? planSelect.value : "Team Enterprise";
-    const indSessUsed = indSessUsedInput ? parseFloat(indSessUsedInput.value) : 60.0;
-    const indWeekUsed = indWeekUsedInput ? parseFloat(indWeekUsedInput.value) : 27.0;
-    const teamSessUsed = teamSessUsedInput ? parseFloat(teamSessUsedInput.value) : 56.0;
-    const teamWeekUsed = teamWeekUsedInput ? parseFloat(teamWeekUsedInput.value) : 26.0;
-    const sessMins = sessMinsInput ? parseFloat(sessMinsInput.value) : 126.0;
-    const weekReset = weekResetInput ? weekResetInput.value.trim() : "Mon 3:00 AM";
-
-    try {
-      const res = await fetch("/api/providers/claude/quota", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scope: scope,
-          plan_type: planType,
-          individual_session_used_pct: indSessUsed,
-          individual_weekly_used_pct: indWeekUsed,
-          team_session_used_pct: teamSessUsed,
-          team_weekly_used_pct: teamWeekUsed,
-          session_reset_minutes: sessMins,
-          weekly_reset_str: weekReset
-        })
-      });
-      if (res.ok) {
-        this.currentScope = scope;
-        this.switchScope(scope);
-        alert(`✓ Claude limits successfully calibrated!\n• Active View: ${scope.toUpperCase()}\n• 👤 Individual Member: ${100 - indSessUsed}% remaining (${indSessUsed}% used) / Weekly: ${100 - indWeekUsed}% rem (${indWeekUsed}% used)\n• 👥 Team Pool: ${100 - teamSessUsed}% remaining (${teamSessUsed}% used) / Weekly: ${100 - teamWeekUsed}% rem (${teamWeekUsed}% used)\n• Resets: ${weekReset}`);
-        this.closeClaudeQuotaModal();
-        await this.loadUsageData();
-      } else {
-        const err = await res.json();
-        alert(`Failed to calibrate Claude limits: ${err.error || res.statusText}`);
-      }
-    } catch (e) {
-      alert(`Error calibrating Claude quota: ${e}`);
-    }
   },
 
   async saveClaudeConfig() {
@@ -2732,12 +2768,249 @@ window.App = {
     }
   },
 
-  // Historical Reporting & Multi-Dimensional Analytics Engine
+  // Historical Reporting & Multi-Dimensional Analytics Engine (AIUM-607 / AIUM-801 / AIUM-902 / AIUM-903)
   selectedReportGrouping: 'day',
+  reportSortBy: 'period',
+  reportSortDir: 'desc',
+  lastReportRows: [],
+  reportGroupByCols: [],
+  reportIncludeGroupTotals: true,
+  _draggedReportColKey: null,
+  reportColumns: null,
+
+  getDefaultReportColumns() {
+    return [
+      { key: 'period', label: 'Period / Date', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'provider', label: 'Provider', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'account_id', label: 'Account / Tenant', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'group_key', label: 'Pivot Dimension', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'source', label: 'Traffic Route', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'model', label: 'Model', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'locality_label', label: 'Node Locality', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'account_tier_label', label: 'Account Tier', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'compute_node', label: 'Compute Node', visible: false, align: 'left', groupable: true, sortable: true },
+      { key: 'instance_id', label: 'Instance / Node ID', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'client_ip', label: 'Client IP / Alias', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'team_name', label: 'Team', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'user_name', label: 'User / Seat', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'project_id', label: 'Project', visible: false, align: 'left', groupable: true, sortable: true },
+      { key: 'event_count', label: 'Events', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'input_tokens', label: 'Input', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'output_tokens', label: 'Output', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'cache_creation_tokens', label: 'Cache Create', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'cache_read_tokens', label: 'Cache Read', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'total_tokens', label: 'Total Tokens', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'net_cost_usd', label: 'Est. Cost', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'cost_per_1k', label: 'Cost / 1k', visible: true, align: 'right', groupable: false, sortable: false, numeric: true },
+      { key: 'share', label: 'Share', visible: true, align: 'center', groupable: false, sortable: false }
+    ];
+  },
+
+  ensureReportColumnsInitialized() {
+    if (!Array.isArray(this.reportColumns) || this.reportColumns.length === 0) {
+      this.reportColumns = this.getDefaultReportColumns();
+    }
+    return this.reportColumns;
+  },
+
+  toggleReportGridCustomizer() {
+    const panel = document.getElementById("reports-grid-customizer");
+    if (!panel) return;
+    const isHidden = panel.style.display === "none";
+    panel.style.display = isHidden ? "block" : "none";
+    this.renderReportCustomizerControls();
+  },
+
+  toggleReportColumnVisibility(colKey) {
+    const cols = this.ensureReportColumnsInitialized();
+    const target = cols.find(c => c.key === colKey);
+    if (target) {
+      const visibleCount = cols.filter(c => c.visible).length;
+      if (target.visible && visibleCount <= 1) return; // keep at least 1 column visible
+      target.visible = !target.visible;
+    }
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  setAllReportColumnsVisibility(visible) {
+    const cols = this.ensureReportColumnsInitialized();
+    cols.forEach((c, idx) => {
+      c.visible = visible ? true : (idx === 0 || c.key === 'total_tokens' || c.key === 'net_cost_usd');
+    });
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  resetReportColumnsDefault() {
+    this.reportColumns = this.getDefaultReportColumns();
+    this.reportGroupByCols = [];
+    this.reportIncludeGroupTotals = true;
+    const chk = document.getElementById("reports-group-totals-chk");
+    if (chk) chk.checked = true;
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  toggleReportGroupByCol(colKey) {
+    if (!Array.isArray(this.reportGroupByCols)) this.reportGroupByCols = [];
+    const idx = this.reportGroupByCols.indexOf(colKey);
+    if (idx >= 0) {
+      this.reportGroupByCols.splice(idx, 1);
+    } else {
+      this.reportGroupByCols.push(colKey);
+    }
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  clearReportGroupingCols() {
+    this.reportGroupByCols = [];
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  toggleReportGroupTotals(checked) {
+    this.reportIncludeGroupTotals = !!checked;
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  reorderReportColumn(sourceColKey, targetColKey) {
+    if (!sourceColKey || !targetColKey || sourceColKey === targetColKey) return;
+    const cols = this.ensureReportColumnsInitialized();
+    const fromIdx = cols.findIndex(c => c.key === sourceColKey);
+    const toIdx = cols.findIndex(c => c.key === targetColKey);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const [moved] = cols.splice(fromIdx, 1);
+    cols.splice(toIdx, 0, moved);
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  onReportColDragStart(event, colKey) {
+    this._draggedReportColKey = colKey;
+    if (event && event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      try {
+        event.dataTransfer.setData("text/plain", colKey);
+      } catch (_e) {}
+    }
+    if (event && event.currentTarget) {
+      event.currentTarget.style.opacity = "0.55";
+    }
+  },
+
+  onReportColDragOver(event) {
+    if (event) {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      if (event.currentTarget) {
+        event.currentTarget.style.outline = "2px dashed #38bdf8";
+        event.currentTarget.style.outlineOffset = "-2px";
+      }
+    }
+  },
+
+  onReportColDragLeave(event) {
+    if (event && event.currentTarget) {
+      event.currentTarget.style.outline = "";
+      event.currentTarget.style.outlineOffset = "";
+    }
+  },
+
+  onReportColDrop(event, targetColKey) {
+    if (event) {
+      event.preventDefault();
+      if (event.currentTarget) {
+        event.currentTarget.style.outline = "";
+        event.currentTarget.style.outlineOffset = "";
+      }
+    }
+    const sourceKey = this._draggedReportColKey || (event && event.dataTransfer ? event.dataTransfer.getData("text/plain") : null);
+    this._draggedReportColKey = null;
+    if (sourceKey && targetColKey && sourceKey !== targetColKey) {
+      this.reorderReportColumn(sourceKey, targetColKey);
+    }
+  },
+
+  onReportColDragEnd(event) {
+    this._draggedReportColKey = null;
+    if (event && event.currentTarget) {
+      event.currentTarget.style.opacity = "1";
+      event.currentTarget.style.outline = "";
+    }
+  },
+
+  renderReportCustomizerControls() {
+    const cols = this.ensureReportColumnsInitialized();
+    const groupByContainer = document.getElementById("reports-groupby-chips");
+    const seqContainer = document.getElementById("reports-column-sequence-chips");
+    const chkTotals = document.getElementById("reports-group-totals-chk");
+    if (chkTotals) chkTotals.checked = !!this.reportIncludeGroupTotals;
+
+    if (groupByContainer) {
+      const groupableCols = cols.filter(c => c.groupable);
+      groupByContainer.innerHTML = groupableCols.map(c => {
+        const orderIdx = (this.reportGroupByCols || []).indexOf(c.key);
+        const isSelected = orderIdx >= 0;
+        const badge = isSelected ? `<span style="background:#38bdf8; color:#0f172a; border-radius:50%; padding:0 5px; font-size:0.65rem; font-weight:800; margin-right:4px;">${orderIdx + 1}</span>` : '';
+        return `
+          <button type="button"
+                  onclick="App.toggleReportGroupByCol('${c.key}')"
+                  style="padding: 4px 10px; font-size: 0.72rem; border-radius: 999px; cursor: pointer; transition: all 0.15s; border: 1px solid ${isSelected ? '#38bdf8' : 'rgba(255,255,255,0.14)'}; background: ${isSelected ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.65)'}; color: ${isSelected ? '#e0f2fe' : 'var(--text-muted)'}; font-weight: ${isSelected ? '700' : '500'};">
+            ${badge}${this.escapeHtml(c.label)}
+          </button>
+        `;
+      }).join("");
+    }
+
+    if (seqContainer) {
+      seqContainer.innerHTML = cols.map((c, idx) => {
+        return `
+          <div draggable="true"
+               ondragstart="App.onReportColDragStart(event, '${c.key}')"
+               ondragover="App.onReportColDragOver(event)"
+               ondragleave="App.onReportColDragLeave(event)"
+               ondrop="App.onReportColDrop(event, '${c.key}')"
+               ondragend="App.onReportColDragEnd(event)"
+               title="Drag to reorder column position (#${idx + 1})"
+               style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; cursor: grab; user-select: none; border: 1px solid ${c.visible ? 'rgba(56, 189, 248, 0.35)' : 'rgba(255,255,255,0.08)'}; background: ${c.visible ? 'rgba(30, 41, 59, 0.9)' : 'rgba(15, 23, 42, 0.45)'}; color: ${c.visible ? '#f8fafc' : 'var(--text-dim)'}; font-size: 0.73rem;">
+            <span style="color: var(--text-dim); font-size: 0.7rem; cursor: grab;">⠿</span>
+            <input type="checkbox" ${c.visible ? 'checked' : ''} onchange="App.toggleReportColumnVisibility('${c.key}')" style="cursor: pointer; accent-color: #38bdf8;">
+            <span>${this.escapeHtml(c.label)}</span>
+          </div>
+        `;
+      }).join("");
+    }
+  },
+
+  renderReportTableHeaders() {
+    const headRow = document.getElementById("reports-table-head-row");
+    if (!headRow) return;
+    const cols = this.ensureReportColumnsInitialized().filter(c => c.visible);
+    headRow.innerHTML = cols.map(c => {
+      const isSorted = this.reportSortBy === c.key;
+      const sortArrow = isSorted ? (this.reportSortDir === 'asc' ? ' ▲' : ' ▼') : (c.sortable ? ' ⇅' : '');
+      const clickAttr = c.sortable ? `onclick="App.sortReportsTable('${c.key}')"` : '';
+      return `
+        <th draggable="true"
+            ondragstart="App.onReportColDragStart(event, '${c.key}')"
+            ondragover="App.onReportColDragOver(event)"
+            ondragleave="App.onReportColDragLeave(event)"
+            ondrop="App.onReportColDrop(event, '${c.key}')"
+            ondragend="App.onReportColDragEnd(event)"
+            ${clickAttr}
+            title="Drag header left/right to reorder column${c.sortable ? ' • Click to sort' : ''}"
+            style="text-align: ${c.align || 'left'}; cursor: ${c.sortable ? 'pointer' : 'grab'}; user-select: none; white-space: nowrap; position: relative;">
+          <span style="opacity: 0.45; font-size: 0.68rem; margin-right: 3px; cursor: grab;">⠿</span>${this.escapeHtml(c.label)}<span style="font-size: 0.68rem; color: ${isSorted ? '#38bdf8' : 'var(--text-dim)'};">${sortArrow}</span>
+        </th>
+      `;
+    }).join("");
+  },
 
   setReportGrouping(group) {
     this.selectedReportGrouping = group;
-    ['hour', 'day', 'week', 'month'].forEach(g => {
+    ['hour', 'day', 'week', 'month', 'year'].forEach(g => {
       const btn = document.getElementById(`slice-btn-${g}`);
       if (btn) {
         btn.className = (g === group) ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
@@ -2747,47 +3020,78 @@ window.App = {
   },
 
   handleDateRangeChange() {
+    const rangeSelect = document.getElementById("report-date-range-select");
+    const startInput = document.getElementById("report-filter-start-date");
+    const endInput = document.getElementById("report-filter-end-date");
+    if (rangeSelect && rangeSelect.value !== "custom") {
+      if (startInput) startInput.value = "";
+      if (endInput) endInput.value = "";
+    }
     this.loadHistoricalReport();
   },
 
-  async loadHistoricalReport() {
-    const tbody = document.getElementById("reports-table-body");
-    if (!tbody) return;
+  sortReportsTable(columnKey) {
+    if (this.reportSortBy === columnKey) {
+      this.reportSortDir = this.reportSortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+      this.reportSortBy = columnKey;
+      this.reportSortDir = 'desc';
+    }
+    if (Array.isArray(this.lastReportRows) && this.lastReportRows.length > 0) {
+      this.renderHistoricalReportRows(this.lastReportRows);
+    } else {
+      this.loadHistoricalReport();
+    }
+  },
 
+  _collectReportFilterParams() {
     const group = this.selectedReportGrouping || 'day';
     const rangeSelect = document.getElementById("report-date-range-select");
     const rangeVal = rangeSelect ? rangeSelect.value : '7d';
 
-    const provSelect = document.getElementById("report-filter-provider");
-    const prov = provSelect ? provSelect.value : '';
+    const prov = document.getElementById("report-filter-provider")?.value || '';
+    const acct = document.getElementById("report-filter-account")?.value?.trim() || '';
+    const dim = document.getElementById("report-filter-dimension")?.value || '';
+    const sourceVal = document.getElementById("report-filter-source")?.value?.trim() || '';
+    const modelVal = document.getElementById("report-filter-model")?.value?.trim() || '';
+    const instanceVal = document.getElementById("report-filter-instance")?.value?.trim() || '';
+    const clientIpVal = document.getElementById("report-filter-client-ip")?.value?.trim() || '';
+    const team = document.getElementById("report-filter-team")?.value?.trim() || '';
+    const user = document.getElementById("report-filter-user")?.value?.trim() || '';
 
-    const dimSelect = document.getElementById("report-filter-dimension");
-    const dim = dimSelect ? dimSelect.value : '';
+    const customStart = document.getElementById("report-filter-start-date")?.value?.trim() || '';
+    const customEnd = document.getElementById("report-filter-end-date")?.value?.trim() || '';
 
-    const teamInput = document.getElementById("report-filter-team");
-    const team = teamInput ? teamInput.value.trim() : '';
-
-    const userInput = document.getElementById("report-filter-user");
-    const user = userInput ? userInput.value.trim() : '';
-
-    let startDate = null;
-    let endDate = null;
+    let startDate = customStart || null;
+    let endDate = customEnd || null;
     const now = new Date();
-    if (rangeVal === 'today') {
-      startDate = now.toISOString().substring(0, 10);
-    } else if (rangeVal === '7d') {
-      const d7 = new Date(now.getTime() - 7 * 86400000);
-      startDate = d7.toISOString().substring(0, 10);
-    } else if (rangeVal === '30d') {
-      const d30 = new Date(now.getTime() - 30 * 86400000);
-      startDate = d30.toISOString().substring(0, 10);
+    const rangeHoursMap = {
+      '1h': 1,
+      '3h': 3,
+      '6h': 6,
+      '12h': 12,
+      '24h': 24,
+      '48h': 48,
+      '3d': 72,
+      '5d': 120,
+      '7d': 168,
+      '10d': 240,
+      '15d': 360,
+      '30d': 720,
+      '90d': 2160,
+      '3m': 2160,
+      '6m': 4320,
+      '12m': 8760
+    };
+    if (!startDate && rangeVal !== 'custom') {
+      if (rangeVal === 'today') {
+        startDate = now.toISOString().substring(0, 10);
+      } else if (rangeHoursMap[rangeVal]) {
+        const hrs = rangeHoursMap[rangeVal];
+        const cutoff = new Date(now.getTime() - hrs * 3600000);
+        startDate = hrs < 24 ? cutoff.toISOString() : cutoff.toISOString().substring(0, 10);
+      }
     }
-
-    const acctSelect = document.getElementById("report-filter-account");
-    const acct = acctSelect ? acctSelect.value.trim() : '';
-
-    const sourceSelect = document.getElementById("report-filter-source");
-    const sourceVal = sourceSelect ? sourceSelect.value.trim() : '';
 
     const params = new URLSearchParams({ group_by: group });
     if (startDate) params.set("start_date", startDate);
@@ -2796,8 +3100,24 @@ window.App = {
     if (acct) params.set("account_id", acct);
     if (dim) params.set("dimension", dim);
     if (sourceVal) params.set("source", sourceVal);
+    if (modelVal) params.set("model", modelVal);
+    if (instanceVal) params.set("instance_id", instanceVal);
+    if (clientIpVal) params.set("client_ip", clientIpVal);
     if (team) params.set("team_name", team);
     if (user) params.set("user_name", user);
+    if (this.reportSortBy) params.set("sort_by", this.reportSortBy);
+    if (this.reportSortDir) params.set("sort_dir", this.reportSortDir);
+    return params;
+  },
+
+  async loadHistoricalReport() {
+    const tbody = document.getElementById("reports-table-body");
+    if (!tbody) return;
+
+    this.renderReportCustomizerControls();
+    this.renderReportTableHeaders();
+
+    const params = this._collectReportFilterParams();
 
     try {
       const res = await fetch(`/api/reports/history?${params.toString()}`);
@@ -2807,6 +3127,7 @@ window.App = {
       const summary = data.summary || {};
       const totTokEl = document.getElementById("rep-tot-tokens");
       const totCostEl = document.getElementById("rep-tot-cost");
+      const totSavingsEl = document.getElementById("rep-tot-savings");
       const totEvtEl = document.getElementById("rep-tot-events");
       const totDimEl = document.getElementById("rep-tot-records") || document.getElementById("rep-tot-dims");
       const totCacheEl = document.getElementById("rep-tot-cache");
@@ -2818,93 +3139,386 @@ window.App = {
       if (totCacheSubEl) {
         totCacheSubEl.innerText = `Create: ${Number(summary.cache_creation_tokens || 0).toLocaleString()} | Read: ${Number(summary.cache_read_tokens || 0).toLocaleString()}`;
       }
-      if (totCostEl) totCostEl.innerText = `$${Number(summary.total_estimated_cost || 0).toFixed(4)}`;
+      if (totCostEl) {
+        totCostEl.innerText = `$${Number(summary.total_estimated_cost || 0).toFixed(4)}`;
+      }
+      if (totSavingsEl) {
+        const totSav = Math.abs(Number(summary.total_estimated_savings_usd || 0));
+        totSavingsEl.innerText = `(-$${totSav.toFixed(4)})`;
+      }
       if (totEvtEl) totEvtEl.innerText = Number(summary.total_events || 0).toLocaleString();
       if (totDimEl) totDimEl.innerText = `${Number(summary.distinct_dimensions || (data.rows ? data.rows.length : 0))} slices`;
 
+      this.lastReportRows = data.rows || [];
+      this.renderHistoricalReportRows(this.lastReportRows);
+      this.loadPivotMatrix();
+    } catch (e) {
+      console.error("Error loading historical report:", e);
+    }
+  },
+
+  _isLocalModelReportRow(row) {
+    if (!row) return false;
+    if (row.is_local_model === true) return true;
+    const prov = String(row.provider || '').toLowerCase();
+    const src = String(row.source || '').toLowerCase();
+    return prov === 'ollama' || prov === 'local' || src.includes('ollama');
+  },
+
+  formatReportEstCostCell(row, isSubtotal = false) {
+    const isLocal = this._isLocalModelReportRow(row);
+    const netVal = row.net_cost_usd !== undefined ? Number(row.net_cost_usd) : (isLocal ? -Math.abs(Number(row.estimated_savings_usd || ((row.total_tokens || 0) / 1000000.0) * 6.0)) : Number(row.estimated_cost || 0));
+    if (isLocal || netVal < 0) {
+      const absSavings = Math.abs(netVal || Number(row.estimated_savings_usd || 0));
+      return `<span title="Local Model Estimated Cloud Savings (at $6.00/1M frontier benchmark)" style="color: #c084fc; background: rgba(192, 132, 252, 0.14); border: 1px solid rgba(192, 132, 252, 0.35); padding: 2px 6px; border-radius: 4px; font-weight: 700; font-family: var(--font-mono); white-space: nowrap;">(-$${absSavings.toFixed(4)})</span>`;
+    }
+    const cloudCost = Number(row.estimated_cost !== undefined ? row.estimated_cost : netVal);
+    if (isSubtotal && Number(row.estimated_savings_usd || 0) > 0) {
+      return `
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+          <span style="color: #34d399; font-weight: 700; font-family: var(--font-mono);">$${cloudCost.toFixed(4)}</span>
+          <span style="color: #c084fc; font-size: 0.68rem; font-family: var(--font-mono);" title="Includes Local Model Savings">(-$${Number(row.estimated_savings_usd).toFixed(4)} saved)</span>
+        </div>
+      `;
+    }
+    return `<span style="color: #34d399; font-weight: 700; font-family: var(--font-mono);">$${cloudCost.toFixed(4)}</span>`;
+  },
+
+  _renderSingleReportCell(col, r, maxTokens, isSubtotal = false) {
+    const key = col.key;
+    const isLocal = this._isLocalModelReportRow(r);
+    if (key === 'period') {
+      return `<td style="font-family: var(--font-mono); font-weight: 600; color: #fff; white-space: nowrap;">${this.escapeHtml(r.period || '—')}</td>`;
+    }
+    if (key === 'provider') {
+      const pName = String(r.provider || '—').toUpperCase();
+      const badgeColor = isLocal ? '#c084fc' : '#38bdf8';
+      return `<td><span style="font-weight: 700; font-size: 0.75rem; color: ${badgeColor};">${this.escapeHtml(pName)}</span></td>`;
+    }
+    if (key === 'account_id') {
+      return `<td style="font-size: 0.78rem; color: #e2e8f0;">${this.escapeHtml(r.account_id || 'default')}</td>`;
+    }
+    if (key === 'group_key') {
+      return `<td><strong style="color: #60a5fa; font-size: 0.8rem;">${this.escapeHtml(r.group_key || r.provider || 'All')}</strong></td>`;
+    }
+    if (key === 'source') {
+      return `<td><span style="font-size: 0.72rem; color: #94a3b8; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono);">${this.escapeHtml(r.source || 'direct')}</span></td>`;
+    }
+    if (key === 'model') {
+      return `<td style="font-family: var(--font-mono); font-size: 0.76rem; color: #f1f5f9;">${this.escapeHtml(r.model || 'default')}</td>`;
+    }
+    if (key === 'locality_label') {
+      const loc = r.locality || (isLocal ? 'local' : 'cloud');
+      const locLbl = r.locality_label || (loc === 'remote_lan' ? 'Remote LAN Node' : (loc === 'local' ? 'Local Node (This PC)' : 'Cloud API'));
+      const locColor = loc === 'remote_lan' ? '#22d3ee' : (loc === 'local' ? '#c084fc' : '#94a3b8');
+      return `<td><span style="font-size: 0.72rem; color: ${locColor}; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 600;">${this.escapeHtml(locLbl)}</span></td>`;
+    }
+    if (key === 'account_tier_label') {
+      const tier = r.account_tier || '';
+      const tierLbl = r.account_tier_label || r.team_name || 'Standard';
+      const tierColor = tier === 'personal_pro' ? '#fbbf24' : (tier === 'team_org' ? '#f43f5e' : '#a78bfa');
+      return `<td><span style="font-size: 0.72rem; color: ${tierColor}; font-weight: 600;">${this.escapeHtml(tierLbl)}</span></td>`;
+    }
+    if (key === 'compute_node') {
+      return `<td style="font-family: var(--font-mono); font-size: 0.74rem; color: #cbd5e1;">${this.escapeHtml(r.compute_node || r.instance_id || 'local')}</td>`;
+    }
+    if (key === 'instance_id') {
+      return `<td style="font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted);">${this.escapeHtml(r.instance_id || 'local')}</td>`;
+    }
+    if (key === 'client_ip') {
+      const label = r.client_alias && r.client_alias !== r.client_ip
+        ? `${r.client_alias} (${r.client_ip || '127.0.0.1'})`
+        : (r.client_ip || r.client_alias || '127.0.0.1');
+      return `<td style="font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted);">${this.escapeHtml(label)}</td>`;
+    }
+    if (key === 'team_name') {
+      return `<td style="font-size: 0.76rem; color: var(--text-muted);">${this.escapeHtml(r.team_name || 'default')}</td>`;
+    }
+    if (key === 'user_name') {
+      return `<td style="font-size: 0.76rem; color: var(--text-muted);">${this.escapeHtml(r.user_name || 'local-user')}</td>`;
+    }
+    if (key === 'project_id') {
+      return `<td style="font-size: 0.75rem; color: var(--text-dim);">${this.escapeHtml(r.project_id || 'default')}</td>`;
+    }
+    if (key === 'event_count') {
+      return `<td style="font-family: var(--font-mono); color: var(--text-muted); text-align: right;">${Number(r.event_count || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'input_tokens') {
+      return `<td style="font-family: var(--font-mono); text-align: right;">${Number(r.input_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'output_tokens') {
+      return `<td style="font-family: var(--font-mono); text-align: right;">${Number(r.output_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'cache_creation_tokens') {
+      return `<td style="font-family: var(--font-mono); text-align: right; color: #c084fc;">${Number(r.cache_creation_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'cache_read_tokens') {
+      return `<td style="font-family: var(--font-mono); text-align: right; color: #a78bfa;">${Number(r.cache_read_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'total_tokens') {
+      return `<td style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8; text-align: right;">${Number(r.total_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'net_cost_usd') {
+      return `<td style="text-align: right;">${this.formatReportEstCostCell(r, isSubtotal)}</td>`;
+    }
+    if (key === 'cost_per_1k') {
+      const totTok = Number(r.total_tokens || 0);
+      const netVal = r.net_cost_usd !== undefined ? Number(r.net_cost_usd) : Number(r.estimated_cost || 0);
+      if (totTok <= 0) {
+        return `<td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem; text-align: right;">$0.0000</td>`;
+      }
+      if (isLocal || netVal < 0) {
+        const savPer1k = ((Math.abs(netVal || Number(r.estimated_savings_usd || 0)) / totTok) * 1000).toFixed(4);
+        return `<td style="font-family: var(--font-mono); color: #c084fc; font-size: 0.75rem; text-align: right;">(-$${savPer1k})</td>`;
+      }
+      const c1k = ((Number(r.estimated_cost || 0) / totTok) * 1000).toFixed(4);
+      return `<td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem; text-align: right;">$${c1k}</td>`;
+    }
+    if (key === 'share') {
+      const pct = Math.min(100, Math.max(3, Math.round(((r.total_tokens || 0) / Math.max(1, maxTokens)) * 100)));
+      return `
+        <td style="text-align: center;">
+          <div style="background: rgba(255,255,255,0.05); border-radius: 4px; height: 10px; width: 80px; margin: 0 auto; overflow: hidden;">
+            <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, ${isLocal ? '#a855f7, #ec4899' : '#3b82f6, #06b6d4'}); border-radius: 4px;"></div>
+          </div>
+        </td>
+      `;
+    }
+    return `<td>${this.escapeHtml(String(r[key] ?? '—'))}</td>`;
+  },
+
+  _aggregateReportGroup(groupRows, groupDescriptor) {
+    const agg = {
+      period: `Σ Group Total (${groupRows.length})`,
+      provider: groupDescriptor.provider || '—',
+      account_id: groupDescriptor.account_id || '—',
+      group_key: groupDescriptor.label || 'Group Subtotal',
+      source: groupDescriptor.source || '—',
+      model: groupDescriptor.model || '—',
+      locality_label: groupDescriptor.locality_label || '—',
+      account_tier_label: groupDescriptor.account_tier_label || '—',
+      compute_node: groupDescriptor.compute_node || '—',
+      instance_id: groupDescriptor.instance_id || '—',
+      client_ip: groupDescriptor.client_ip || '—',
+      team_name: groupDescriptor.team_name || '—',
+      user_name: groupDescriptor.user_name || '—',
+      project_id: groupDescriptor.project_id || '—',
+      event_count: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+      total_tokens: 0,
+      estimated_cost: 0,
+      estimated_savings_usd: 0,
+      net_cost_usd: 0,
+      is_local_model: groupRows.length > 0 && groupRows.every(r => this._isLocalModelReportRow(r))
+    };
+    groupRows.forEach(r => {
+      agg.event_count += Number(r.event_count || 0);
+      agg.input_tokens += Number(r.input_tokens || 0);
+      agg.output_tokens += Number(r.output_tokens || 0);
+      agg.cache_creation_tokens += Number(r.cache_creation_tokens || 0);
+      agg.cache_read_tokens += Number(r.cache_read_tokens || 0);
+      agg.total_tokens += Number(r.total_tokens || 0);
+      agg.estimated_cost += Number(r.estimated_cost || 0);
+      const isLoc = this._isLocalModelReportRow(r);
+      const sav = Number(r.estimated_savings_usd || (isLoc ? ((r.total_tokens || 0) / 1000000.0) * 6.0 : 0));
+      agg.estimated_savings_usd += sav;
+      const net = r.net_cost_usd !== undefined ? Number(r.net_cost_usd) : (isLoc ? -sav : Number(r.estimated_cost || 0));
+      agg.net_cost_usd += net;
+    });
+    return agg;
+  },
+
+  renderHistoricalReportRows(rows) {
+    const tbody = document.getElementById("reports-table-body");
+    if (!tbody) return;
+
+    this.renderReportTableHeaders();
+    const visibleCols = this.ensureReportColumnsInitialized().filter(c => c.visible);
+    const colSpan = Math.max(1, visibleCols.length);
+
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="${colSpan}" style="text-align: center; color: var(--text-dim); padding: 24px;">
+            No usage activity found for the selected time slice and filters.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const sorted = [...rows];
+    const key = this.reportSortBy || 'period';
+    const dir = this.reportSortDir === 'asc' ? 1 : -1;
+    sorted.sort((a, b) => {
+      const va = a[key] ?? '';
+      const vb = b[key] ?? '';
+      if (typeof va === 'number' && typeof vb === 'number') {
+        return (va - vb) * dir;
+      }
+      return String(va).localeCompare(String(vb)) * dir;
+    });
+
+    const maxTokens = Math.max(...sorted.map(r => r.total_tokens || 0), 1);
+    const groupCols = Array.isArray(this.reportGroupByCols) ? this.reportGroupByCols : [];
+    const htmlRows = [];
+
+    if (groupCols.length > 0) {
+      const groupsMap = new Map();
+      sorted.forEach(r => {
+        const keyParts = groupCols.map(gk => `${gk}:${r[gk] ?? 'default'}`);
+        const compositeKey = keyParts.join('||');
+        if (!groupsMap.has(compositeKey)) {
+          const descriptor = {};
+          const labelParts = [];
+          const allCols = this.ensureReportColumnsInitialized();
+          groupCols.forEach(gk => {
+            const val = r[gk] || 'default';
+            descriptor[gk] = val;
+            const colMeta = allCols.find(c => c.key === gk);
+            labelParts.push(`${colMeta ? colMeta.label : gk}: ${val}`);
+          });
+          descriptor.label = labelParts.join(' • ');
+          groupsMap.set(compositeKey, { descriptor, items: [] });
+        }
+        groupsMap.get(compositeKey).items.push(r);
+      });
+
+      groupsMap.forEach(groupEntry => {
+        const { descriptor, items } = groupEntry;
+        // Group Header Banner Row
+        htmlRows.push(`
+          <tr class="report-group-header-row" style="background: rgba(56, 189, 248, 0.08); border-top: 1px solid rgba(56, 189, 248, 0.25);">
+            <td colspan="${colSpan}" style="padding: 7px 12px; font-size: 0.76rem; font-weight: 700; color: #38bdf8;">
+              📂 Group: ${this.escapeHtml(descriptor.label)} <span style="color: var(--text-dim); font-weight: 500; margin-left: 6px;">(${items.length} line item${items.length === 1 ? '' : 's'})</span>
+            </td>
+          </tr>
+        `);
+
+        // Individual Line Items in Group
+        items.forEach(r => {
+          const cells = visibleCols.map(c => this._renderSingleReportCell(c, r, maxTokens, false)).join("");
+          htmlRows.push(`<tr>${cells}</tr>`);
+        });
+
+        // Group Aggregate Subtotal Line-Item at End of Group
+        if (this.reportIncludeGroupTotals) {
+          const subtotalRow = this._aggregateReportGroup(items, descriptor);
+          const subtotalCells = visibleCols.map((c, idx) => {
+            if (idx === 0) {
+              return `<td style="font-family: var(--font-mono); font-weight: 800; color: #38bdf8; white-space: nowrap;">Σ Subtotal (${this.escapeHtml(descriptor.label)})</td>`;
+            }
+            if (!c.numeric && c.key !== 'share' && !groupCols.includes(c.key)) {
+              return `<td style="color: var(--text-dim); font-size: 0.72rem; font-style: italic;">(${items.length} items)</td>`;
+            }
+            return this._renderSingleReportCell(c, subtotalRow, maxTokens, true);
+          }).join("");
+          htmlRows.push(`
+            <tr class="report-group-subtotal-row" style="background: rgba(15, 23, 42, 0.92); border-top: 1px dashed rgba(56, 189, 248, 0.45); border-bottom: 2px solid rgba(56, 189, 248, 0.3); font-weight: 700;">
+              ${subtotalCells}
+            </tr>
+          `);
+        }
+      });
+    } else {
+      sorted.forEach(r => {
+        const cells = visibleCols.map(c => this._renderSingleReportCell(c, r, maxTokens, false)).join("");
+        htmlRows.push(`<tr>${cells}</tr>`);
+      });
+    }
+
+    // Grand Total Footer Line-Item
+    if (sorted.length > 1) {
+      const grandTotal = this._aggregateReportGroup(sorted, { label: 'Grand Total' });
+      const grandTotalCells = visibleCols.map((c, idx) => {
+        if (idx === 0) {
+          return `<td style="font-family: var(--font-mono); font-weight: 800; color: #f8fafc; white-space: nowrap;">∑ GRAND TOTAL (${sorted.length} rows)</td>`;
+        }
+        if (!c.numeric && c.key !== 'share') {
+          return `<td style="color: var(--text-dim); font-size: 0.72rem;">All Filtered</td>`;
+        }
+        return this._renderSingleReportCell(c, grandTotal, Math.max(grandTotal.total_tokens, 1), true);
+      }).join("");
+      htmlRows.push(`
+        <tr class="report-grand-total-row" style="background: rgba(30, 41, 59, 0.95); border-top: 2px solid rgba(255, 255, 255, 0.25); font-weight: 800;">
+          ${grandTotalCells}
+        </tr>
+      `);
+    }
+
+    tbody.innerHTML = htmlRows.join("");
+  },
+
+  async loadPivotMatrix() {
+    const tbody = document.getElementById("pivot-matrix-table-body");
+    if (!tbody) return;
+
+    const dims = document.getElementById("pivot-dimensions-select")?.value || "platform,model,source";
+    const win = document.getElementById("pivot-window-select")?.value || "24h";
+    const prov = document.getElementById("report-filter-provider")?.value || "";
+    const src = document.getElementById("report-filter-source")?.value || "";
+    const mdl = document.getElementById("report-filter-model")?.value?.trim() || "";
+    const inst = document.getElementById("report-filter-instance")?.value?.trim() || "";
+    const cip = document.getElementById("report-filter-client-ip")?.value?.trim() || "";
+
+    const params = new URLSearchParams({ dimensions: dims, window: win });
+    if (prov) params.set("filter_platform", prov);
+    if (src) params.set("filter_source", src);
+    if (mdl) params.set("filter_model", mdl);
+    if (inst) params.set("filter_instance", inst);
+    if (cip) params.set("filter_client", cip);
+
+    try {
+      const res = await fetch(`/api/usage/pivot?${params.toString()}`);
+      if (!res.ok) return;
+      const data = await res.json();
       const rows = data.rows || [];
-      if (rows.length === 0) {
+      if (!rows.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 24px;">
-              No usage activity found for the selected time slice and filters.
+            <td colspan="7" style="text-align: center; color: var(--text-dim); padding: 18px;">
+              No pivot telemetry recorded for the selected window.
             </td>
           </tr>
         `;
         return;
       }
 
-      const maxTokens = Math.max(...rows.map(r => r.total_tokens || 0), 1);
-
       tbody.innerHTML = rows.map(r => {
-        const pct = Math.min(100, Math.max(3, Math.round((r.total_tokens / maxTokens) * 100)));
-        const costPer1k = r.total_tokens > 0 ? ((r.estimated_cost / r.total_tokens) * 1000).toFixed(4) : "0.0000";
+        const keyParts = [];
+        if (r.group) keyParts.push(`🏷️ ${r.group}`);
+        if (r.provider) keyParts.push(r.provider.toUpperCase());
+        if (r.account_id) keyParts.push(r.account_id);
+        if (r.client_alias || r.client_ip) keyParts.push(`${r.client_alias || r.client_ip}`);
+        if (r.instance_id) keyParts.push(`Node: ${r.instance_id}`);
+        if (r.project_id) keyParts.push(`Proj: ${r.project_id}`);
+        if (r.model) keyParts.push(r.model);
+        if (r.source) keyParts.push(`[${r.source}]`);
+        const compositeLabel = keyParts.join("  •  ") || "All";
+
         return `
           <tr>
-            <td style="font-family: var(--font-mono); font-weight: 600; color: #fff;">${this.escapeHtml(r.period)}</td>
-            <td><strong style="color: #60a5fa; font-size: 0.8rem;">${this.escapeHtml(r.group_key || r.provider || 'All')}</strong></td>
-            <td style="font-family: var(--font-mono); color: var(--text-muted); text-align: right;">${Number(r.event_count || 0).toLocaleString()}</td>
+            <td style="font-weight: 600; color: #e2e8f0; font-size: 0.8rem;">${this.escapeHtml(compositeLabel)}</td>
+            <td style="font-family: var(--font-mono); text-align: right; color: var(--text-muted);">${Number(r.request_count || 0).toLocaleString()}</td>
             <td style="font-family: var(--font-mono); text-align: right;">${Number(r.input_tokens || 0).toLocaleString()}</td>
             <td style="font-family: var(--font-mono); text-align: right;">${Number(r.output_tokens || 0).toLocaleString()}</td>
-            <td style="font-family: var(--font-mono); text-align: right; color: #c084fc;">${Number(r.cache_creation_tokens || 0).toLocaleString()}</td>
-            <td style="font-family: var(--font-mono); text-align: right; color: #a78bfa;">${Number(r.cache_read_tokens || 0).toLocaleString()}</td>
             <td style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8; text-align: right;">${Number(r.total_tokens || 0).toLocaleString()}</td>
             <td style="font-family: var(--font-mono); font-weight: 700; color: #34d399; text-align: right;">$${Number(r.estimated_cost || 0).toFixed(4)}</td>
-            <td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem; text-align: right;">$${costPer1k}</td>
-            <td style="text-align: center;">
-              <div style="background: rgba(255,255,255,0.05); border-radius: 4px; height: 10px; width: 80px; margin: 0 auto; overflow: hidden;">
-                <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, #3b82f6, #06b6d4); border-radius: 4px;"></div>
-              </div>
-            </td>
+            <td style="font-family: var(--font-mono); text-align: right; color: #c084fc;">${Number(r.percentage_share || 0).toFixed(1)}%</td>
           </tr>
         `;
       }).join("");
-
     } catch (e) {
-      console.error("Error loading historical report:", e);
+      console.warn("Error loading pivot matrix:", e);
     }
   },
 
   exportReportsCsv() {
-    const group = this.selectedReportGrouping || 'day';
-    const rangeSelect = document.getElementById("report-date-range-select");
-    const rangeVal = rangeSelect ? rangeSelect.value : '7d';
-
-    const provSelect = document.getElementById("report-filter-provider");
-    const prov = provSelect ? provSelect.value : '';
-
-    const dimSelect = document.getElementById("report-filter-dimension");
-    const dim = dimSelect ? dimSelect.value : '';
-
-    const teamInput = document.getElementById("report-filter-team");
-    const team = teamInput ? teamInput.value.trim() : '';
-
-    const userInput = document.getElementById("report-filter-user");
-    const user = userInput ? userInput.value.trim() : '';
-
-    let startDate = '';
-    const now = new Date();
-    if (rangeVal === 'today') {
-      startDate = now.toISOString().substring(0, 10);
-    } else if (rangeVal === '7d') {
-      const d7 = new Date(now.getTime() - 7 * 86400000);
-      startDate = d7.toISOString().substring(0, 10);
-    } else if (rangeVal === '30d') {
-      const d30 = new Date(now.getTime() - 30 * 86400000);
-      startDate = d30.toISOString().substring(0, 10);
-    }
-
-    const acctSelect = document.getElementById("report-filter-account");
-    const acct = acctSelect ? acctSelect.value.trim() : '';
-
-    const params = new URLSearchParams({ group_by: group, format: 'csv' });
-    if (startDate) params.set("start_date", startDate);
-    if (prov) params.set("provider", prov);
-    if (acct) params.set("account_id", acct);
-    if (dim) params.set("dimension", dim);
-    if (team) params.set("team_name", team);
-    if (user) params.set("user_name", user);
-
+    const params = this._collectReportFilterParams();
+    params.set("format", "csv");
     window.location.href = `/api/reports/history?${params.toString()}`;
   },
 
@@ -2947,12 +3561,20 @@ window.App = {
 
   switchDashboardViewMode(mode) {
     this.dashboardViewMode = mode;
+    this._lastLocalWindowUpdateTs = Date.now();
     const btnBal = document.getElementById("view-mode-btn-balances");
     const btnTrd = document.getElementById("view-mode-btn-trends");
     const trendWinCtrl = document.getElementById("trend-window-control");
+    const viewModeSelect = document.getElementById("cfg-default-view-mode");
     if (btnBal) btnBal.className = mode === 'balances' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
     if (btnTrd) btnTrd.className = mode === 'trends' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
     if (trendWinCtrl) trendWinCtrl.style.display = mode === 'trends' ? 'flex' : 'none';
+    if (viewModeSelect) viewModeSelect.value = mode;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { widget_view_mode: mode } })
+    }).catch(() => {});
     if (this.lastCompData && window._lastProviders) {
       this.renderComparison(this.lastCompData, window._lastProviders);
     }
@@ -2985,6 +3607,7 @@ window.App = {
       const topRefreshCadence = document.getElementById("ui-refresh-cadence-select");
       const ollamaSync = document.getElementById("cfg-ollama-sync");
       const viewModeSelect = document.getElementById("cfg-default-view-mode");
+      const defTrendWinSelect = document.getElementById("cfg-default-trend-window");
 
       if (autoResize && st.widget_auto_resize !== undefined) autoResize.checked = !!st.widget_auto_resize;
       if (fadeUnpinned && st.widget_fade_unpinned !== undefined) fadeUnpinned.checked = !!st.widget_fade_unpinned;
@@ -3004,6 +3627,16 @@ window.App = {
       }
       if (ollamaSync && st.ollama_sync_interval) ollamaSync.value = st.ollama_sync_interval;
       if (viewModeSelect && st.widget_view_mode) viewModeSelect.value = st.widget_view_mode;
+      const syncedWin = st.active_trend_window || st.default_trend_window;
+      if (syncedWin) {
+        this.chartWindow = syncedWin;
+        this.trendWindow = syncedWin;
+        if (defTrendWinSelect) defTrendWinSelect.value = syncedWin;
+        const cWinSel = document.getElementById("chart-window-select");
+        const tWinSel = document.getElementById("trend-window-select");
+        if (cWinSel) cWinSel.value = syncedWin;
+        if (tWinSel) tWinSel.value = syncedWin;
+      }
 
       const fontRadios = document.querySelectorAll("input[name='cfg-font-scale']");
       if (st.widget_font_size && fontRadios.length) {
@@ -3055,8 +3688,167 @@ window.App = {
       if (bridgeOllamaUrl) bridgeOllamaUrl.innerText = `http://127.0.0.1:${ollamaPort}`;
       if (bridgeOpenAiUrl) bridgeOpenAiUrl.innerText = `http://127.0.0.1:${ollamaPort}/v1`;
       if (bridgeProxyUrl) bridgeProxyUrl.innerText = `http://127.0.0.1:${proxyPort}`;
+
+      // Load Windows Auto-Start & Background Service status (AIUM-901)
+      this.loadWindowsServiceStatus(false);
     } catch (e) {
       console.warn("Error loading settings:", e);
+    }
+  },
+
+  async loadWindowsServiceStatus(includeLogs = false) {
+    try {
+      const res = await fetch(`/api/system/startup?logs=${includeLogs ? "true" : "false"}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      this.renderWindowsServiceStatus(data);
+    } catch (e) {
+      console.warn("Error loading Windows service status:", e);
+    }
+  },
+
+  renderWindowsServiceStatus(data) {
+    if (!data) return;
+    const startup = data.startup || data;
+    const enabledChk = document.getElementById("cfg-win-autostart-enabled");
+    const widgetChk = document.getElementById("cfg-win-autostart-widget");
+    const watchdogChk = document.getElementById("cfg-win-autostart-watchdog");
+    const methodSel = document.getElementById("cfg-win-autostart-method");
+
+    if (enabledChk) enabledChk.checked = !!startup.enabled;
+    if (widgetChk) widgetChk.checked = !!startup.launch_widget;
+    if (watchdogChk && startup.auto_restart_on_crash !== undefined) {
+      watchdogChk.checked = !!startup.auto_restart_on_crash;
+    }
+    if (methodSel && startup.preferred_method) {
+      methodSel.value = startup.preferred_method;
+    }
+
+    const startupBadge = document.getElementById("win-startup-badge");
+    if (startupBadge) {
+      if (startup.enabled) {
+        const methodLabel = startup.method === "task_scheduler" ? "Task Scheduler" : (startup.method === "both" ? "Dual" : "Registry Run");
+        startupBadge.innerText = `🟢 Auto-Start Active (${methodLabel})`;
+        startupBadge.style.background = "rgba(16, 185, 129, 0.15)";
+        startupBadge.style.color = "#34d399";
+        startupBadge.style.borderColor = "rgba(16, 185, 129, 0.35)";
+      } else {
+        startupBadge.innerText = "⚪ Auto-Start Disabled";
+        startupBadge.style.background = "rgba(148, 163, 184, 0.15)";
+        startupBadge.style.color = "#94a3b8";
+        startupBadge.style.borderColor = "rgba(148, 163, 184, 0.25)";
+      }
+    }
+
+    const runningBadge = document.getElementById("win-service-running-badge");
+    if (runningBadge) {
+      if (data.running) {
+        const modeTxt = data.mode === "daemon" ? "Daemon" : "Active";
+        runningBadge.innerText = `⚡ ${modeTxt} (PID ${data.pid || "--"})`;
+        runningBadge.style.background = "rgba(56, 189, 248, 0.15)";
+        runningBadge.style.color = "#38bdf8";
+      } else {
+        runningBadge.innerText = "⏹ Stopped";
+        runningBadge.style.background = "rgba(239, 68, 68, 0.15)";
+        runningBadge.style.color = "#f87171";
+      }
+    }
+
+    const pidEl = document.getElementById("win-svc-pid");
+    if (pidEl) pidEl.innerText = data.pid ? `${data.pid}` : "--";
+
+    const uptimeEl = document.getElementById("win-svc-uptime");
+    if (uptimeEl) {
+      const sec = parseInt(data.uptime_seconds || 0, 10);
+      if (sec > 3600) {
+        uptimeEl.innerText = `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+      } else if (sec > 60) {
+        uptimeEl.innerText = `${Math.floor(sec / 60)}m ${sec % 60}s`;
+      } else {
+        uptimeEl.innerText = `${sec}s`;
+      }
+    }
+
+    const logSizeEl = document.getElementById("win-svc-log-size");
+    if (logSizeEl) {
+      const kb = ((data.log_size_bytes || 0) / 1024).toFixed(1);
+      logSizeEl.innerText = `${kb} KB`;
+    }
+
+    const cmdEl = document.getElementById("win-svc-cmd");
+    if (cmdEl && startup.command) {
+      cmdEl.innerText = startup.command;
+    }
+
+    const logOut = document.getElementById("win-service-log-output");
+    if (logOut && Array.isArray(data.recent_logs)) {
+      logOut.innerText = data.recent_logs.length ? data.recent_logs.join("\n") : "No daemon log entries recorded yet.";
+    }
+  },
+
+  async applyWindowsStartupConfig() {
+    const enabledChk = document.getElementById("cfg-win-autostart-enabled");
+    const widgetChk = document.getElementById("cfg-win-autostart-widget");
+    const watchdogChk = document.getElementById("cfg-win-autostart-watchdog");
+    const methodSel = document.getElementById("cfg-win-autostart-method");
+
+    const payload = {
+      enabled: enabledChk ? enabledChk.checked : false,
+      launch_widget: widgetChk ? widgetChk.checked : false,
+      auto_restart_on_crash: watchdogChk ? watchdogChk.checked : true,
+      method: methodSel ? methodSel.value : "registry"
+    };
+
+    try {
+      const res = await fetch("/api/system/startup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        await this.loadWindowsServiceStatus(false);
+        if (typeof this.showToast === "function") {
+          this.showToast(payload.enabled ? "Windows Auto-Start enabled." : "Windows Auto-Start disabled.", "success");
+        }
+      }
+    } catch (e) {
+      console.warn("Failed applying Windows startup config:", e);
+    }
+  },
+
+  async controlWindowsService(action) {
+    try {
+      const widgetChk = document.getElementById("cfg-win-autostart-widget");
+      const res = await fetch("/api/system/service", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: action,
+          deferred: true,
+          launch_widget: widgetChk ? widgetChk.checked : false
+        })
+      });
+      if (res.ok) {
+        if (action === "clear_logs") {
+          await this.loadWindowsServiceStatus(true);
+        } else if (action === "restart") {
+          setTimeout(() => this.loadWindowsServiceStatus(true), 2200);
+        } else {
+          await this.loadWindowsServiceStatus(true);
+        }
+      }
+    } catch (e) {
+      console.warn("Error controlling Windows service:", e);
+    }
+  },
+
+  toggleServiceLogViewer() {
+    const panel = document.getElementById("win-service-log-panel");
+    if (!panel) return;
+    const isHidden = panel.style.display === "none";
+    panel.style.display = isHidden ? "block" : "none";
+    if (isHidden) {
+      this.loadWindowsServiceStatus(true);
     }
   },
 
@@ -3070,6 +3862,7 @@ window.App = {
     const refreshCadence = document.getElementById("cfg-ui-refresh-cadence");
     const ollamaSync = document.getElementById("cfg-ollama-sync");
     const viewModeSelect = document.getElementById("cfg-default-view-mode");
+    const defTrendWinSelect = document.getElementById("cfg-default-trend-window");
 
     const checkedFont = document.querySelector("input[name='cfg-font-scale']:checked");
     const pinned = [];
@@ -3102,6 +3895,8 @@ window.App = {
       ui_refresh_interval_seconds: refreshCadence ? Math.max(30, Math.min(300, parseInt(refreshCadence.value, 10) || 30)) : 30,
       ollama_sync_interval: ollamaSync ? parseInt(ollamaSync.value, 10) || 15 : 15,
       widget_view_mode: viewModeSelect ? viewModeSelect.value : "balances",
+      default_trend_window: defTrendWinSelect ? defTrendWinSelect.value : (this.chartWindow || "24h"),
+      active_trend_window: defTrendWinSelect ? defTrendWinSelect.value : (this.chartWindow || "24h"),
       pinned_items: pinned,
       quota_tracking_mode: quotaTrackingMode,
       ollama_emulator_port: parseInt(ollamaPortInput ? ollamaPortInput.value : "8989", 10) || 8989,

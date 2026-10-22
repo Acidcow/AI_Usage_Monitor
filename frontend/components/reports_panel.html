@@ -4,13 +4,16 @@
     <div>
       <div style="display: flex; align-items: center; gap: 8px;">
         <span style="font-size: 1.3rem;">📊</span>
-        <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff;">Historical Usage Reports & Cost Attribution</h3>
+        <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff;">Historical Usage Reports &amp; Cost Attribution</h3>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
-        Slice, group, and audit AI consumption and financial charges across hours, days, weeks, months, accounts, teams, users, and models.
+        Slice, group, sort, reorder columns via drag-and-drop, and audit AI consumption, cloud charges, and local model savings across all operational dimensions.
       </p>
     </div>
     <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <button class="btn btn-secondary btn-sm" onclick="window.App.toggleReportGridCustomizer()" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" title="Show/Hide Columns, Configure Grouping &amp; Reorder Column Sequence">
+        🎛️ Columns, Grouping &amp; Sequence
+      </button>
       <button class="btn btn-secondary btn-sm" onclick="window.App.exportReportsCsv()" style="border-color: rgba(16, 185, 129, 0.4); color: #34d399;" title="Download filtered report as RFC-4180 CSV">
         📥 Export CSV Report
       </button>
@@ -21,32 +24,50 @@
   </div>
 
   <!-- Slicing & Filter Strip -->
-  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(0,0,0,0.3); padding: 14px 16px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); margin-bottom: 20px;">
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(0,0,0,0.3); padding: 14px 16px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); margin-bottom: 16px;">
     <!-- Row 1: Time Slicing & Date Range -->
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-      <div style="display: flex; align-items: center; gap: 8px;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
         <span style="font-size: 0.74rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Time Slice:</span>
-        <div class="scope-switcher" style="display: flex; gap: 6px;">
+        <div class="scope-switcher" style="display: flex; gap: 6px; flex-wrap: wrap;">
           <button id="slice-btn-hour" class="btn btn-sm btn-secondary" onclick="window.App.setReportGrouping('hour')" style="font-size: 0.72rem;">⏱️ Hourly</button>
           <button id="slice-btn-day" class="btn btn-sm btn-primary" onclick="window.App.setReportGrouping('day')" style="font-size: 0.72rem;">📅 Daily</button>
           <button id="slice-btn-week" class="btn btn-sm btn-secondary" onclick="window.App.setReportGrouping('week')" style="font-size: 0.72rem;">📆 Weekly</button>
           <button id="slice-btn-month" class="btn btn-sm btn-secondary" onclick="window.App.setReportGrouping('month')" style="font-size: 0.72rem;">📊 Monthly</button>
+          <button id="slice-btn-year" class="btn btn-sm btn-secondary" onclick="window.App.setReportGrouping('year')" style="font-size: 0.72rem;">🗓️ Yearly</button>
         </div>
       </div>
 
-      <div style="display: flex; align-items: center; gap: 8px;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
         <span style="font-size: 0.74rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Range:</span>
         <select id="report-date-range-select" onchange="window.App.handleDateRangeChange()" style="background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 10px; border-radius: 6px; font-size: 0.78rem;">
+          <option value="1h">Last 1hr</option>
+          <option value="3h">Last 3hrs</option>
+          <option value="6h">Last 6hrs</option>
+          <option value="12h">Last 12hrs</option>
+          <option value="24h">Last 24hrs</option>
+          <option value="48h">Last 48hrs</option>
           <option value="today">Today</option>
-          <option value="7d" selected>Last 7 Days</option>
-          <option value="30d">Last 30 Days</option>
+          <option value="3d">Last 3 days</option>
+          <option value="5d">Last 5 days</option>
+          <option value="7d" selected>Last 7 days</option>
+          <option value="10d">Last 10 days</option>
+          <option value="15d">Last 15 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="3m">Last 3 months</option>
+          <option value="6m">Last 6 months</option>
+          <option value="12m">Last 12 months</option>
           <option value="all">All-Time History</option>
+          <option value="custom">Custom Date Window</option>
         </select>
+        <input type="date" id="report-filter-start-date" onchange="window.App.loadHistoricalReport()" title="Start Date (YYYY-MM-DD)" style="background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 4px 8px; border-radius: 6px; font-size: 0.75rem;">
+        <span style="color: var(--text-dim); font-size: 0.75rem;">to</span>
+        <input type="date" id="report-filter-end-date" onchange="window.App.loadHistoricalReport()" title="End Date (YYYY-MM-DD)" style="background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 4px 8px; border-radius: 6px; font-size: 0.75rem;">
       </div>
     </div>
 
-    <!-- Row 2: Operational Dimensions -->
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+    <!-- Row 2: Operational Dimensions & Attribution Filters -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 10px;">
       <div>
         <label for="report-filter-provider" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Provider / Platform</label>
         <select id="report-filter-provider" onchange="window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 8px; border-radius: 6px; font-size: 0.78rem;">
@@ -69,13 +90,17 @@
       <div>
         <label for="report-filter-dimension" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Pivot Dimension</label>
         <select id="report-filter-dimension" onchange="window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 8px; border-radius: 6px; font-size: 0.78rem;">
-          <option value="">Default (Provider & Account)</option>
+          <option value="">Default (All Dimensions)</option>
           <option value="account_id">By Account ID (acidcow@gmail.com)</option>
           <option value="team_name">By Team (Synthesis2, Core)</option>
           <option value="user_name">By User / Seat (James Eckhardt)</option>
           <option value="model">By Model (Sonnet, Flash, etc.)</option>
+          <option value="project_id">By Project / Workspace</option>
+          <option value="group">By Cross-Platform Tag / Group</option>
           <option value="source">By Traffic Source (Proxy vs Direct vs Scanner)</option>
           <option value="instance_id">By Hardware Node / Instance</option>
+          <option value="locality">By Node Locality (Local vs. Remote LAN vs. Cloud)</option>
+          <option value="account_tier">By Account Tier (Personal Pro vs. Team/Org)</option>
           <option value="client_ip">By Client IP Address</option>
           <option value="client_alias">By Client Workstation Alias</option>
         </select>
@@ -84,12 +109,27 @@
       <div>
         <label for="report-filter-source" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Traffic Route</label>
         <select id="report-filter-source" onchange="window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 8px; border-radius: 6px; font-size: 0.78rem;">
-          <option value="">All Traffic (Direct & Proxied)</option>
+          <option value="">All Traffic (Direct &amp; Proxied)</option>
           <option value="proxy">⚡ Transparent Proxy (Port 8766)</option>
           <option value="direct">🌐 Direct Upstream Calls</option>
-          <option value="emulator">🌉 Secondary Port Bridge (11435)</option>
+          <option value="emulator">🌉 Secondary Port Bridge (8989)</option>
           <option value="log_scanner">📑 Background Log Scanners</option>
         </select>
+      </div>
+
+      <div>
+        <label for="report-filter-model" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Filter by Model</label>
+        <input type="text" id="report-filter-model" placeholder="e.g. sonnet, gemini-2.0" onkeyup="if(event.key==='Enter') window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 8px; border-radius: 6px; font-size: 0.78rem;">
+      </div>
+
+      <div>
+        <label for="report-filter-instance" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Filter by Instance / Node</label>
+        <input type="text" id="report-filter-instance" placeholder="e.g. local-default, node-1" onkeyup="if(event.key==='Enter') window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 8px; border-radius: 6px; font-size: 0.78rem;">
+      </div>
+
+      <div>
+        <label for="report-filter-client-ip" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 3px;">Filter by Client IP / Alias</label>
+        <input type="text" id="report-filter-client-ip" placeholder="e.g. 127.0.0.1, Workstation" onkeyup="if(event.key==='Enter') window.App.loadHistoricalReport()" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 8px; border-radius: 6px; font-size: 0.78rem;">
       </div>
 
       <div>
@@ -104,8 +144,44 @@
     </div>
   </div>
 
+  <!-- Interactive Grid Customizer: Column Visibility, Drag-and-Drop Sequence & Group-By Subtotals (AIUM-903) -->
+  <div id="reports-grid-customizer" style="background: rgba(15, 23, 42, 0.78); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 12px;">
+    <!-- Row A: Multi-Column Grouping & Aggregate Subtotals Toggle -->
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 10px;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span style="font-size: 0.73rem; color: #38bdf8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">🗂️ Group Items By Column(s):</span>
+        <div id="reports-groupby-chips" style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <!-- Injected dynamically by app.js -->
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="window.App.clearReportGroupingCols()" style="font-size: 0.68rem; padding: 2px 7px;" title="Clear all column groupings">✕ Clear Grouping</button>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: #e2e8f0; cursor: pointer; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); padding: 4px 10px; border-radius: 6px;">
+          <input type="checkbox" id="reports-group-totals-chk" checked onchange="window.App.toggleReportGroupTotals(this.checked)" style="accent-color: #10b981; cursor: pointer;">
+          <strong>∑ Include Aggregate Totals Line-Item per Group</strong>
+        </label>
+      </div>
+    </div>
+
+    <!-- Row B: Column Visibility (Show/Hide) & Drag-and-Drop Sequence Bar -->
+    <div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+        <span style="font-size: 0.73rem; color: #cbd5e1; font-weight: 600;">
+          👁️ <strong>Visible Columns &amp; Left-to-Right Sequence</strong> <span style="color: var(--text-dim); font-weight: normal;">(Toggle checkboxes to show/hide • Drag &amp; drop chips or table headers <code>⠿</code> to reorder sequence)</span>
+        </span>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn btn-secondary btn-sm" onclick="window.App.setAllReportColumnsVisibility(true)" style="font-size: 0.68rem; padding: 2px 8px;">Show All Columns</button>
+          <button class="btn btn-secondary btn-sm" onclick="window.App.resetReportColumnsDefault()" style="font-size: 0.68rem; padding: 2px 8px;">Reset Default Order</button>
+        </div>
+      </div>
+      <div id="reports-column-sequence-chips" style="display: flex; gap: 6px; flex-wrap: wrap; padding: 6px; background: rgba(0,0,0,0.3); border-radius: 6px; border: 1px dashed rgba(255,255,255,0.1);">
+        <!-- Injected dynamically by app.js -->
+      </div>
+    </div>
+  </div>
+
   <!-- Summary Metric Strip -->
-  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px;">
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 14px; margin-bottom: 20px;">
     <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
       <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Total Tokens (Period)</span>
       <div style="font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: #38bdf8; margin-top: 2px;" id="rep-tot-tokens">0</div>
@@ -116,11 +192,12 @@
       <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;" id="rep-tot-cache-sub">Create: 0 | Read: 0</div>
     </div>
     <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
-      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Total Estimated Cost</span>
+      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Cloud Est. Cost</span>
       <div style="font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: #34d399; margin-top: 2px;" id="rep-tot-cost">$0.0000</div>
+      <div style="font-size: 0.7rem; color: #c084fc; font-family: var(--font-mono); margin-top: 2px;" id="rep-tot-savings">Local Savings: ($0.0000)</div>
     </div>
     <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
-      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Events & Interactions</span>
+      <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Events &amp; Interactions</span>
       <div style="font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: #c084fc; margin-top: 2px;" id="rep-tot-events">0</div>
     </div>
     <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 12px 14px;">
@@ -129,28 +206,103 @@
     </div>
   </div>
 
-  <!-- Historical Data Table -->
-  <div class="data-table-container">
-    <table class="data-table">
+  <!-- Historical Data Table (Draggable, Sortable, Groupable Columns) -->
+  <div class="data-table-container" style="overflow-x: auto;">
+    <table class="data-table" id="historical-reports-table">
       <thead>
-        <tr>
-          <th>Period / Date</th>
-          <th>Dimension / Key</th>
-          <th style="text-align: right;">Events</th>
-          <th style="text-align: right;">Input</th>
-          <th style="text-align: right;">Output</th>
-          <th style="text-align: right;">Cache Create</th>
-          <th style="text-align: right;">Cache Read</th>
-          <th style="text-align: right;">Total Tokens</th>
-          <th style="text-align: right;">Est. Cost</th>
+        <tr id="reports-table-head-row">
+          <th style="cursor: pointer;" onclick="window.App.sortReportsTable('period')">Period / Date ⇅</th>
+          <th style="cursor: pointer;" onclick="window.App.sortReportsTable('provider')">Provider ⇅</th>
+          <th style="cursor: pointer;" onclick="window.App.sortReportsTable('account_id')">Account / Tenant ⇅</th>
+          <th style="cursor: pointer;" onclick="window.App.sortReportsTable('group_key')">Pivot Dimension ⇅</th>
+          <th style="cursor: pointer;" onclick="window.App.sortReportsTable('source')">Traffic Route ⇅</th>
+          <th style="cursor: pointer;" onclick="window.App.sortReportsTable('model')">Model ⇅</th>
+          <th style="cursor: pointer;" onclick="window.App.sortReportsTable('instance_id')">Instance / Node ⇅</th>
+          <th style="cursor: pointer;" onclick="window.App.sortReportsTable('client_ip')">Client IP / Alias ⇅</th>
+          <th style="text-align: right; cursor: pointer;" onclick="window.App.sortReportsTable('event_count')">Events ⇅</th>
+          <th style="text-align: right; cursor: pointer;" onclick="window.App.sortReportsTable('input_tokens')">Input ⇅</th>
+          <th style="text-align: right; cursor: pointer;" onclick="window.App.sortReportsTable('output_tokens')">Output ⇅</th>
+          <th style="text-align: right; cursor: pointer;" onclick="window.App.sortReportsTable('cache_creation_tokens')">Cache Create ⇅</th>
+          <th style="text-align: right; cursor: pointer;" onclick="window.App.sortReportsTable('cache_read_tokens')">Cache Read ⇅</th>
+          <th style="text-align: right; cursor: pointer;" onclick="window.App.sortReportsTable('total_tokens')">Total Tokens ⇅</th>
+          <th style="text-align: right; cursor: pointer;" onclick="window.App.sortReportsTable('net_cost_usd')">Est. Cost ⇅</th>
           <th style="text-align: right;">Cost / 1k</th>
           <th style="text-align: center;">Share</th>
         </tr>
       </thead>
       <tbody id="reports-table-body">
         <tr>
-          <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 24px;">
+          <td colspan="17" style="text-align: center; color: var(--text-dim); padding: 24px;">
             Select criteria and click <strong>Run Report</strong> to load historical analytics.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Multi-Dimensional OLAP Pivot Matrix Card (/api/usage/pivot) -->
+<div class="glass-card" style="margin-bottom: 24px; border-left: 4px solid var(--accent-purple);">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 1.3rem;">🧊</span>
+        <h3 style="font-size: 1.05rem; font-weight: 700; color: #fff;">Multi-Dimensional Telemetry Pivot Matrix</h3>
+      </div>
+      <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+        Cross-tabulate token volume, percentage share, and cost across combined dimensions (Platform, Model, Source, Client IP/Alias, Instance, Project, or Cross-Platform Tag).
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <select id="pivot-dimensions-select" onchange="window.App.loadPivotMatrix()" style="background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 10px; border-radius: 6px; font-size: 0.78rem;">
+        <option value="platform,model,source" selected>Platform × Model × Source</option>
+        <option value="client,platform,model">Client Workstation × Platform × Model</option>
+        <option value="group,platform,model">Cross-Platform Tag × Platform × Model</option>
+        <option value="instance,model,source">Hardware Instance × Model × Source</option>
+        <option value="account,model">Account × Model</option>
+        <option value="project,model">Project / Workspace × Model</option>
+      </select>
+      <select id="pivot-window-select" onchange="window.App.loadPivotMatrix()" style="background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 6px 10px; border-radius: 6px; font-size: 0.78rem;">
+        <option value="1h">Last 1hr</option>
+        <option value="3h">Last 3hrs</option>
+        <option value="6h">Last 6hrs</option>
+        <option value="12h">Last 12hrs</option>
+        <option value="24h" selected>Last 24hrs</option>
+        <option value="48h">Last 48hrs</option>
+        <option value="3d">Last 3 days</option>
+        <option value="5d">Last 5 days</option>
+        <option value="7d">Last 7 days</option>
+        <option value="10d">Last 10 days</option>
+        <option value="15d">Last 15 days</option>
+        <option value="30d">Last 30 days</option>
+        <option value="3m">Last 3 months</option>
+        <option value="6m">Last 6 months</option>
+        <option value="12m">Last 12 months</option>
+        <option value="all">All-Time</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="window.App.loadPivotMatrix()">
+        🔄 Refresh Pivot
+      </button>
+    </div>
+  </div>
+
+  <div class="data-table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Composite Pivot Key</th>
+          <th style="text-align: right;">Requests</th>
+          <th style="text-align: right;">Input Tokens</th>
+          <th style="text-align: right;">Output Tokens</th>
+          <th style="text-align: right;">Total Tokens</th>
+          <th style="text-align: right;">Est. Cost</th>
+          <th style="text-align: right;">% Share</th>
+        </tr>
+      </thead>
+      <tbody id="pivot-matrix-table-body">
+        <tr>
+          <td colspan="7" style="text-align: center; color: var(--text-dim); padding: 18px;">
+            Loading multi-dimensional pivot matrix...
           </td>
         </tr>
       </tbody>

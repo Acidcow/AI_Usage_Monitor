@@ -94,6 +94,29 @@ class NativeTaskbarWidget:
     right-click pinning, dynamic height auto-resizing, and sparkline trend charts.
     """
 
+    WINDOW_OPTIONS = [
+        "1h", "3h", "6h", "12h", "24h", "48h",
+        "3d", "5d", "7d", "10d", "15d", "30d",
+        "3m", "6m", "12m"
+    ]
+    WINDOW_LABELS = {
+        "1h": "Last 1hr",
+        "3h": "Last 3hrs",
+        "6h": "Last 6hrs",
+        "12h": "Last 12hrs",
+        "24h": "Last 24hrs",
+        "48h": "Last 48hrs",
+        "3d": "Last 3 days",
+        "5d": "Last 5 days",
+        "7d": "Last 7 days",
+        "10d": "Last 10 days",
+        "15d": "Last 15 days",
+        "30d": "Last 30 days",
+        "3m": "Last 3 months",
+        "6m": "Last 6 months",
+        "12m": "Last 12 months",
+    }
+
     def __init__(self, host: str = "127.0.0.1", port: int = 8765, width: int = 370, height: int = 390):
         self.host = host
         self.port = port
@@ -113,6 +136,8 @@ class NativeTaskbarWidget:
         self.auto_resize = True
         self.fade_unpinned = False
         self.view_mode = "balances" # "balances" or "trends"
+        self.trend_window = "24h"
+        self.chart_granularity = 5
         self.pinned_items = set(["claude", "gemini", "ollama"])
         self.hide_parent_chart_on_expand = False
         self.hidden_platforms = set()
@@ -193,7 +218,11 @@ class NativeTaskbarWidget:
             if self.view_mode in ("trends", "interval"):
                 try:
                     ts_mode = "interval_delta" if self.view_mode == "interval" else "cumulative"
-                    req_ts = urllib.request.Request(f"http://{self.host}:{self.active_port}/api/usage/timeseries?window=1h&bucket_minutes=5&mode={ts_mode}")
+                    win_val = getattr(self, "trend_window", "24h") or "24h"
+                    gran_val = getattr(self, "chart_granularity", 5) or 5
+                    req_ts = urllib.request.Request(
+                        f"http://{self.host}:{self.active_port}/api/usage/timeseries?window={win_val}&bucket_minutes={gran_val}&mode={ts_mode}"
+                    )
                     with urllib.request.urlopen(req_ts, timeout=1.5) as resp:
                         if resp.status == 200:
                             self.cached_timeseries = json.loads(resp.read().decode("utf-8"))
@@ -228,6 +257,19 @@ class NativeTaskbarWidget:
             self.fade_unpinned = (st["widget_fade_unpinned"] is True or st["widget_fade_unpinned"] == "true")
         if "widget_view_mode" in st:
             self.view_mode = st["widget_view_mode"]
+        win_srv = st.get("active_trend_window") or st.get("default_trend_window")
+        if win_srv and str(win_srv).strip().lower() in self.WINDOW_OPTIONS:
+            self.trend_window = str(win_srv).strip().lower()
+            if hasattr(self, "btn_window_select") and self.btn_window_select:
+                try:
+                    self.btn_window_select.configure(text=f"⏱ {self.trend_window}")
+                except Exception:
+                    pass
+        if "active_chart_granularity" in st:
+            try:
+                self.chart_granularity = int(st["active_chart_granularity"])
+            except Exception:
+                pass
         if "widget_hide_parent_chart_on_expand" in st:
             self.hide_parent_chart_on_expand = bool(st["widget_hide_parent_chart_on_expand"])
         if "pinned_items" in st and isinstance(st["pinned_items"], list):
@@ -355,6 +397,18 @@ class NativeTaskbarWidget:
         self.btn_view_mode.pack(side="right", padx=4)
         self.btn_view_mode.bind("<Button-1>", lambda e: self._toggle_view_mode())
 
+        self.btn_window_select = tk.Label(
+            header,
+            text=f"⏱ {getattr(self, 'trend_window', '24h')}",
+            bg=th["header_bg"],
+            fg=th["cyan"],
+            font=self._get_font(8, "bold"),
+            cursor="hand2"
+        )
+        self.btn_window_select.pack(side="right", padx=4)
+        self.btn_window_select.bind("<Button-1>", self._show_window_menu)
+        self.btn_window_select.bind("<Button-3>", lambda e: self.cycle_trend_window())
+
         # Accounts List Canvas
         self.canvas = tk.Canvas(main_frame, bg=th["container_bg"], highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, padx=8, pady=6)
@@ -432,6 +486,60 @@ class NativeTaskbarWidget:
                 self.btn_view_mode.configure(text=icons.get(self.view_mode, "📊"))
             self._save_settings_async({"widget_view_mode": self.view_mode})
             self.render_canvas()
+
+    def set_trend_window(self, window: str):
+        """Sets the time-span window for trends/charts and syncs with Web UI via /api/settings."""
+        win_norm = str(window or "24h").strip().lower()
+        if win_norm in self.WINDOW_OPTIONS:
+            self.trend_window = win_norm
+            if hasattr(self, "btn_window_select") and self.btn_window_select:
+                try:
+                    self.btn_window_select.configure(text=f"⏱ {self.trend_window}")
+                except Exception:
+                    pass
+            self._save_settings_async({
+                "active_trend_window": self.trend_window,
+                "default_trend_window": self.trend_window,
+            })
+            if hasattr(self, "canvas") and self.canvas:
+                self.render_canvas()
+
+    def cycle_trend_window(self) -> str:
+        """Cycles to the next time-span window in WINDOW_OPTIONS and syncs with Web UI."""
+        try:
+            idx = self.WINDOW_OPTIONS.index(self.trend_window)
+        except ValueError:
+            idx = 4
+        next_win = self.WINDOW_OPTIONS[(idx + 1) % len(self.WINDOW_OPTIONS)]
+        self.set_trend_window(next_win)
+        return next_win
+
+    def _show_window_menu(self, event=None):
+        """Displays a popup menu allowing the user to select any of the 15 time-span windows."""
+        if not self.root:
+            return
+        try:
+            import tkinter as tk
+            menu = tk.Menu(
+                self.root,
+                tearoff=0,
+                bg="#0f172a",
+                fg="#f8fafc",
+                activebackground="#06b6d4",
+                activeforeground="#0b0f19",
+                font=("Segoe UI", 8)
+            )
+            for code in self.WINDOW_OPTIONS:
+                lbl = self.WINDOW_LABELS.get(code, code)
+                prefix = "● " if code == self.trend_window else "   "
+                menu.add_command(
+                    label=f"{prefix}{lbl} ({code})",
+                    command=lambda c=code: self.set_trend_window(c)
+                )
+            if event:
+                menu.tk_popup(event.x_root, event.y_root)
+        except Exception:
+            self.cycle_trend_window()
 
     def _on_focus_in(self, event=None):
         if not self.has_focus:

@@ -105,10 +105,21 @@
       <div id="trend-window-control" style="display: none; align-items: center; gap: 6px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
         <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Window:</span>
         <select id="trend-window-select" class="form-control" onchange="window.App.changeTrendWindow(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
-          <option value="1h">1h</option>
-          <option value="24h" selected>24h</option>
-          <option value="7d">7d</option>
-          <option value="30d">30d</option>
+          <option value="1h">Last 1hr</option>
+          <option value="3h">Last 3hrs</option>
+          <option value="6h">Last 6hrs</option>
+          <option value="12h">Last 12hrs</option>
+          <option value="24h" selected>Last 24hrs</option>
+          <option value="48h">Last 48hrs</option>
+          <option value="3d">Last 3 days</option>
+          <option value="5d">Last 5 days</option>
+          <option value="7d">Last 7 days</option>
+          <option value="10d">Last 10 days</option>
+          <option value="15d">Last 15 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="3m">Last 3 months</option>
+          <option value="6m">Last 6 months</option>
+          <option value="12m">Last 12 months</option>
         </select>
         <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Bucket:</span>
         <select id="trend-granularity-select" class="form-control" onchange="window.App.changeTrendGranularity(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
@@ -139,7 +150,6 @@
       <span class="badge" id="live-sync-indicator" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); display: flex; align-items: center; gap: 4px;">
         <span class="sync-spinner" style="display: inline-block; animation: spin 2s linear infinite;">●</span> Live
       </span>
-      <button class="btn btn-secondary btn-sm" onclick="window.App.openClaudeQuotaModal()" style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;" title="Calibrate Claude Individual and Team quotas">⚖️ Calibrate Claude</button>
       <button class="btn btn-secondary btn-sm" onclick="window.App.loadUsageData()">↻ Refresh</button>
     </div>
   </div>
@@ -211,10 +221,21 @@
       <div style="display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
         <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Window:</span>
         <select id="chart-window-select" class="form-control" onchange="window.App.changeChartWindow(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #38bdf8; border-radius: 4px; cursor: pointer;">
-          <option value="1h">Last 1 Hour</option>
-          <option value="24h" selected>Last 24 Hours</option>
-          <option value="7d">Last 7 Days</option>
-          <option value="30d">Last 30 Days</option>
+          <option value="1h">Last 1hr</option>
+          <option value="3h">Last 3hrs</option>
+          <option value="6h">Last 6hrs</option>
+          <option value="12h">Last 12hrs</option>
+          <option value="24h" selected>Last 24hrs</option>
+          <option value="48h">Last 48hrs</option>
+          <option value="3d">Last 3 days</option>
+          <option value="5d">Last 5 days</option>
+          <option value="7d">Last 7 days</option>
+          <option value="10d">Last 10 days</option>
+          <option value="15d">Last 15 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="3m">Last 3 months</option>
+          <option value="6m">Last 6 months</option>
+          <option value="12m">Last 12 months</option>
         </select>
       </div>
       <div style="display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
@@ -235,6 +256,30 @@
           <option value="cumulative">📈 Cumulative (Total Run)</option>
         </select>
       </div>
+      <div style="display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
+        <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Curves:</span>
+        <select id="chart-breakdown-select" class="form-control" onchange="window.App.changeChartBreakdown(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #c084fc; border-radius: 4px; cursor: pointer;" title="Consolidate or separate curves by Node Locality, Personal vs Team Account, Compute Node, Access Route, or Model">
+          <option value="locality" selected>🔀 Split Local vs. Remote &amp; Pro vs. Team</option>
+          <option value="consolidated">📦 Consolidated by Platform (L1)</option>
+          <option value="tenant_account">👤 Split by Account / Tenant (L2)</option>
+          <option value="workspace_pool">🏢 Split by Workspace / Quota Pool (L3)</option>
+          <option value="compute_node">🖥️ Split by Compute Node / Instance (L5)</option>
+          <option value="client_host">💻 Split by Client Host / Alias (L6)</option>
+          <option value="access_route">🛤️ Split by Access / Traffic Route (L7)</option>
+          <option value="model">🧠 Split by Model Engine (L8)</option>
+        </select>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);">
+        <span style="font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600;">Scope:</span>
+        <select id="chart-scope-filter-select" class="form-control" onchange="window.App.changeChartScopeFilter(this.value)" style="font-size: 0.72rem; padding: 2px 6px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); color: #fbbf24; border-radius: 4px; cursor: pointer;" title="Filter telemetry by Personal Pro vs. Legacy Team Pool or Local vs. Remote LAN Nodes">
+          <option value="all" selected>🌐 All Scopes &amp; Nodes</option>
+          <option value="personal_only">👤 Personal Pro Only (Excl. Team Pool)</option>
+          <option value="team_only">👥 Team / Org Pool Only</option>
+          <option value="local_only">🏠 Local Node Only (This PC)</option>
+          <option value="remote_only">📡 Remote LAN Nodes Only</option>
+        </select>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="window.App.toggleTaxonomyDrawer()" style="font-size: 0.72rem; padding: 3px 8px; border-color: rgba(168, 85, 247, 0.4); color: #e9d5ff;" title="View Unified 8-Tier Telemetry Taxonomy & Cross-Platform Terminology Mapping">🧭 Unified Taxonomy</button>
       <span style="font-size: 0.75rem; color: var(--accent-cyan); font-family: var(--font-mono); background: rgba(6, 182, 212, 0.1); padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.25);" id="chart-peak-info">Peak: -- tokens</span>
     </div>
   </div>
@@ -274,6 +319,106 @@
       <!-- Dynamically generated multi-platform SVG line curves & data points -->
     </svg>
     <div id="chart-flyout-tooltip" style="display: none; position: absolute; pointer-events: none; z-index: 50; background: rgba(11, 16, 27, 0.95); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.7); backdrop-filter: blur(8px); min-width: 175px;"></div>
+  </div>
+
+  <!-- Unified 8-Tier Telemetry Taxonomy & Cross-Platform Terminology Matrix Drawer -->
+  <div id="unified-taxonomy-drawer" style="display: none; margin-top: 14px; padding: 14px; background: rgba(11, 17, 30, 0.92); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 8px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+      <div>
+        <h4 style="margin: 0; font-size: 0.92rem; font-weight: 700; color: #f3e8ff;">🧭 Canonical 8-Tier Unified Telemetry Taxonomy &amp; Terminology Matrix</h4>
+        <p style="margin: 2px 0 0 0; font-size: 0.74rem; color: var(--text-muted);">Normalizes disparate provider hierarchies (Accounts, Teams/Orgs, Quota Pools, Seats/Keys, Local vs. Remote LAN Compute Nodes, Clients, Traffic Routes &amp; Models) into a single comparable schema across all UI views.</p>
+      </div>
+      <button class="btn btn-sm btn-secondary" onclick="window.App.toggleTaxonomyDrawer()" style="font-size: 0.72rem; padding: 2px 8px;">✕ Close</button>
+    </div>
+    <div class="data-table-container" style="max-height: 320px; overflow-y: auto;">
+      <table class="data-table" style="font-size: 0.73rem;">
+        <thead>
+          <tr>
+            <th>Canonical Tier</th>
+            <th>Unified Attribute</th>
+            <th>Claude (Anthropic)</th>
+            <th>Google Gemini</th>
+            <th>Ollama / LAN Compute</th>
+            <th>OpenAI ChatGPT</th>
+            <th>M365 Copilot</th>
+          </tr>
+        </thead>
+        <tbody id="unified-taxonomy-table-body">
+          <tr>
+            <td><span class="badge" style="background:rgba(168,85,247,0.2);color:#d8b4fe;">L1 · Platform</span></td>
+            <td><code>provider</code></td>
+            <td>Claude (Anthropic)</td>
+            <td>Google Gemini / Vertex AI</td>
+            <td>Ollama / Local &amp; LAN Compute</td>
+            <td>OpenAI ChatGPT</td>
+            <td>Microsoft 365 Copilot</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:rgba(59,130,246,0.2);color:#93c5fd;">L2 · Tenant / Account</span></td>
+            <td><code>tenant_account</code></td>
+            <td>Personal Pro Account vs. Enterprise Org</td>
+            <td>Google Cloud / AI Studio Account</td>
+            <td>Host Machine Owner / Cluster</td>
+            <td>OpenAI Organization / Account</td>
+            <td>Entra ID / M365 Tenant</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:rgba(245,158,11,0.2);color:#fcd34d;">L3 · Workspace / Pool</span></td>
+            <td><code>workspace_pool</code></td>
+            <td>Claude Pro Plan vs. Team Workspace Pool</td>
+            <td>GCP Project / Billing Quota Pool</td>
+            <td>Worker Compute Pool (Active Compute)</td>
+            <td>OpenAI Project / Tier</td>
+            <td>Department / Business Unit</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:rgba(16,185,129,0.2);color:#6ee7b7;">L4 · Principal / Seat</span></td>
+            <td><code>principal_seat</code></td>
+            <td>Seat User / API Key</td>
+            <td>Named API Key / OAuth Credential</td>
+            <td>Invoker User / Agent</td>
+            <td>Member User / API Secret Key</td>
+            <td>Licensed Copilot Seat</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:rgba(6,182,212,0.2);color:#67e8f9;">L5 · Compute Node</span></td>
+            <td><code>compute_node</code> &amp; <code>locality</code></td>
+            <td>Anthropic Cloud API (<code>cloud</code>)</td>
+            <td>Google Cloud Endpoint (<code>cloud</code>)</td>
+            <td>Local Node (<code>127.0.0.1</code>) vs. Remote LAN Node (<code>10.1.7.74</code>)</td>
+            <td>OpenAI Cloud API (<code>cloud</code>)</td>
+            <td>Microsoft Graph Cloud (<code>cloud</code>)</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:rgba(236,72,153,0.2);color:#f9a8d4;">L6 · Client Host</span></td>
+            <td><code>client_host</code></td>
+            <td>Originating Workstation / CLI Host</td>
+            <td>Originating Client IP &amp; Alias</td>
+            <td>Requesting LAN Client PC</td>
+            <td>Originating Client Host</td>
+            <td>Workstation / Office App Host</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:rgba(139,92,246,0.2);color:#c4b5fd;">L7 · Access Route</span></td>
+            <td><code>access_route</code></td>
+            <td>Direct API · Proxy (:8766) · CLI Scanner</td>
+            <td>Direct API · Proxy (:8766) · OAuth</td>
+            <td>Local Log Scanner · LAN Governor · Emulator (:8989)</td>
+            <td>Direct API · Proxy (:8766)</td>
+            <td>Enterprise CSV Importer · Graph Sync</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:rgba(20,184,166,0.2);color:#5eead4;">L8 · Model &amp; Session</span></td>
+            <td><code>model</code> &amp; <code>session_id</code></td>
+            <td>Claude Sonnet / Opus / Haiku · Session</td>
+            <td>Gemini 2.5 Pro / Flash · Session</td>
+            <td>Gemma 4 / Llama 3 / Qwen · Inference Run</td>
+            <td>GPT-4o / o3-mini · Conversation</td>
+            <td>M365 Copilot GPT-4o · Session</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 

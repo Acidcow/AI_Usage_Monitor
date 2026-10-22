@@ -6,6 +6,8 @@ window.Widget = {
   providers: ["claude", "gemini", "chatgpt", "ollama", "copilot"],
   currentProviderIndex: 0,
   viewMode: "multi", // 'multi' | 'trends' | 'interval' | 'single'
+  trendWindow: "24h",
+  chartGranularity: 5,
   refreshCadenceSeconds: 30,
   cachedSummary: null,
   cachedProviders: null,
@@ -46,7 +48,20 @@ window.Widget = {
           this.fadeUnpinned = (st.widget_fade_unpinned === true || st.widget_fade_unpinned === "true");
         }
         if (st.widget_view_mode) {
-          this.viewMode = st.widget_view_mode;
+          const mappedMode = st.widget_view_mode === "balances" ? "multi" : st.widget_view_mode;
+          if (mappedMode !== this.viewMode) {
+            this.viewMode = mappedMode;
+            this.updateModeUI(this.viewMode);
+          }
+        }
+        const srvWindow = st.active_trend_window || st.default_trend_window;
+        if (srvWindow) {
+          this.trendWindow = srvWindow;
+          const winSel = document.getElementById("w-window-select");
+          if (winSel) winSel.value = srvWindow;
+        }
+        if (st.active_chart_granularity) {
+          this.chartGranularity = parseInt(st.active_chart_granularity, 10) || 5;
         }
         if (st.ui_refresh_interval_seconds) {
           this.refreshCadenceSeconds = Math.max(30, Math.min(300, parseInt(st.ui_refresh_interval_seconds, 10) || 30));
@@ -297,10 +312,23 @@ window.Widget = {
   setViewMode(mode) {
     this.viewMode = mode;
     this.updateModeUI(mode);
+    const activeChartMode = mode === "trends" ? "cumulative" : "interval_delta";
     fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings: { widget_view_mode: mode } })
+      body: JSON.stringify({ settings: { widget_view_mode: mode, active_chart_mode: activeChartMode } })
+    }).catch(() => {});
+    this.refresh();
+  },
+
+  setTrendWindow(win) {
+    this.trendWindow = win || "24h";
+    const winSel = document.getElementById("w-window-select");
+    if (winSel) winSel.value = this.trendWindow;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_trend_window: this.trendWindow, default_trend_window: this.trendWindow } })
     }).catch(() => {});
     this.refresh();
   },
@@ -344,7 +372,9 @@ window.Widget = {
         fetch("/api/usage/comparison?filter_visibility=true")
       ];
       if (isSparklineMode) {
-        fetchPromises.push(fetch(`/api/usage/timeseries?window=1h&bucket_minutes=5&mode=${tsMode}`));
+        const winParam = encodeURIComponent(this.trendWindow || "24h");
+        const granParam = encodeURIComponent(this.chartGranularity || 5);
+        fetchPromises.push(fetch(`/api/usage/timeseries?window=${winParam}&bucket_minutes=${granParam}&mode=${tsMode}`));
       }
       const [sumRes, provRes, compRes, tsRes] = await Promise.all(fetchPromises);
 

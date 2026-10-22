@@ -115,21 +115,28 @@ class MCPServer:
             }
         ]
 
-    def handle_json_rpc(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Processes a single JSON-RPC 2.0 MCP request dict and returns response dict."""
+    def handle_json_rpc(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Processes a single JSON-RPC 2.0 MCP request dict and returns response dict (or None for notifications)."""
         req_id = request.get("id")
         method = request.get("method", "")
         params = request.get("params", {}) or {}
 
+        # In JSON-RPC 2.0, a notification is a request object without an 'id' member.
+        # The server MUST NOT reply to a notification.
+        is_notification = ("id" not in request or req_id is None)
+
         # 1. initialize
         if method == "initialize":
+            client_proto = params.get("protocolVersion") or self.PROTOCOL_VERSION
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "protocolVersion": self.PROTOCOL_VERSION,
+                    "protocolVersion": client_proto,
                     "capabilities": {
-                        "tools": {"listChanged": False}
+                        "tools": {"listChanged": False},
+                        "resources": {"subscribe": False, "listChanged": False},
+                        "prompts": {"listChanged": False}
                     },
                     "serverInfo": {
                         "name": self.SERVER_NAME,
@@ -138,14 +145,15 @@ class MCPServer:
                 }
             }
 
-        # 2. notifications/initialized & ping
-        if method in ["notifications/initialized", "initialized"]:
-            return {"jsonrpc": "2.0", "id": req_id, "result": {}}
+        # 2. Notifications: MUST NOT receive any response in JSON-RPC 2.0 / MCP
+        if is_notification:
+            return None
 
+        # 3. ping
         if method == "ping":
             return {"jsonrpc": "2.0", "id": req_id, "result": {}}
 
-        # 3. tools/list
+        # 4. tools/list
         if method == "tools/list":
             return {
                 "jsonrpc": "2.0",
@@ -155,7 +163,35 @@ class MCPServer:
                 }
             }
 
-        # 4. tools/call
+        # 5. resources/list, resources/templates/list, prompts/list (graceful empty results)
+        if method == "resources/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "resources": []
+                }
+            }
+
+        if method == "resources/templates/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "resourceTemplates": []
+                }
+            }
+
+        if method == "prompts/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "prompts": []
+                }
+            }
+
+        # 6. tools/call
         if method == "tools/call":
             tool_name = params.get("name")
             args = params.get("arguments", {}) or {}
@@ -286,8 +322,9 @@ class MCPServer:
             try:
                 req = json.loads(line_str)
                 resp = self.handle_json_rpc(req)
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+                if resp is not None:
+                    sys.stdout.write(json.dumps(resp) + "\n")
+                    sys.stdout.flush()
             except Exception as e:
                 err_resp = {
                     "jsonrpc": "2.0",
