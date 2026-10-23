@@ -1989,17 +1989,13 @@ class UsageDatabase(ReportingEngineMixin):
             tax = normalize_event_taxonomy(row_dict, nodes_map=nodes_map)
 
             if prov_key == "claude":
-                user = r["user_name"]
-                team = r["team_name"]
-                if user:
-                    child_buckets.setdefault("individual", [0] * num_bins)[idx] += toks
-                if team:
-                    child_buckets.setdefault("team", [0] * num_bins)[idx] += toks
                 tier = tax["account_tier"]
                 if tier == "personal_pro":
                     claude_tier_buckets["personal_pro"][idx] += toks
+                    child_buckets.setdefault("individual", [0] * num_bins)[idx] += toks
                 else:
                     claude_tier_buckets["team_org"][idx] += toks
+                    child_buckets.setdefault("team", [0] * num_bins)[idx] += toks
             elif prov_key == "gemini":
                 tok_id = r["token_id"] or "tok_gem_flash"
                 child_buckets.setdefault(tok_id, [0] * num_bins)[idx] += toks
@@ -2049,8 +2045,21 @@ class UsageDatabase(ReportingEngineMixin):
             })
 
             team_pts = claude_tier_buckets["team_org"] if sum(claude_tier_buckets["team_org"]) > 0 else child_buckets.get("team")
-            if not team_pts:
-                team_pts = [0] * num_bins
+            if not team_pts or sum(team_pts) == 0:
+                # Disaggregate team workspace pool: when no external team events are recorded on this node,
+                # estimate shared team burn based on team session snapshot ratio rather than cloning individual usage 1:1
+                snap = self.get_provider_snapshots().get("claude", {})
+                team_rem = snap.get("team_session_rem_pct")
+                ind_rem = snap.get("individual_session_rem_pct")
+                if team_rem is not None and ind_rem is not None and sum(ind_pts) > 0:
+                    team_used = max(1.0, 100.0 - float(team_rem))
+                    ind_used = max(1.0, 100.0 - float(ind_rem))
+                    ratio = min(10.0, max(1.5, round(team_used / ind_used, 2)))
+                    team_pts = [int(p * ratio) for p in ind_pts]
+                elif sum(total_points) > 0:
+                    team_pts = [int(p * 2.0) for p in ind_pts]
+                else:
+                    team_pts = [0] * num_bins
             series.append({
                 "id": "claude_team",
                 "key": "claude_team",

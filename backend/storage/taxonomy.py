@@ -303,12 +303,9 @@ def classify_account_tier(
     is_company_team = False
     team_lower = team.lower()
     acct_lower = acct.lower()
-    if acct_lower in ("synthesis2", "synthesis", "synthesis engineering core") or team_lower in (
-        "synthesis2",
-        "synthesis",
-        "synthesis engineering core",
-    ):
-        if "pro" not in team_lower and "pro" not in acct_lower:
+    company_team_keywords = ("synthesis", "enterprise", "team", "organization", "workspace")
+    if any(k in acct_lower for k in company_team_keywords) or any(k in team_lower for k in company_team_keywords):
+        if "pro" not in team_lower and "personal" not in team_lower and "pro" not in acct_lower and "personal" not in acct_lower:
             is_company_team = True
 
     if prov == "claude":

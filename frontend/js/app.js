@@ -72,6 +72,33 @@ window.App = {
 
     // Start background auto-refresh respecting user-configured cadence (minimum 30s)
     this.resetPollingInterval(this.refreshCadenceSeconds || 30);
+
+    // Setup ResizeObserver for responsive non-stretching SVG charts
+    if (window.ResizeObserver) {
+      let resizeTimer = null;
+      const ro = new ResizeObserver(() => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (this._lastTimeseriesData) {
+            this.renderSvgChart(this._lastTimeseriesData);
+          }
+          if (this.lastCompData) {
+            Object.keys(this.expandedHierarchy).forEach(k => {
+              if (this.expandedHierarchy[k]) {
+                const cachedData = this.cachedHierarchicalTrends[`${k}_${this.trendWindow}_${this.currentScope}`];
+                if (cachedData) {
+                  this.renderMultiSeriesTrendChart(`trend-chart-svg-${k}`, cachedData, k);
+                }
+              }
+            });
+          }
+        }, 50);
+      });
+      const chartCont = document.getElementById("svg-chart-container");
+      if (chartCont) ro.observe(chartCont);
+      const gaugesCont = document.getElementById("container-usage-gauges");
+      if (gaugesCont) ro.observe(gaugesCont);
+    }
   },
 
   resetPollingInterval(seconds) {
@@ -314,6 +341,9 @@ window.App = {
       const provSelect = document.getElementById("filter-session-provider");
       const providerParam = provSelect && provSelect.value ? `?provider=${provSelect.value}` : '';
 
+      // Invalidate cached hierarchical trends so refresh/poll interrogates live backend data
+      this.cachedHierarchicalTrends = {};
+
       const bucketMinutes = this.chartGranularity || 5;
       const chartMode = this.chartMode || "interval_delta";
       const chartWindow = this.chartWindow || "24h";
@@ -359,6 +389,7 @@ window.App = {
 
       if (timeseriesRes.ok) {
         const timeseries = await timeseriesRes.json();
+        this._lastTimeseriesData = timeseries;
         this.renderSvgChart(timeseries);
       }
     } catch (err) {
@@ -698,6 +729,7 @@ window.App = {
                       const mCol = m.color || ["#c084fc", "#34d399", "#38bdf8", "#f59e0b"][mIdx % 4];
                       const mPts = this.getChildRealPoints('ollama', m.name || m.model);
                       const spk = this.generateInlineSparkline(mPts, mCol);
+                      const safeModelId = (m.name || m.model || `mod_${mIdx}`).replace(/[^a-zA-Z0-9_-]/g, '_');
                       return `
                         <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
                           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -712,7 +744,7 @@ window.App = {
                           <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 6px;">
                             Params: <strong style="color: #e2e8f0;">${m.parameter_size || 'Unknown'}</strong> • Disk: ${m.size || 'N/A'} ${m.vram_size_gb ? ' • VRAM: ' + m.vram_size_gb + ' GB' : ''}
                           </div>
-                          <div style="margin-bottom: 6px;">${spk}</div>
+                          <div id="sparkline-ollama-${safeModelId}" style="margin-bottom: 6px;">${spk}</div>
                           <div style="font-size: 0.78rem; color: #e2e8f0; margin-bottom: 2px;">
                             <strong>Today:</strong> <span style="color: var(--accent-cyan); font-weight: 700; font-family: var(--font-mono);">${Number(m.tokens_today || 0).toLocaleString()} tok</span>
                           </div>
@@ -732,7 +764,7 @@ window.App = {
                         </span>
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'acidcow@gmail.com'}</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-gemini-gemini_account" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('gemini', 'gemini_account'), '#60a5fa')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -750,6 +782,7 @@ window.App = {
                     ${h.tokens.map((t, tIdx) => {
                       const tCol = ["#34d399", "#f472b6", "#fbbf24", "#38bdf8"][tIdx % 4];
                       const tPts = this.getChildRealPoints('gemini', t.id);
+                      const safeTokId = (t.id || `tok_${tIdx}`).replace(/[^a-zA-Z0-9_-]/g, '_');
                       return `
                         <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px 12px;">
                           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -759,7 +792,7 @@ window.App = {
                             </span>
                           </div>
                           <div style="font-size: 0.68rem; color: var(--text-dim); margin-bottom: 6px;">${this.escapeHtml(t.masked_key)} • ${this.escapeHtml(t.description || 'API Token')}</div>
-                          <div style="margin-bottom: 6px;">${this.generateInlineSparkline(tPts, tCol)}</div>
+                          <div id="sparkline-gemini-${safeTokId}" style="margin-bottom: 6px;">${this.generateInlineSparkline(tPts, tCol)}</div>
                           <div style="font-size: 0.75rem; color: #e2e8f0; margin-bottom: 2px;">
                             <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${t.session_balance_remaining_pct}% rem</span>
                           </div>
@@ -782,7 +815,7 @@ window.App = {
                         </span>
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'James Eckhardt'}</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-claude-claude_individual" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_individual'), '#38bdf8')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -810,7 +843,7 @@ window.App = {
                         </span>
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Synthesis2'}</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-claude-claude_team" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_team'), '#c084fc')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -833,7 +866,7 @@ window.App = {
                         </span>
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-claude-claude_department" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_department'), '#34d399')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -856,7 +889,7 @@ window.App = {
                         </span>
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-claude-claude_enterprise" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_enterprise'), '#fbbf24')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -1225,8 +1258,10 @@ window.App = {
       }
     }
 
-    // SVG ViewBox dimensions: 900 x 200
-    const width = 900;
+    // Responsive SVG ViewBox dimensions: measured from real container width
+    const chartContainer = document.getElementById("svg-chart-container");
+    const cWidth = chartContainer ? (chartContainer.clientWidth || chartContainer.getBoundingClientRect().width) : 0;
+    const width = Math.max(cWidth > 40 ? Math.floor(cWidth - 20) : 1000, 360);
     const height = 200;
     const padL = 60;
     const padR = 25;
@@ -1236,13 +1271,16 @@ window.App = {
     const plotH = height - padT - padB;
     const step = numPoints > 1 ? plotW / (numPoints - 1) : plotW;
 
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.removeAttribute("preserveAspectRatio");
+
     // Grid lines (3 levels: 0%, 50%, 100%)
     let gridHtml = "";
     [0, 0.5, 1.0].forEach(ratio => {
       const y = padT + (plotH * (1.0 - ratio));
       const val = Math.round(maxTokens * ratio);
       gridHtml += `
-        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="4,4"/>
+        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.07)" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="4,4"/>
         <text x="${padL - 8}" y="${y + 4}" fill="#64748b" font-size="9" text-anchor="end" font-family="monospace">${val >= 1000 ? (val/1000).toFixed(0)+'k' : val}</text>
       `;
     });
@@ -1253,13 +1291,14 @@ window.App = {
       ? keys.map(k => this.formatLocalTime(k))
       : labels;
 
-    const labelInterval = Math.max(1, Math.ceil(numPoints / 10));
+    const maxLabels = Math.max(5, Math.floor(plotW / 85));
+    const labelInterval = Math.max(1, Math.ceil(numPoints / maxLabels));
     localLabels.forEach((labelStr, idx) => {
       const showLabel = (idx % labelInterval === 0) || (idx === numPoints - 1);
       if (showLabel) {
         const x = padL + (idx * step);
         axisHtml += `
-          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 4}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 4}" stroke="rgba(255,255,255,0.2)" stroke-width="1" vector-effect="non-scaling-stroke"/>
           <text x="${x}" y="${height - 8}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${labelStr}</text>
         `;
       }
@@ -1356,10 +1395,10 @@ window.App = {
     `;
 
     this._setupChartLegendInteractivity();
-    this._setupChartHoverCrosshair(localLabels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin);
+    this._setupChartHoverCrosshair(localLabels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin, width);
   },
 
-  _setupChartHoverCrosshair(labels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin) {
+  _setupChartHoverCrosshair(labels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin, width = 1000) {
     const container = document.getElementById("svg-chart-container");
     const svg = document.getElementById("token-velocity-chart");
     const crosshair = document.getElementById("chart-crosshair-line");
@@ -1369,7 +1408,7 @@ window.App = {
     container.onmousemove = (e) => {
       const rect = svg.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
-      const svgX = (mouseX / rect.width) * 900;
+      const svgX = (mouseX / rect.width) * width;
 
       if (svgX < padL - 10 || svgX > padL + plotW + 10) {
         crosshair.setAttribute("opacity", "0");
@@ -1493,9 +1532,12 @@ window.App = {
     const cached = (this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey]) ||
                    (this.trendsCache && this.trendsCache[provKey]);
     if (cached && cached.series && cached.series.length > 0) {
+      const normChild = String(childId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const match = cached.series.find(s => {
-        const sid = s.id || s.key || '';
-        return sid === childId || sid.includes(childId) || (childId && childId.includes(sid));
+        const sid = String(s.id || s.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const sName = String(s.name || s.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return sid === normChild || sid.includes(normChild) || normChild.includes(sid) ||
+               sName === normChild || sName.includes(normChild) || normChild.includes(sName);
       });
       if (match && match.points && match.points.length > 0) {
         return match.points;
@@ -1553,8 +1595,8 @@ window.App = {
     if (isAllZero) {
       const yZero = (h - pad).toFixed(1);
       return `
-        <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);" title="No activity in window (0 tokens)">
-          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+        <svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" style="max-width: 140px; background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); display: block;" title="No activity in window (0 tokens)">
+          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="2,2"/>
           <text x="${w / 2}" y="${h / 2 + 3}" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
         </svg>
       `;
@@ -1576,13 +1618,13 @@ window.App = {
       const lastX = (pad + (s.points.length - 1) * step).toFixed(1);
       const lastY = (h - pad - ((lastVal - min) / range) * (h - pad * 2)).toFixed(1);
       return `
-        <polyline fill="none" stroke="${s.color}" stroke-width="2" points="${pts}" stroke-linecap="round" stroke-linejoin="round"/>
+        <polyline fill="none" stroke="${s.color}" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts}" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="${lastX}" cy="${lastY}" r="2" fill="${s.color}" stroke="#ffffff" stroke-width="0.6"/>
       `;
     }).join("");
 
     return `
-      <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.3); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); overflow: visible;">
+      <svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" style="max-width: 140px; background: rgba(0,0,0,0.3); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); overflow: visible; display: block;">
         ${polylines}
       </svg>
     `;
@@ -1613,6 +1655,59 @@ window.App = {
     }
 
     this.renderMultiSeriesTrendChart(containerId, data, providerKey);
+    this.updateChildSparklines(providerKey, data);
+  },
+
+  updateChildSparklines(providerKey, data) {
+    if (!data || !data.series || data.series.length === 0) return;
+
+    if (providerKey === 'ollama') {
+      const sparklineDivs = document.querySelectorAll("[id^='sparkline-ollama-']");
+      sparklineDivs.forEach(div => {
+        const rawId = div.id.replace("sparkline-ollama-", "");
+        const normRaw = rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const match = data.series.find(s => {
+          const sid = String(s.id || s.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const sName = String(s.name || s.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return sid === normRaw || sid.includes(normRaw) || normRaw.includes(sid) ||
+                 sName === normRaw || sName.includes(normRaw) || normRaw.includes(sName);
+        });
+        if (match && match.points && match.points.length > 0) {
+          div.innerHTML = this.generateInlineSparkline(match.points, match.color || "#c084fc");
+        }
+      });
+    } else if (providerKey === 'claude') {
+      ['claude_individual', 'claude_team', 'claude_department', 'claude_enterprise'].forEach(cid => {
+        const el = document.getElementById(`sparkline-claude-${cid}`);
+        if (el) {
+          const match = data.series.find(s => (s.id === cid || s.key === cid));
+          if (match && match.points && match.points.length > 0) {
+            el.innerHTML = this.generateInlineSparkline(match.points, match.color || "#38bdf8");
+          }
+        }
+      });
+    } else if (providerKey === 'gemini') {
+      const acctEl = document.getElementById("sparkline-gemini-gemini_account");
+      if (acctEl) {
+        const match = data.series.find(s => s.id === 'gemini_account' || s.key === 'gemini_account');
+        if (match && match.points && match.points.length > 0) {
+          acctEl.innerHTML = this.generateInlineSparkline(match.points, match.color || "#60a5fa");
+        }
+      }
+      const sparklineDivs = document.querySelectorAll("[id^='sparkline-gemini-']");
+      sparklineDivs.forEach(div => {
+        if (div.id === "sparkline-gemini-gemini_account") return;
+        const rawId = div.id.replace("sparkline-gemini-", "");
+        const normRaw = rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const match = data.series.find(s => {
+          const sid = String(s.id || s.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return sid === normRaw || sid.includes(normRaw) || normRaw.includes(sid);
+        });
+        if (match && match.points && match.points.length > 0) {
+          div.innerHTML = this.generateInlineSparkline(match.points, match.color || "#34d399");
+        }
+      });
+    }
   },
 
   _buildSyntheticHierarchicalTrends(providerKey, windowPeriod) {
@@ -1662,7 +1757,8 @@ window.App = {
     });
     const maxVal = Math.max(...allPoints, 50);
 
-    const width = 860;
+    const cWidth = container.clientWidth || container.getBoundingClientRect().width || 0;
+    const width = Math.max(cWidth > 20 ? Math.floor(cWidth) : 860, 360);
     const height = 180;
     const padL = this.showAxisLabels ? 60 : 35;
     const padR = 25;
@@ -1678,18 +1774,24 @@ window.App = {
       const y = padT + (plotH * (1.0 - ratio));
       const val = Math.round(maxVal * ratio);
       gridHtml += `
-        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4,4"/>
+        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4,4" vector-effect="non-scaling-stroke"/>
         <text x="${padL - 6}" y="${y + 3}" fill="#64748b" font-size="9" text-anchor="end" font-family="monospace">${val >= 1000 ? (val/1000).toFixed(0)+'k' : val}</text>
       `;
     });
 
-    // Time axis labels
+    // Time axis labels (dynamically spaced and localized if keys available)
     let axisHtml = "";
-    labels.forEach((lbl, idx) => {
-      if (idx % Math.ceil(n / 6) === 0 || idx === n - 1) {
+    const localLabels = (trendsData.keys && trendsData.keys.length === n)
+      ? trendsData.keys.map(k => this.formatLocalTime(k))
+      : labels;
+    const maxLabels = Math.max(4, Math.floor(plotW / 85));
+    const labelInterval = Math.max(1, Math.ceil(n / maxLabels));
+
+    localLabels.forEach((lbl, idx) => {
+      if (idx % labelInterval === 0 || idx === n - 1) {
         const x = padL + (idx * step);
         axisHtml += `
-          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 3}" stroke="rgba(255,255,255,0.15)"/>
+          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 3}" stroke="rgba(255,255,255,0.15)" vector-effect="non-scaling-stroke"/>
           <text x="${x}" y="${padT + plotH + 14}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${lbl}</text>
         `;
       }
@@ -1731,6 +1833,7 @@ window.App = {
               fill="none" 
               stroke="${s.color}" 
               stroke-width="2.5" 
+              vector-effect="non-scaling-stroke"
               opacity="${isHidden ? '0' : '0.9'}" 
               stroke-linecap="round" 
               stroke-linejoin="round" 
@@ -1787,7 +1890,7 @@ window.App = {
 
         <!-- SVG Multi-Series Plot with Glow Filter -->
         <div style="width: 100%; height: 180px; position: relative;">
-          <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="overflow: visible;">
+          <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" style="overflow: visible;">
             <defs>
               <filter id="glow-${providerKey}" x="-30%" y="-30%" width="160%" height="160%">
                 <feGaussianBlur stdDeviation="3.5" result="coloredBlur"/>
@@ -1797,7 +1900,7 @@ window.App = {
                 </feMerge>
               </filter>
             </defs>
-            <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.15)"/>
+            <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.15)" stroke-width="1" vector-effect="non-scaling-stroke"/>
             ${gridHtml}
             ${axisHtml}
             ${axisTitlesHtml}
@@ -2637,6 +2740,7 @@ window.App = {
 
   async syncProvider(provider) {
     try {
+      this.cachedHierarchicalTrends = {};
       await fetch("/api/providers/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3534,8 +3638,8 @@ window.App = {
     if (isAllZero || (min === 0 && max === 0)) {
       const yZero = (h - pad).toFixed(1);
       return `
-        <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);" title="No activity in window (0 tokens)">
-          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+        <svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" style="max-width: 140px; background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); display: block;" title="No activity in window (0 tokens)">
+          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="2,2"/>
           <text x="${w / 2}" y="${h / 2 + 3}" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
         </svg>
       `;
@@ -3552,8 +3656,8 @@ window.App = {
     const lastY = (h - pad - ((points[points.length - 1] - min) / range) * (h - pad * 2)).toFixed(1);
 
     return `
-      <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
-        <polyline fill="none" stroke="${color}" stroke-width="2" points="${coords}" stroke-linecap="round" stroke-linejoin="round"/>
+      <svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" style="max-width: 140px; background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); display: block;">
+        <polyline fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" points="${coords}" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="${lastX}" cy="${lastY}" r="2.5" fill="${color}" stroke="#ffffff" stroke-width="1"/>
       </svg>
     `;
