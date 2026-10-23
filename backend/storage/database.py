@@ -1863,11 +1863,14 @@ class UsageDatabase(ReportingEngineMixin):
         self,
         provider: str,
         window: str = "24h",
-        scope: str = "individual"
+        scope: str = "individual",
+        bucket_minutes: Optional[int] = None,
+        mode: str = "interval_delta"
     ) -> Dict[str, Any]:
         """
         Returns multi-series time-bucketed trend curves for a provider and all its child
         hierarchical entities (Organization, Department, Team, Individual, Accounts, API Keys, Models).
+        Supports dynamic bucket_minutes (1..60m) and mode ('interval_delta' | 'cumulative').
         """
         prov_key = provider.lower()
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -1895,12 +1898,33 @@ class UsageDatabase(ReportingEngineMixin):
             "1y": (12, 43800, "Last 12 Months", "%b '%y"),
         }
 
+        win_mins_map = {
+            "1h": 60, "3h": 180, "6h": 360, "12h": 720, "24h": 1440, "48h": 2880,
+            "3d": 4320, "5d": 7200, "7d": 10080, "10d": 14400, "15d": 21600,
+            "30d": 43200, "90d": 129600, "3m": 129600, "180d": 259200, "6m": 259200,
+            "365d": 525600, "12m": 525600, "1y": 525600,
+        }
+
         if win_norm in window_specs:
             window = win_norm
             num_bins, step_min, window_label, lbl_fmt = window_specs[win_norm]
         else:
             window = "24h"
             num_bins, step_min, window_label, lbl_fmt = window_specs["24h"]
+
+        win_mins = win_mins_map.get(window, 1440)
+        valid_buckets = (1, 5, 10, 15, 30, 60)
+        if bucket_minutes is not None:
+            try:
+                b_min = int(bucket_minutes)
+                if b_min in valid_buckets:
+                    step_min = b_min
+                    if win_mins > 1440 and (win_mins // step_min) > 288:
+                        step_min = max(step_min, win_mins // 120)
+                    num_bins = max(1, win_mins // step_min)
+                    lbl_fmt = "%H:%M" if win_mins <= 1440 else ("%b %d %H:%M" if win_mins <= 7200 else "%b %d")
+            except (ValueError, TypeError):
+                pass
 
         total_mins = num_bins * step_min
         cutoff = now - datetime.timedelta(minutes=total_mins)
@@ -1909,13 +1933,17 @@ class UsageDatabase(ReportingEngineMixin):
         for i in range(num_bins - 1, -1, -1):
             t = now - datetime.timedelta(minutes=i * step_min)
             t_local = t.astimezone()
-            labels.append(t_local.strftime(lbl_fmt))
-            if step_min < 60:
-                keys.append(t.strftime("%Y-%m-%dT%H:%M")[:15])
-            elif step_min < 1440:
-                keys.append(t.strftime("%Y-%m-%dT%H"))
+            if win_mins <= 60 or step_min < 60:
+                labels.append(t_local.strftime("%H:%M"))
+            elif win_mins <= 1440:
+                labels.append(t_local.strftime("%H:%M"))
+            elif win_mins <= 43200:
+                labels.append(t_local.strftime("%b %d %H:%M") if win_mins <= 7200 else t_local.strftime("%b %d"))
             else:
-                keys.append(t.strftime("%Y-%m-%d"))
+                labels.append(t_local.strftime("%Y-%m-%d"))
+
+            # Always format keys as canonical ISO 8601 with minutes for accurate JS Date parsing
+            keys.append(t.strftime("%Y-%m-%dT%H:%M"))
 
         key_to_idx = {k: idx for idx, k in enumerate(keys)}
         cutoff_epoch = cutoff.timestamp()
@@ -2259,10 +2287,23 @@ class UsageDatabase(ReportingEngineMixin):
                 "total_tokens": sum(s_pts)
             })
 
+        mode_val = "cumulative" if str(mode).lower() == "cumulative" else "interval_delta"
+        if mode_val == "cumulative":
+            for s in series:
+                pts = s.get("points", [])
+                running = 0
+                cum_pts = []
+                for p in pts:
+                    running += int(p or 0)
+                    cum_pts.append(running)
+                s["points"] = cum_pts
+
         return {
             "provider": prov_key,
             "window": window,
             "window_label": window_label,
+            "bucket_minutes": step_min,
+            "mode": mode_val,
             "labels": labels,
             "keys": keys,
             "series": series

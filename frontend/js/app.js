@@ -85,7 +85,11 @@ window.App = {
           if (this.lastCompData) {
             Object.keys(this.expandedHierarchy).forEach(k => {
               if (this.expandedHierarchy[k]) {
-                const cachedData = this.cachedHierarchicalTrends[`${k}_${this.trendWindow}_${this.currentScope}`];
+                const bucketMinutes = this.chartGranularity || 5;
+                const mode = this.chartMode || "interval_delta";
+                const cachedData = this.cachedHierarchicalTrends[`${k}_${this.trendWindow}_${bucketMinutes}_${mode}_${this.currentScope}`]
+                  || this.cachedHierarchicalTrends[`${k}_${this.trendWindow}_${this.currentScope}`]
+                  || Object.values(this.cachedHierarchicalTrends).find(c => c && c.provider === k);
                 if (cachedData) {
                   this.renderMultiSeriesTrendChart(`trend-chart-svg-${k}`, cachedData, k);
                 }
@@ -131,6 +135,7 @@ window.App = {
 
   changeChartGranularity(val) {
     this.chartGranularity = parseInt(val, 10) || 5;
+    this.cachedHierarchicalTrends = {};
     this._lastLocalWindowUpdateTs = Date.now();
     const gSelect = document.getElementById("chart-granularity-select");
     const tSelect = document.getElementById("trend-granularity-select");
@@ -146,6 +151,7 @@ window.App = {
 
   changeChartMode(mode) {
     this.chartMode = mode === "cumulative" ? "cumulative" : "interval_delta";
+    this.cachedHierarchicalTrends = {};
     this._lastLocalWindowUpdateTs = Date.now();
     const mSelect = document.getElementById("chart-mode-select");
     const tSelect = document.getElementById("trend-mode-select");
@@ -710,8 +716,12 @@ window.App = {
                       ${key === 'ollama' ? 'LOCAL HARDWARE INFERENCE' : (isIndividualMode ? '1:1 INDIVIDUAL DIRECT TELEMETRY' : ('Active View: ' + (comp.active_scope || 'individual').toUpperCase()))}
                     </span>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #94a3b8; font-family: var(--font-mono);">
+                  <div style="display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: #94a3b8; font-family: var(--font-mono); flex-wrap: wrap;">
                     <span>Window: <strong style="color: #38bdf8;">${this.trendWindow.toUpperCase()}</strong></span>
+                    <span>•</span>
+                    <span>Bucket: <strong style="color: #c084fc;">${this.chartGranularity || 5}m</strong></span>
+                    <span>•</span>
+                    <span>Mode: <strong style="color: #34d399;">${this.chartMode === 'cumulative' ? 'Cumulative Run' : 'Delta Bursts'}</strong></span>
                   </div>
                 </div>
 
@@ -1528,8 +1538,11 @@ window.App = {
 
   getChildRealPoints(provKey, childId) {
     const zeroes = [0, 0, 0, 0, 0, 0, 0, 0];
-    const cacheKey = `${provKey}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
-    const cached = (this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey]) ||
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || "interval_delta";
+    const cacheKey = `${provKey}_${this.trendWindow || '24h'}_${bucketMinutes}_${mode}_${this.currentScope || 'individual'}`;
+    const legacyKey = `${provKey}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
+    const cached = (this.cachedHierarchicalTrends && (this.cachedHierarchicalTrends[cacheKey] || this.cachedHierarchicalTrends[legacyKey] || Object.values(this.cachedHierarchicalTrends).find(c => c && c.provider === provKey))) ||
                    (this.trendsCache && this.trendsCache[provKey]);
     if (cached && cached.series && cached.series.length > 0) {
       const normChild = String(childId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1550,8 +1563,11 @@ window.App = {
     const zeroes = [0, 0, 0, 0, 0, 0, 0, 0];
 
     // Check if we have real cached hierarchical trend series from backend
-    const cacheKey = `${key}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
-    const cached = (this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey]) ||
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || "interval_delta";
+    const cacheKey = `${key}_${this.trendWindow || '24h'}_${bucketMinutes}_${mode}_${this.currentScope || 'individual'}`;
+    const legacyKey = `${key}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
+    const cached = (this.cachedHierarchicalTrends && (this.cachedHierarchicalTrends[cacheKey] || this.cachedHierarchicalTrends[legacyKey] || Object.values(this.cachedHierarchicalTrends).find(c => c && c.provider === key))) ||
                    (this.trendsCache && this.trendsCache[key]);
     if (cached && cached.series && cached.series.length > 0) {
       return cached.series.map(s => ({
@@ -1635,12 +1651,14 @@ window.App = {
     if (!container) return;
     const windowPeriod = this.trendWindow || '24h';
     const scope = this.currentScope || 'individual';
-    const cacheKey = `${providerKey}_${windowPeriod}_${scope}`;
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || 'interval_delta';
+    const cacheKey = `${providerKey}_${windowPeriod}_${bucketMinutes}_${mode}_${scope}`;
 
     let data = this.cachedHierarchicalTrends[cacheKey];
     if (!data) {
       try {
-        const res = await fetch(`/api/usage/trends/hierarchy?provider=${providerKey}&window=${windowPeriod}&scope=${scope}`);
+        const res = await fetch(`/api/usage/trends/hierarchy?provider=${providerKey}&window=${windowPeriod}&bucket_minutes=${bucketMinutes}&mode=${mode}&scope=${scope}`);
         if (res.ok) {
           data = await res.json();
           this.cachedHierarchicalTrends[cacheKey] = data;
@@ -1712,7 +1730,9 @@ window.App = {
 
   _buildSyntheticHierarchicalTrends(providerKey, windowPeriod) {
     const childSeries = this._getProviderChildSeries(providerKey, { tokens_today: 0 });
-    const n = 12;
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || 'interval_delta';
+    const n = Math.min(288, Math.max(12, Math.floor(1440 / bucketMinutes)));
     const labels = Array.from({ length: n }, (_, i) => `${i * 2}:00`);
     const series = childSeries.map(cs => {
       const sKey = cs.key || cs.id;
@@ -1729,6 +1749,8 @@ window.App = {
     return {
       provider: providerKey,
       window: windowPeriod,
+      bucket_minutes: bucketMinutes,
+      mode: mode,
       scope: this.currentScope,
       labels: labels,
       series: series
@@ -1883,9 +1905,17 @@ window.App = {
           <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
             ${legendPillsHtml}
           </div>
-          <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem; font-family: var(--font-mono);">
-            Window: ${trendsData.window || this.trendWindow}
-          </span>
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem; font-family: var(--font-mono);">
+              Window: ${(trendsData.window || this.trendWindow || "24h").toUpperCase()}
+            </span>
+            <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 0.68rem; font-family: var(--font-mono);">
+              Bucket: ${trendsData.bucket_minutes || this.chartGranularity || 5}m
+            </span>
+            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.68rem; font-family: var(--font-mono);">
+              ${(trendsData.mode || this.chartMode) === 'cumulative' ? 'Cumulative Run' : 'Delta Bursts'}
+            </span>
+          </div>
         </div>
 
         <!-- SVG Multi-Series Plot with Glow Filter -->
@@ -1992,7 +2022,13 @@ window.App = {
     } else {
       set.add(seriesKey);
     }
-    const cachedData = this.cachedHierarchicalTrends[`${providerKey}_${this.trendWindow}_${this.currentScope}`]
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || "interval_delta";
+    const cacheKey = `${providerKey}_${this.trendWindow}_${bucketMinutes}_${mode}_${this.currentScope}`;
+    const legacyKey = `${providerKey}_${this.trendWindow}_${this.currentScope}`;
+    const cachedData = this.cachedHierarchicalTrends[cacheKey]
+      || this.cachedHierarchicalTrends[legacyKey]
+      || Object.values(this.cachedHierarchicalTrends).find(c => c && c.provider === providerKey)
       || this._buildSyntheticHierarchicalTrends(providerKey, this.trendWindow);
     this.renderMultiSeriesTrendChart(containerId, cachedData, providerKey);
   },
@@ -6008,6 +6044,9 @@ window.App = {
     try {
       let s = String(isoStr).trim();
       if (!s) return "-";
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(s)) {
+        s += ":00";
+      }
       if (!s.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(s)) {
         s += "Z";
       }
@@ -6030,6 +6069,9 @@ window.App = {
     try {
       let s = String(isoStr).trim();
       if (!s) return "-";
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(s)) {
+        s += ":00";
+      }
       if (!s.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(s)) {
         s += "Z";
       }

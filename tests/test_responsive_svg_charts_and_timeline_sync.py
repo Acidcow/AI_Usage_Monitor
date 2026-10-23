@@ -272,9 +272,9 @@ class TestResponsiveSvgChartsAndTimelineSync(unittest.TestCase):
         """Verifies that keys returned by hierarchical trends allow browser local-time conversion."""
         res = self.db.get_hierarchical_trends(provider="ollama", window="24h")
         self.assertTrue(len(res["keys"]) > 0)
-        # 24h keys format is %Y-%m-%dT%H
+        # 24h keys format is %Y-%m-%dT%H:%M for precise local time conversion
         for k in res["keys"]:
-            self.assertTrue(re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}$", k), f"Key {k} is not in expected %Y-%m-%dT%H format")
+            self.assertTrue(re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}(:\d{2})?$", k), f"Key {k} is not in expected format")
 
     def test_18_inline_sparkline_responsive_viewbox(self):
         """Verifies generateInlineSparkline produces responsive viewBox with non-scaling-stroke."""

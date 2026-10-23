@@ -262,7 +262,18 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             prov = query.get("provider", ["claude"])[0]
             window = query.get("window", ["24h"])[0]
             scope = query.get("scope", ["individual"])[0]
-            trends = srv.database.get_hierarchical_trends(provider=prov, window=window, scope=scope)
+            try:
+                bucket_minutes = int(query.get("bucket_minutes", [None])[0])
+            except (ValueError, TypeError):
+                bucket_minutes = None
+            mode = query.get("mode", ["interval_delta"])[0]
+            trends = srv.database.get_hierarchical_trends(
+                provider=prov,
+                window=window,
+                scope=scope,
+                bucket_minutes=bucket_minutes,
+                mode=mode,
+            )
             return self._send_json(200, trends)
 
         if path == "/api/usage/pivot":
