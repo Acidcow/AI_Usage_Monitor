@@ -997,6 +997,17 @@ window.App = {
           return { key: p, label: displayNames[p] || p, color: provColors[p] || "#38bdf8", points: pPts };
         });
 
+        const totalEstateTokens = comp.total_tokens_today || Object.values(comp.providers || {}).reduce((acc, p) => acc + (p.tokens_today || 0), 0) || 1;
+        let sharePctDisplay = "0%";
+        if (comp.providers && totalEstateTokens > 0 && grpTokens > 0) {
+          const rawPct = (grpTokens / totalEstateTokens) * 100;
+          if (rawPct > 0 && rawPct < 1) {
+            sharePctDisplay = "<1%";
+          } else {
+            sharePctDisplay = `${Math.min(100, Math.round(rawPct))}%`;
+          }
+        }
+
         html += `
           <tr style="background: rgba(14, 165, 233, 0.04); border-left: 2px solid #06b6d4;">
             <td>
@@ -1018,7 +1029,7 @@ window.App = {
               ${Number(grpTokens).toLocaleString()}
             </td>
             <td style="font-family: var(--font-mono); color: var(--accent-cyan); font-weight: 600;">
-              ${comp.providers ? Math.round((grpTokens / Math.max(1, (comp.summary?.total_tokens_today || 10000))) * 100) : 0}%
+              ${sharePctDisplay}
             </td>
             <td>
               <div style="display: flex; align-items: center; gap: 8px;">
@@ -3287,7 +3298,10 @@ window.App = {
         totSavingsEl.innerText = `(-$${totSav.toFixed(4)})`;
       }
       if (totEvtEl) totEvtEl.innerText = Number(summary.total_events || 0).toLocaleString();
-      if (totDimEl) totDimEl.innerText = `${Number(summary.distinct_dimensions || (data.rows ? data.rows.length : 0))} slices`;
+      if (totDimEl) {
+        const sliceCount = Number(summary.distinct_dimensions !== undefined ? summary.distinct_dimensions : (data.rows ? data.rows.length : 0));
+        totDimEl.innerText = sliceCount === 1 ? '1 slice' : `${sliceCount.toLocaleString()} slices`;
+      }
 
       this.lastReportRows = data.rows || [];
       this.renderHistoricalReportRows(this.lastReportRows);

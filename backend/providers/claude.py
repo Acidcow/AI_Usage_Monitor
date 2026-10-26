@@ -169,12 +169,43 @@ class ClaudeProvider(BaseProvider):
     Supports: Direct API poller, Transparent Proxy ingestion, CLI cache scanner, and Simulation.
     """
 
+    @staticmethod
+    def is_valid_anthropic_api_key(key: Optional[str]) -> bool:
+        """Validates that a string has the structural signature of an Anthropic API key."""
+        if not key or not isinstance(key, str):
+            return False
+        k = key.strip()
+        if k.lower() in ("proxy", "dummy", "vault", "local", "demo", "mock", "none", "sk-ant-secret123", "sk-ant-sec...", "sk-ant-secret-999", "sk-ant-dummy"):
+            return False
+        if "..." in k or k.endswith("."):
+            return False
+        if not k.startswith("sk-ant-"):
+            return False
+        if len(k) < 30:
+            return False
+        return True
+
     def __init__(self, database, vault, diagnostics):
         super().__init__(database, vault, diagnostics)
         self._simulation_mode = False
         self._cached_plan = "Team Enterprise"
         self._tokens_limit = 400000
         self._requests_limit = 1000
+
+        # AIUM-909: In-memory TTL cache and 429 rate limit backoff guards
+        self._oauth_telemetry_cache: Optional[Dict[str, Any]] = None
+        self._oauth_telemetry_cache_time: float = 0.0
+        self._oauth_rate_limited_until: float = 0.0
+        self._oauth_cache_ttl_seconds: float = 300.0  # 5 minutes
+
+        # AIUM-909: Automatic sanitization of invalid placeholder keys from vault
+        if hasattr(self.vault, "get_credential") and hasattr(self.vault, "delete_credential"):
+            try:
+                cur_key = self.vault.get_credential("claude", "default")
+                if cur_key and not self.is_valid_anthropic_api_key(cur_key):
+                    self.vault.delete_credential("claude", "default")
+            except Exception:
+                pass
 
     def calibrate_limits(
         self,
@@ -485,6 +516,8 @@ class ClaudeProvider(BaseProvider):
 
     def _request_oauth_json(self, url: str) -> Optional[Dict[str, Any]]:
         """Makes an authenticated HTTP request using the decrypted OAuth token."""
+        if time.time() < self._oauth_rate_limited_until:
+            return None
         token = self._discover_oauth_token()
         if not token:
             return None
@@ -498,6 +531,10 @@ class ClaudeProvider(BaseProvider):
             with urllib.request.urlopen(req, timeout=7.0) as resp:
                 if resp.status == 200:
                     return json.loads(resp.read().decode("utf-8", errors="ignore"))
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                self._oauth_rate_limited_until = time.time() + 600.0  # 10m backoff
+            return None
         except Exception:
             return None
         return None
@@ -515,8 +552,53 @@ class ClaudeProvider(BaseProvider):
             "timestamp": latest.get("t")
         }
 
-    def fetch_live_oauth_telemetry(self) -> Dict[str, Any]:
+    def _scan_offline_plan_history(self) -> Dict[str, Any]:
+        """Offline fallback: scan plan-usage-history.json."""
+        for d in self._get_claude_desktop_data_dirs():
+            history_file = d / "plan-usage-history.json"
+            if history_file.exists():
+                try:
+                    data = json.loads(history_file.read_text(encoding="utf-8", errors="ignore"))
+                    sample = self._parse_latest_plan_usage_sample(data)
+                    fh = sample.get("fh", 0)
+                    sd = sample.get("sd", 0)
+                    sess_rem = max(0.0, min(100.0, round(100.0 - float(fh), 1)))
+                    week_rem = max(0.0, min(100.0, round(100.0 - float(sd), 1)))
+                    self.db.update_provider_snapshot(
+                        provider="claude",
+                        plan_type="Claude Pro",
+                        status="ACTIVE (Local Cache)",
+                        session_remaining_pct=sess_rem,
+                        weekly_remaining_pct=week_rem,
+                        individual_session_rem_pct=sess_rem,
+                        individual_weekly_rem_pct=week_rem,
+                        active_scope="individual"
+                    )
+                    return {
+                        "success": True,
+                        "session_remaining_pct": sess_rem,
+                        "weekly_remaining_pct": week_rem,
+                        "fallback": True
+                    }
+                except Exception:
+                    pass
+        return {"success": False, "error": "Unable to fetch live OAuth telemetry or local plan history", "fallback": True}
+
+    def fetch_live_oauth_telemetry(self, force: bool = False) -> Dict[str, Any]:
         """Fetches live personal session and weekly quotas directly from Anthropic OAuth API with fallback."""
+        now = time.time()
+        if not force and self._oauth_telemetry_cache and (now - self._oauth_telemetry_cache_time < self._oauth_cache_ttl_seconds):
+            res = dict(self._oauth_telemetry_cache)
+            res["cached"] = True
+            return res
+
+        if not force and now < self._oauth_rate_limited_until:
+            if self._oauth_telemetry_cache:
+                res = dict(self._oauth_telemetry_cache)
+                res["cached"] = True
+                return res
+            return self._scan_offline_plan_history()
+
         usage_data = self._request_oauth_json("https://api.anthropic.com/api/oauth/usage")
         profile_data = self._request_oauth_json("https://api.anthropic.com/api/oauth/profile")
 
@@ -575,44 +657,19 @@ class ClaudeProvider(BaseProvider):
                 individual_weekly_rem_pct=week_rem,
                 active_scope="individual"
             )
-            return {
+            result = {
                 "success": True,
                 "session_remaining_pct": sess_rem,
                 "weekly_remaining_pct": week_rem,
                 "plan_type": plan_type,
-                "user_name": user_name
+                "user_name": user_name,
+                "cached": False
             }
+            self._oauth_telemetry_cache = result
+            self._oauth_telemetry_cache_time = now
+            return result
 
-        # Offline fallback: scan plan-usage-history.json
-        for d in self._get_claude_desktop_data_dirs():
-            history_file = d / "plan-usage-history.json"
-            if history_file.exists():
-                try:
-                    data = json.loads(history_file.read_text(encoding="utf-8", errors="ignore"))
-                    sample = self._parse_latest_plan_usage_sample(data)
-                    fh = sample.get("fh", 0)
-                    sd = sample.get("sd", 0)
-                    sess_rem = max(0.0, min(100.0, round(100.0 - float(fh), 1)))
-                    week_rem = max(0.0, min(100.0, round(100.0 - float(sd), 1)))
-                    self.db.update_provider_snapshot(
-                        provider="claude",
-                        plan_type="Claude Pro",
-                        status="ACTIVE (Local Cache)",
-                        session_remaining_pct=sess_rem,
-                        weekly_remaining_pct=week_rem,
-                        individual_session_rem_pct=sess_rem,
-                        individual_weekly_rem_pct=week_rem,
-                        active_scope="individual"
-                    )
-                    return {
-                        "success": True,
-                        "session_remaining_pct": sess_rem,
-                        "weekly_remaining_pct": week_rem,
-                        "fallback": True
-                    }
-                except Exception:
-                    pass
-        return {"success": False, "error": "Unable to fetch live OAuth telemetry or local plan history"}
+        return self._scan_offline_plan_history()
 
     def scan_desktop_indexeddb(self) -> int:
         """Scans Claude Desktop IndexedDB leveldb and blob storage for assistant turns and usage."""
@@ -976,9 +1033,9 @@ class ClaudeProvider(BaseProvider):
         # 2. Ingest local CLI and Claude Desktop IndexedDB turns
         local_ingested = self.scan_local_logs()
 
-        # 3. If direct API key exists in vault, probe messages endpoint to refresh headers
+        # 3. If direct API key exists in vault and is structurally valid, probe messages endpoint to refresh headers
         api_key = self.vault.get_credential("claude", "default")
-        if not api_key:
+        if not api_key or not self.is_valid_anthropic_api_key(api_key):
             return {
                 "success": True,
                 "mode": "live_sync",

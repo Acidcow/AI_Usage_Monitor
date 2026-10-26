@@ -297,7 +297,7 @@ class TestProviderTelemetryCaptureAndDisplay(unittest.TestCase):
         )
 
         with patch.object(self.claude, "scan_local_logs", return_value=0):
-            with patch.object(self.vault, "get_credential", return_value="sk-ant-FakeKey"):
+            with patch.object(self.vault, "get_credential", return_value="sk-ant-api03-FakeKeyForTestingRateLimits12345678901234567890"):
                 with patch("urllib.request.urlopen", side_effect=err_429):
                     res = self.claude.sync_usage()
                     self.assertFalse(res["success"])
