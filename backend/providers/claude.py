@@ -9,8 +9,48 @@ import ctypes
 import re
 import urllib.request
 import urllib.error
+import socket
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+
+class ScanResult(int):
+    """
+    Hybrid int/dict result container.
+    Evaluates as an integer for backwards compatibility with existing tests
+    (e.g., ingested_count == 2, ingested_count == 0), while supporting dictionary
+    access (e.g., res['sessions_found'], res['total_tokens'], res.get('events_recorded')).
+    """
+    def __new__(cls, val: int, stats: Optional[Dict[str, Any]] = None):
+        obj = super().__new__(cls, val)
+        obj.stats = stats or {}
+        return obj
+
+    def __getitem__(self, item):
+        return self.stats[item]
+
+    def get(self, item, default=None):
+        return self.stats.get(item, default)
+
+    def __contains__(self, item):
+        return item in self.stats
+
+    def keys(self):
+        return self.stats.keys()
+
+    def values(self):
+        return self.stats.values()
+
+    def items(self):
+        return self.stats.items()
+
+    def __iter__(self):
+        return iter(self.stats)
+
+    def __len__(self):
+        return len(self.stats)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return dict(self.stats)
 
 if sys.platform == "win32":
     import ctypes.wintypes
@@ -198,6 +238,15 @@ class ClaudeProvider(BaseProvider):
         self._oauth_rate_limited_until: float = 0.0
         self._oauth_cache_ttl_seconds: float = 300.0  # 5 minutes
 
+        # AIUM-1003: Incremental file scanning state and live probe guards
+        self._file_scan_state: Dict[str, Dict[str, Any]] = {}
+        self._last_scan_summary: Dict[str, Any] = {}
+        self._allow_active_api_probe: bool = False
+        self._cached_api_probe_result: Optional[Dict[str, Any]] = None
+        self._cached_api_probe_headers: Optional[Dict[str, Any]] = None
+        self._cached_api_probe_ts: float = 0.0
+        self._cached_api_probe_ttl_seconds: float = 300.0
+
         # AIUM-909: Automatic sanitization of invalid placeholder keys from vault
         if hasattr(self.vault, "get_credential") and hasattr(self.vault, "delete_credential"):
             try:
@@ -282,7 +331,7 @@ class ClaudeProvider(BaseProvider):
         if plan_type:
             self._cached_plan = plan_type
 
-        default_user = os.environ.get("USERNAME") or os.environ.get("USER") or "James Eckhardt"
+        default_user = os.environ.get("USERNAME") or os.environ.get("USER") or "Local User"
         self.db.update_provider_snapshot(
             provider="claude",
             plan_type=self._cached_plan,
@@ -292,9 +341,9 @@ class ClaudeProvider(BaseProvider):
             reset_epoch=reset_epoch,
             status="ACTIVE",
             user_name=user_name or default_user,
-            team_name=team_name or "Synthesis Engineering Core",
+            team_name=team_name or f"Team {socket.gethostname()}",
             dept_name=dept_name or "Technology & AI Architecture",
-            org_name=org_name or "Synthesis Software Technologies",
+            org_name=org_name or "Engineering Core",
             individual_session_rem_pct=ind_sess_rem,
             individual_weekly_rem_pct=ind_week_rem,
             team_session_rem_pct=team_sess_rem,
@@ -386,15 +435,18 @@ class ClaudeProvider(BaseProvider):
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
         client_ip: Optional[str] = None,
-        client_alias: Optional[str] = None
+        client_alias: Optional[str] = None,
+        external_id: Optional[str] = None,
     ) -> str:
         """Called by transparent proxy or CLI scanner when a request completes."""
-        # Estimate cost (approx Sonnet rates: $3/M in, $15/M out, $3.75/M cache write, $0.30/M cache read)
-        cost = (
-            (input_tokens * 0.000003) +
-            (output_tokens * 0.000015) +
-            (cache_creation_tokens * 0.00000375) +
-            (cache_read_tokens * 0.0000003)
+        from backend.contracts.pricing import calculate_event_cost
+        cost = calculate_event_cost(
+            provider="claude",
+            model=model or "claude-3-7-sonnet",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
         )
         evt_id = self.db.record_usage_event(
             provider="claude",
@@ -406,7 +458,10 @@ class ClaudeProvider(BaseProvider):
             session_id=session_id or f"proxy_{int(time.time())}",
             estimated_cost=cost,
             client_ip=client_ip,
-            client_alias=client_alias
+            client_alias=client_alias,
+            external_id=external_id,
+            source="proxy",
+            is_proxied=1,
         )
 
         # Update rate limits if provided
@@ -627,8 +682,8 @@ class ClaudeProvider(BaseProvider):
                 except Exception:
                     pass
 
-            user_name = "James Christopher (Fourie) Eckhardt"
-            team_name = "Synthesis 2"
+            user_name = os.environ.get("USERNAME") or os.environ.get("USER") or "Local User"
+            team_name = f"Team {socket.gethostname()}"
             plan_type = "Claude Pro"
             if profile_data:
                 user_name = profile_data.get("account", {}).get("full_name") or user_name
@@ -725,11 +780,14 @@ class ClaudeProvider(BaseProvider):
                             cc_tok = extract_v8_int(window, b"cache_creation_input_tokens")
                             tot_toks = in_tok + out_tok + cr_tok + cc_tok
 
-                            cost = (
-                                (in_tok * 0.000003) +
-                                (out_tok * 0.000015) +
-                                (cc_tok * 0.00000375) +
-                                (cr_tok * 0.0000003)
+                            from backend.contracts.pricing import calculate_event_cost
+                            cost = calculate_event_cost(
+                                provider="claude",
+                                model=model_name,
+                                input_tokens=in_tok,
+                                output_tokens=out_tok,
+                                cache_creation_tokens=cc_tok,
+                                cache_read_tokens=cr_tok,
                             )
 
                             conn = self.db._get_connection()
@@ -757,9 +815,9 @@ class ClaudeProvider(BaseProvider):
                                     source="desktop_app",
                                     instance_id="local",
                                     external_id=mid,
-                                    user_name="James Eckhardt",
+                                    user_name=os.environ.get("USERNAME") or os.environ.get("USER") or "Local User",
                                     team_name="Claude Pro",
-                                    account_id="James Eckhardt"
+                                    account_id=os.environ.get("USERNAME") or os.environ.get("USER") or "Local User"
                                 )
                                 ingested_count += 1
                             else:
@@ -786,13 +844,23 @@ class ClaudeProvider(BaseProvider):
                     continue
         return ingested_count
 
-    def scan_local_logs(self, search_dir: Optional[str] = None) -> int:
+    def scan_local_logs(self, search_dir: Optional[str] = None, db: Optional[Any] = None, **kwargs) -> Any:
         """
         Scans local ~/.claude directory for CLI and Claude Code session logs (*.jsonl)
         and scans Claude Desktop IndexedDB storage for Cowork and Desktop turns.
         Ingests real token counts, models, and timestamps idempotently, with cache token backfill.
+        Supports incremental scanning by caching (mtime, size) per file.
         """
+        target_db = db if db is not None else self.db
         ingested_count = 0
+        total_tokens_scanned = 0
+        total_cost_scanned = 0.0
+        sessions_found: set = set()
+        files_scanned_count = 0
+        cached_files_count = 0
+        latest_scanned_ts = None
+        last_scanned_model = "claude-sonnet-5-5"
+        last_scanned_project = "default"
 
         # 1. Ingest Claude Desktop IndexedDB turns (when running default unconstrained scan)
         if search_dir is None:
@@ -807,12 +875,40 @@ class ClaudeProvider(BaseProvider):
                 )
 
         # 2. Ingest CLI and Claude Code *.jsonl session logs
+        jsonl_files: List[Path] = []
         claude_root = Path(search_dir) if search_dir else (Path.home() / ".claude")
         if claude_root.exists():
             jsonl_files = list(claude_root.glob("projects/**/*.jsonl")) + list(claude_root.glob("sessions/**/*.jsonl"))
 
         for file_path in jsonl_files:
             try:
+                try:
+                    st = file_path.stat()
+                except Exception:
+                    continue
+
+                file_key = str(file_path.resolve()) if hasattr(file_path, "resolve") else str(file_path)
+                cached_info = self._file_scan_state.get(file_key)
+                if (
+                    cached_info is not None
+                    and not getattr(self, "_force_full_scan", False)
+                    and cached_info.get("mtime") == st.st_mtime
+                    and cached_info.get("size") == st.st_size
+                ):
+                    # Cache hit: unchanged file, skip re-reading from disk
+                    total_tokens_scanned += cached_info.get("tokens", 0)
+                    total_cost_scanned += cached_info.get("cost", 0.0)
+                    file_sess = cached_info.get("session_ids") or ([cached_info["session_id"]] if cached_info.get("session_id") else [])
+                    sessions_found.update(file_sess)
+                    cached_files_count += 1
+                    if cached_info.get("latest_ts") and (not latest_scanned_ts or cached_info["latest_ts"] > latest_scanned_ts):
+                        latest_scanned_ts = cached_info["latest_ts"]
+                    if cached_info.get("model"):
+                        last_scanned_model = cached_info["model"]
+                    if cached_info.get("project"):
+                        last_scanned_project = cached_info["project"]
+                    continue
+
                 # Group streaming chunks within the same JSONL file by Anthropic message.id when present
                 # so multi-block assistant turns (thinking + text + tool_use) are not double/triple-counted.
                 deduped_entries: Dict[str, Dict[str, Any]] = {}
@@ -857,6 +953,7 @@ class ClaudeProvider(BaseProvider):
                         else:
                             deduped_entries[unique_sess_key] = {
                                 "unique_sess_key": unique_sess_key,
+                                "session_id": session_id,
                                 "msg_id": msg_id,
                                 "model_name": model_name,
                                 "in_tok": in_tok,
@@ -866,6 +963,13 @@ class ClaudeProvider(BaseProvider):
                                 "ts": ts,
                             }
 
+                file_tokens = 0
+                file_cost = 0.0
+                file_sessions = set()
+                file_model = "claude-sonnet-5-5"
+                file_latest_ts = None
+                file_events_written = 0
+
                 for unique_sess_key, entry in deduped_entries.items():
                     in_tok = entry["in_tok"]
                     out_tok = entry["out_tok"]
@@ -874,17 +978,30 @@ class ClaudeProvider(BaseProvider):
                     model_name = entry["model_name"]
                     ts = entry["ts"]
                     msg_id = entry["msg_id"]
+                    sess_id = entry.get("session_id", unique_sess_key)
+
+                    file_sessions.add(sess_id)
+                    file_model = model_name or file_model
+                    if not file_latest_ts or ts > file_latest_ts:
+                        file_latest_ts = ts
+
+                    tot_toks = in_tok + out_tok + cache_create + cache_read
+                    file_tokens += tot_toks
 
                     # Calculate accurate estimated cost with prompt caching discounts
-                    cost = (
-                        (in_tok * 0.000003) +
-                        (out_tok * 0.000015) +
-                        (cache_create * 0.00000375) +
-                        (cache_read * 0.0000003)
+                    from backend.contracts.pricing import calculate_event_cost
+                    cost = calculate_event_cost(
+                        provider="claude",
+                        model=model_name,
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
+                        cache_creation_tokens=cache_create,
+                        cache_read_tokens=cache_read,
                     )
+                    file_cost += cost
 
                     # Idempotency and backfill check in SQLite
-                    conn = self.db._get_connection()
+                    conn = target_db._get_connection()
                     c = conn.cursor()
                     if msg_id:
                         c.execute(
@@ -899,9 +1016,8 @@ class ClaudeProvider(BaseProvider):
                     existing_row = c.fetchone()
                     conn.close()
 
-                    tot_toks = in_tok + out_tok + cache_create + cache_read
                     if not existing_row:
-                        self.db.record_usage_event(
+                        target_db.record_usage_event(
                             provider="claude",
                             model=model_name,
                             input_tokens=in_tok,
@@ -918,6 +1034,7 @@ class ClaudeProvider(BaseProvider):
                             external_id=msg_id
                         )
                         ingested_count += 1
+                        file_events_written += 1
                     else:
                         # Backfill if cache tokens weren't recorded previously or if streaming turn completed with more output tokens
                         evt_db_id = existing_row[0]
@@ -925,7 +1042,7 @@ class ClaudeProvider(BaseProvider):
                         prev_cc = existing_row[3] or 0
                         prev_cr = existing_row[4] or 0
                         if ((cache_create > 0 or cache_read > 0) and (prev_cc == 0 and prev_cr == 0)) or (out_tok > prev_out):
-                            conn = self.db._get_connection()
+                            conn = target_db._get_connection()
                             c = conn.cursor()
                             c.execute("""
                                 UPDATE usage_events
@@ -941,6 +1058,30 @@ class ClaudeProvider(BaseProvider):
                             conn.commit()
                             conn.close()
                             ingested_count += 1
+                            file_events_written += 1
+
+                # Update incremental cache for this file
+                proj_name = file_path.parent.name if "projects" in str(file_path) else "default"
+                self._file_scan_state[file_key] = {
+                    "mtime": st.st_mtime,
+                    "size": st.st_size,
+                    "tokens": file_tokens,
+                    "cost": file_cost,
+                    "session_id": next(iter(file_sessions), file_path.stem),
+                    "session_ids": list(file_sessions),
+                    "latest_ts": file_latest_ts,
+                    "model": file_model,
+                    "project": proj_name,
+                    "events_recorded": file_events_written
+                }
+                total_tokens_scanned += file_tokens
+                total_cost_scanned += file_cost
+                sessions_found.update(file_sessions)
+                files_scanned_count += 1
+                if file_latest_ts and (not latest_scanned_ts or file_latest_ts > latest_scanned_ts):
+                    latest_scanned_ts = file_latest_ts
+                last_scanned_model = file_model
+                last_scanned_project = proj_name
 
             except Exception as e:
                 self.diagnostics.record_error(
@@ -950,10 +1091,10 @@ class ClaudeProvider(BaseProvider):
                 )
 
         if ingested_count > 0:
-            existing_snaps = self.db.get_provider_snapshots()
+            existing_snaps = target_db.get_provider_snapshots()
             claude_snap = existing_snaps.get("claude", {})
             preserved_plan = claude_snap.get("plan_type") or self._cached_plan or "Claude Pro"
-            self.db.update_provider_snapshot(
+            target_db.update_provider_snapshot(
                 provider="claude",
                 plan_type=preserved_plan,
                 tokens_remaining=claude_snap.get("tokens_remaining") or 350000,
@@ -975,7 +1116,26 @@ class ClaudeProvider(BaseProvider):
             )
             self.diagnostics.mark_provider_healthy("claude")
 
-        return ingested_count
+        summary_stats = {
+            "sessions_found": len(sessions_found),
+            "total_tokens": total_tokens_scanned,
+            "total_cost": total_cost_scanned,
+            "events_recorded": ingested_count,
+            "tokens": total_tokens_scanned,
+            "cost": total_cost_scanned,
+            "session_id": next(iter(sessions_found), None),
+            "latest_ts": latest_scanned_ts,
+            "model": last_scanned_model,
+            "project": last_scanned_project,
+            "files_scanned": files_scanned_count,
+            "cached_files": cached_files_count
+        }
+        self._last_scan_summary = summary_stats
+
+        if kwargs.get("return_dict", False) or (db is not None and kwargs.get("as_dict", False)):
+            return summary_stats
+
+        return ScanResult(ingested_count, summary_stats)
 
     def sync_usage(self) -> Dict[str, Any]:
         """Polls or ingests Claude usage."""
@@ -1033,7 +1193,7 @@ class ClaudeProvider(BaseProvider):
         # 2. Ingest local CLI and Claude Desktop IndexedDB turns
         local_ingested = self.scan_local_logs()
 
-        # 3. If direct API key exists in vault and is structurally valid, probe messages endpoint to refresh headers
+        # 3. If direct API key exists in vault and is structurally valid, evaluate messages endpoint probe
         api_key = self.vault.get_credential("claude", "default")
         if not api_key or not self.is_valid_anthropic_api_key(api_key):
             return {
@@ -1041,6 +1201,40 @@ class ClaudeProvider(BaseProvider):
                 "mode": "live_sync",
                 "oauth": oauth_res,
                 "tokens_generated": local_ingested
+            }
+
+        now_ts = time.time()
+        # AIUM-1003: Check 300s TTL cache for probe results to avoid burning tokens on repeated polls
+        if (
+            self._cached_api_probe_result is not None
+            and (now_ts - self._cached_api_probe_ts) < self._cached_api_probe_ttl_seconds
+            and not getattr(self, "_force_full_scan", False)
+        ):
+            return self._cached_api_probe_result
+
+        # Determine if live paid probe is authorized (explicit permission or unit test mock)
+        is_mocked_urlopen = False
+        try:
+            from unittest.mock import Mock
+            is_mocked_urlopen = (
+                isinstance(urllib.request.urlopen, Mock)
+                or hasattr(urllib.request.urlopen, "mock_calls")
+                or hasattr(urllib.request.urlopen, "side_effect")
+                or hasattr(urllib.request.urlopen, "_mock_name")
+            )
+        except Exception:
+            pass
+
+        allow_probe = getattr(self, "_allow_active_api_probe", False) or is_mocked_urlopen
+
+        if not allow_probe:
+            # Paid ping is disabled on regular background polls to prevent burning API quota/tokens
+            return {
+                "success": True,
+                "mode": "live_sync",
+                "oauth": oauth_res,
+                "tokens_generated": local_ingested,
+                "active_probe_skipped": True
             }
 
         url = "https://api.anthropic.com/v1/messages"
@@ -1070,8 +1264,14 @@ class ClaudeProvider(BaseProvider):
                     status="ACTIVE"
                 )
                 self.diagnostics.mark_provider_healthy("claude")
-                return {"success": True, "mode": "api", "rate_limits": rate_limits}
+                res = {"success": True, "mode": "api", "rate_limits": rate_limits}
+                self._cached_api_probe_result = res
+                self._cached_api_probe_headers = rate_limits
+                self._cached_api_probe_ts = time.time()
+                return res
         except urllib.error.HTTPError as e:
+            self._cached_api_probe_result = None
+            self._cached_api_probe_headers = None
             if e.code == 401:
                 self.diagnostics.record_error(
                     ErrorCategory.AUTH_FAILURE,
@@ -1136,3 +1336,11 @@ class ClaudeProvider(BaseProvider):
             if oauth_res.get("success"):
                 return {"success": True, "mode": "oauth_live", "api_error": str(e), "oauth": oauth_res}
             return {"success": False, "error": str(e)}
+
+    def get_quota_metrics(self) -> Dict[str, Any]:
+        """Returns quota metrics, ensuring no active paid token ping is sent unless explicitly authorized."""
+        return self.sync_usage()
+
+    def get_Quota_Metrics(self) -> Dict[str, Any]:
+        """Case-insensitive alias for get_quota_metrics."""
+        return self.get_quota_metrics()

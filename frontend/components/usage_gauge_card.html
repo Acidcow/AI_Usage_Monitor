@@ -90,6 +90,45 @@
   </div>
 </div>
 
+<!-- Prompt Cache Efficiency & Ephemeral TTL Keep-Alive Card (AIUM-1009) -->
+<div id="cache-efficiency-banner" class="glass-card" style="margin-bottom: 28px; border-left: 4px solid var(--accent-cyan); background: linear-gradient(135deg, rgba(6, 182, 212, 0.06), rgba(15, 23, 42, 0.85));">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <div style="width: 52px; height: 52px; border-radius: 12px; background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.35); display: flex; align-items: center; justify-content: center; font-size: 1.8rem; box-shadow: 0 0 16px rgba(6, 182, 212, 0.25);">
+        ⚡
+      </div>
+      <div>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <h3 style="font-size: 1.05rem; font-weight: 700; color: #fff;">Prompt Cache Efficiency &amp; Ephemeral TTL Keep-Alive</h3>
+          <span class="badge" id="val-cache-ttl-badge" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.4); font-size: 0.68rem; font-family: var(--font-mono);">TTL: 5m Ephemeral</span>
+          <span class="badge" id="val-cache-grade-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 0.68rem; font-weight: 700;">Grade: N/A</span>
+        </div>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+          Tracks 5-minute ephemeral prompt cache lifetime, 90% read discount savings vs 25% write surcharge, and net session cost reductions.
+        </p>
+      </div>
+    </div>
+
+    <!-- Savings & Efficiency Metrics Strip -->
+    <div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap;">
+      <div style="text-align: right;">
+        <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em;">Cache Hit Ratio</span>
+        <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 800; color: var(--accent-cyan);" id="val-cache-hit-ratio">0.0%</div>
+      </div>
+      <div style="width: 1px; height: 36px; background: rgba(255, 255, 255, 0.1);"></div>
+      <div style="text-align: right;">
+        <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em;">TTL Countdown</span>
+        <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 800; color: #fbbf24;" id="val-cache-ttl-remaining">0m 0s</div>
+      </div>
+      <div style="width: 1px; height: 36px; background: rgba(255, 255, 255, 0.1);"></div>
+      <div style="text-align: right;">
+        <span style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em;">Net Cache Savings</span>
+        <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 800; color: #34d399;" id="val-cache-net-savings">$0.0000</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Multi-Account Comparative Telemetry & Quota Status Card -->
 <div class="glass-card" style="margin-bottom: 28px;">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">

@@ -15,10 +15,17 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = str(DATA_DIR / "usage_stats.db")
 CREDENTIALS_FILE = str(DATA_DIR / "vault_credentials.enc")
 
+# Application Identity
+APP_NAME = "IRIS"
+APP_FULL_NAME = "IRIS — Inter-node Routing, Inference & Security"
+APP_DESCRIPTION = "Zero-dependency sovereign P2P agent mesh, desktop monitor, and secure tunneling runtime."
+
 # Server Config
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 PROXY_PORT = 8766
+DEFAULT_TUNNEL_PORT = 8767
+DEFAULT_BEACON_PORT = 8769
 DEFAULT_OLLAMA_PORT = 8989
 
 # Poll Intervals (seconds)

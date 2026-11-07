@@ -4,6 +4,9 @@ import re
 import time
 import uuid
 import datetime
+import zlib
+import urllib.request
+import urllib.error
 from typing import Dict, Any, List, Optional
 
 class BenchmarkEngine:
@@ -191,6 +194,81 @@ class BenchmarkEngine:
         }
 
     # -------------------------------------------------------------
+    # Live Inference Execution Capability (AIUM-1011)
+    # -------------------------------------------------------------
+    def _execute_live_model_prompt(
+        self,
+        provider: str,
+        model: str,
+        prompt: str,
+        timeout: float = 8.0
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Attempts live model inference via local Ollama HTTP endpoint (http://127.0.0.1:11434/api/generate).
+        Measures real wall-clock TTFT latency, output token velocity (tokens/sec), and generated text.
+        Returns None if offline, unreachable, or in deterministic mock fallback mode.
+        """
+        if getattr(self, "_force_deterministic_mock", False):
+            return None
+
+        prov = (provider or "").lower().strip()
+        if prov not in ("ollama", "local"):
+            return None
+
+        url = "http://127.0.0.1:11434/api/generate"
+        payload = json.dumps({
+            "model": model,
+            "prompt": prompt,
+            "stream": False
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+
+        t0 = time.time()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                elapsed = time.time() - t0
+                body = resp.read().decode("utf-8")
+                data = json.loads(body)
+
+                generated_text = data.get("response", "")
+
+                # TTFT measurement (Ollama prompt_eval_duration in nanoseconds or wall-clock fraction)
+                prompt_eval_ns = data.get("prompt_eval_duration", 0)
+                if prompt_eval_ns and prompt_eval_ns > 0:
+                    ttft_ms = round(prompt_eval_ns / 1e6, 2)
+                else:
+                    ttft_ms = round(elapsed * 1000.0 * 0.35, 2)
+
+                # Output token velocity (Ollama eval_count / eval_duration_ns)
+                eval_count = data.get("eval_count", 0)
+                eval_duration_ns = data.get("eval_duration", 0)
+                if eval_count > 0 and eval_duration_ns > 0:
+                    tokens_per_sec = round(eval_count / (eval_duration_ns / 1e9), 2)
+                else:
+                    approx_tokens = eval_count or max(1, len(generated_text.split()))
+                    gen_elapsed = max(0.001, elapsed - (ttft_ms / 1000.0))
+                    tokens_per_sec = round(approx_tokens / gen_elapsed, 2)
+
+                return {
+                    "text": generated_text,
+                    "ttft_ms": ttft_ms,
+                    "tokens_per_second": tokens_per_sec,
+                    "tokens_per_sec": tokens_per_sec,
+                    "duration_ms": round(elapsed * 1000.0, 2),
+                    "eval_count": eval_count,
+                    "prompt": prompt,
+                    "raw_response": data,
+                }
+        except Exception:
+            return None
+
+    # -------------------------------------------------------------
     # Runner: Full Benchmark Suite Execution
     # -------------------------------------------------------------
     def run_benchmark_suite(
@@ -212,20 +290,41 @@ class BenchmarkEngine:
         fail_count = 0
         suite_results = {}
 
+        # Default prompt and fallback code sample
+        prompt_text = (
+            "Write a Python function calculate_moving_average(data, window_size) "
+            "that computes the moving average of a list."
+        )
+        code_sample = (
+            "def calculate_moving_average(data, window_size):\n"
+            "    if not data or window_size <= 0:\n"
+            "        return []\n"
+            "    return [sum(data[i:i+window_size])/window_size for i in range(len(data)-window_size+1)]\n"
+        )
+        output_transcript = code_sample
+        execution_mode = "deterministic_baseline"
+        ast_diagnostics = None
+
+        live_res = None
+        if not getattr(self, "_force_deterministic_mock", False) and prov in ("ollama", "local"):
+            live_res = self._execute_live_model_prompt(prov, model, prompt_text)
+
+        if live_res and live_res.get("text"):
+            execution_mode = "live_inference"
+            output_transcript = live_res["text"]
+            code_sample = output_transcript
+
         # 1. Coding Suite
         if "coding" in active_suites:
-            code_sample = (
-                "def calculate_moving_average(data, window_size):\n"
-                "    if not data or window_size <= 0:\n"
-                "        return []\n"
-                "    return [sum(data[i:i+window_size])/window_size for i in range(len(data)-window_size+1)]\n"
-            )
             c_res = self.evaluate_coding_output(code_sample, test_case="moving_average")
             suite_results["coding"] = c_res
+            ast_diagnostics = c_res
             if c_res["passed"]:
                 pass_count += 1
             else:
                 fail_count += 1
+        else:
+            ast_diagnostics = self.evaluate_coding_output(code_sample, test_case="moving_average")
 
         # 2. JSON Schema Suite
         if "json_schema" in active_suites:
@@ -266,11 +365,15 @@ class BenchmarkEngine:
         total_tests = pass_count + fail_count
         score_pct = round((pass_count / total_tests) * 100.0, 1) if total_tests > 0 else 0.0
 
-        # Model latency simulation or baseline calculation
-        # Local models have lower TTFT (<100ms) and cloud models vary around 150-250ms
         is_local = prov in ["ollama", "local"]
-        ttft_ms = round(85.0 + (hash(model) % 40), 1) if is_local else round(195.0 + (hash(model) % 65), 1)
-        tokens_per_sec = round(65.0 + (hash(model) % 35), 1) if is_local else round(82.0 + (hash(model) % 40), 1)
+        if live_res:
+            ttft_ms = float(live_res.get("ttft_ms", 95.0))
+            tokens_per_sec = float(live_res.get("tokens_per_second") or live_res.get("tokens_per_sec", 65.0))
+        else:
+            # Deterministic baseline calculation using zlib.crc32 for 100% reproducibility across process restarts
+            crc = zlib.crc32(model.encode("utf-8"))
+            ttft_ms = round(85.0 + (crc % 40), 1) if is_local else round(195.0 + (crc % 65), 1)
+            tokens_per_sec = round(65.0 + (crc % 35), 1) if is_local else round(82.0 + (crc % 40), 1)
 
         result_payload = {
             "id": f"eval_{uuid.uuid4().hex[:10]}",
@@ -284,7 +387,11 @@ class BenchmarkEngine:
             "fail_count": fail_count,
             "suite_results": suite_results,
             "duration_ms": round((time.time() - start_time) * 1000, 2),
-            "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "prompt_text": prompt_text,
+            "output_transcript": output_transcript,
+            "execution_mode": execution_mode,
+            "ast_diagnostics": ast_diagnostics,
         }
 
         # Persist to database if provided

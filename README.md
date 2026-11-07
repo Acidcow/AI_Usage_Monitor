@@ -1,17 +1,19 @@
-# AI Usage Monitor
+# IRIS (Inter-node Routing, Inference & Security)
 
 <div align="center">
-  <img src="frontend/assets/icons/app_icon_johnny5.jpg" width="100" height="100" alt="Johnny 5 App Icon" style="border-radius: 20px; box-shadow: 0 0 25px rgba(6,182,212,0.4);" />
-  <h3><em>"Number 5 is alive!"</em></h3>
-  <p><strong>Lightweight, Security-First Desktop AI Telemetry Monitor & Floating Widget</strong></p>
+  <img src="frontend/assets/icons/app_icon_johnny5.jpg" width="100" height="100" alt="IRIS Platform Icon" style="border-radius: 20px; box-shadow: 0 0 25px rgba(6,182,212,0.4);" />
+  <h3><em>"Inter-node Routing, Inference & Security"</em></h3>
+  <p><strong>Zero-Dependency Sovereign P2P Agent Mesh, Observability Platform & Native Desktop Service</strong></p>
+  <p><em>Inspired by Iris, the golden-winged Greek goddess of the rainbow and trusted divine conduit across realms.</em></p>
+  <p><a href="docs/IRIS_PLATFORM_IDENTITY.md"><strong>Read the IRIS Mythological & Architectural Charter →</strong></a></p>
 </div>
 
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 [![Architecture](https://img.shields.io/badge/Dependencies-Zero%20External%20Deps-emerald.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
-[![Security](https://img.shields.io/badge/Security-Windows%20DPAPI%20Native-purple.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
-[![Tests](https://img.shields.io/badge/Tests-51%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
+[![Security](https://img.shields.io/badge/Security-Windows%20DPAPI%20%2B%20TLS%201.3-purple.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
+[![Tests](https://img.shields.io/badge/Tests-486%20Passing%20(100%25)-brightgreen.svg)](https://github.com/Acidcow/AI_Usage_Monitor)
 
-A lightweight, security-first, zero-dependency desktop service and web dashboard that monitors AI token usage, sessions, rate limits, and costs across providers (**Claude**, **M365 Copilot**, **Google Gemini**, **Ollama**, and **ChatGPT**).
+**IRIS** (**I**nter-node **R**outing, **I**nference & **S**ecurity) is a lightweight, security-first, zero-external-dependency desktop service, sovereign P2P agent mesh, and web dashboard that monitors AI token usage, sessions, rate limits, and costs across providers (**Claude**, **Google Gemini**, **OpenAI ChatGPT**, **M365 Copilot**, and **Ollama**), while enabling secure, locally managed peer-to-peer delegation of agent capacity across workstations with zero network snooping.
 
 Includes an ambient **Windows System Tray** notification icon, a **Native Standalone Floating Desktop Widget**, automatic **Local Telemetry Scanners**, **1-Click Key Procurement Portals**, and an interactive **Johnny 5 Mascot System** with switchable cybernetic icons!
 

@@ -123,11 +123,62 @@
         <tbody id="benchmark-results-body">
           <tr>
             <td colspan="7" style="padding: 20px; text-align: center; color: var(--text-dim);">
-              Evaluation run history will populate as tests complete.
+              Evaluation run history will populate as tests complete. Click any row to inspect prompt transcript & AST diagnostics.
             </td>
           </tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Evaluation Transcript Inspection Modal (AIUM-1011) -->
+  <div class="modal-overlay" id="benchmark-transcript-modal" style="display: none;">
+    <div class="modal-box" style="max-width: 720px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.25rem;">🔍</span>
+          <h3 style="font-size: 1.1rem; font-weight: 700; color: #fff; margin: 0;">Evaluation Transcript & AST Inspection</h3>
+          <span id="modal-bench-mode-badge" class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); font-size: 0.72rem;">
+            Live Inference
+          </span>
+        </div>
+        <button onclick="document.getElementById('benchmark-transcript-modal').style.display='none'" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <!-- Meta Details Strip -->
+        <div style="display: flex; gap: 14px; background: rgba(0,0,0,0.25); padding: 10px 14px; border-radius: 6px; font-size: 0.76rem; border: 1px solid rgba(255,255,255,0.05); flex-wrap: wrap;">
+          <div><span style="color: var(--text-dim);">Model:</span> <strong id="modal-bench-model" style="color: #fff;">-</strong></div>
+          <div><span style="color: var(--text-dim);">Provider:</span> <strong id="modal-bench-provider" style="color: #fff;">-</strong></div>
+          <div><span style="color: var(--text-dim);">TTFT:</span> <strong id="modal-bench-ttft" style="color: #38bdf8;">-</strong></div>
+          <div><span style="color: var(--text-dim);">Speed:</span> <strong id="modal-bench-tps" style="color: #4ade80;">-</strong></div>
+          <div><span style="color: var(--text-dim);">Score:</span> <strong id="modal-bench-score" style="color: #c084fc;">-</strong></div>
+        </div>
+
+        <!-- Evaluation Prompt -->
+        <div>
+          <label for="modal-bench-prompt" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Evaluation Prompt</label>
+          <pre id="modal-bench-prompt" style="background: #090d16; border: 1px solid #1e293b; border-radius: 6px; padding: 10px 12px; font-family: monospace; font-size: 0.78rem; color: #f1f5f9; white-space: pre-wrap; word-break: break-all; margin: 0; max-height: 160px; overflow-y: auto;">-</pre>
+        </div>
+
+        <!-- Generated Output Transcript -->
+        <div>
+          <label for="modal-bench-output" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Generated Output Transcript</label>
+          <pre id="modal-bench-output" style="background: #090d16; border: 1px solid #1e293b; border-radius: 6px; padding: 10px 12px; font-family: monospace; font-size: 0.78rem; color: #a5f3fc; white-space: pre-wrap; word-break: break-all; margin: 0; max-height: 220px; overflow-y: auto;">-</pre>
+        </div>
+
+        <!-- AST Diagnostics & Validation Details -->
+        <div>
+          <label for="modal-bench-ast" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">AST Diagnostics & Validation</label>
+          <pre id="modal-bench-ast" style="background: #090d16; border: 1px solid #1e293b; border-radius: 6px; padding: 10px 12px; font-family: monospace; font-size: 0.76rem; color: #cbd5e1; white-space: pre-wrap; word-break: break-all; margin: 0; max-height: 160px; overflow-y: auto;">-</pre>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('benchmark-transcript-modal').style.display='none'">
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </div>

@@ -25,7 +25,16 @@ REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from backend.config import DEFAULT_HOST, DEFAULT_PORT, PROXY_PORT, DEFAULT_OLLAMA_PORT
+from backend.config import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    PROXY_PORT,
+    DEFAULT_OLLAMA_PORT,
+    DEFAULT_TUNNEL_PORT,
+    DEFAULT_BEACON_PORT,
+    APP_NAME,
+    APP_FULL_NAME
+)
 from backend.security.dpapi_vault import DPAPIVault
 from backend.diagnostics.logging_engine import DiagnosticsEngine
 from backend.storage.database import UsageDatabase
@@ -48,6 +57,8 @@ def parse_args(argv=None):
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port for web dashboard and API")
     parser.add_argument("--proxy-port", type=int, default=PROXY_PORT, help="Port for transparent Claude proxy")
     parser.add_argument("--ollama-port", type=int, default=DEFAULT_OLLAMA_PORT, help="Port for secondary Ollama emulator and worker node RPC bridge")
+    parser.add_argument("--tunnel-port", type=int, default=DEFAULT_TUNNEL_PORT, help="Port for IRIS P2P HTTPS tunnel")
+    parser.add_argument("--beacon-port", type=int, default=DEFAULT_BEACON_PORT, help="Port for IRIS UDP discovery beacon")
     parser.add_argument("--no-tray", action="store_true", help="Disable native Windows system tray icon")
     parser.add_argument("--open-browser", action="store_true", help="Open web dashboard in default browser on launch")
     parser.add_argument("--widget", action="store_true", help="Launch standalone floating desktop widget on launch")
@@ -66,7 +77,7 @@ def parse_args(argv=None):
 
 def run_service_runtime(args, service_manager: WindowsServiceManager):
     print("\n" + "=" * 65)
-    print("⚡ AI USAGE MONITOR - INITIALIZING")
+    print("⚡ IRIS: INTER-NODE ROUTING, INFERENCE & SECURITY - INITIALIZING")
     print("=" * 65)
     print(f"[INIT] Host: {args.host}")
     print(f"[INIT] Web Dashboard: http://{args.host}:{args.port}")
@@ -181,6 +192,34 @@ def run_service_runtime(args, service_manager: WindowsServiceManager):
     ollama_emulator.start()
     print(f"[OK] Ollama API Emulator & Worker Node Bridge: http://{args.host}:{ollama_emulator.server_port}")
 
+    # 4c. Start IRIS P2P Discovery Beacon & Anti-Snooping HTTPS Tunnel Server
+    import socket
+    from backend.discovery.p2p_tunnel import P2PBeacon, P2PTunnelServer, TLSCertificateManager
+    cert_mgr = TLSCertificateManager()
+    node_id = f"iris-node-{socket.gethostname().lower()}"
+    p2p_beacon = P2PBeacon(
+        node_id=node_id,
+        alias=socket.gethostname(),
+        tunnel_port=args.tunnel_port,
+        api_port=server.server_port,
+        beacon_port=args.beacon_port,
+        database=database,
+        models=ollama.get_installed_models() if hasattr(ollama, "get_installed_models") else ["ollama"]
+    )
+    p2p_beacon.start()
+
+    p2p_tunnel = P2PTunnelServer(
+        node_id=node_id,
+        alias=socket.gethostname(),
+        port=args.tunnel_port,
+        database=database,
+        beacon=p2p_beacon,
+        cert_manager=cert_mgr
+    )
+    p2p_tunnel.start()
+    print(f"[OK] IRIS P2P HTTPS Tunnel: https://0.0.0.0:{args.tunnel_port} (Anti-Snooping Active)")
+    print(f"[OK] IRIS P2P Mesh Beacon: UDP port {args.beacon_port}")
+
     # Update PID state with actual bound ports
     service_manager.update_heartbeat(
         port=server.server_port,
@@ -268,11 +307,20 @@ def run_service_runtime(args, service_manager: WindowsServiceManager):
 
                 if tray:
                     tray.update_tooltip(
-                        f"AI Usage Monitor\nClaude Today: {total_today:,} tok\nQuota Rem: {rem_tok}"
+                        f"IRIS\nClaude Today: {total_today:,} tok\nQuota Rem: {rem_tok}"
                     )
             except Exception:
                 pass
-            time.sleep(10)
+            # AIUM-1003: Adaptive polling cadence reading ui_refresh_interval_seconds dynamically
+            poll_interval = 10
+            try:
+                setting_val = database.get_setting("ui_refresh_interval_seconds")
+                if setting_val is not None:
+                    parsed = json.loads(setting_val) if isinstance(setting_val, str) else setting_val
+                    poll_interval = max(5, min(60, int(parsed)))
+            except Exception:
+                poll_interval = 10
+            time.sleep(poll_interval)
 
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
@@ -284,9 +332,13 @@ def run_service_runtime(args, service_manager: WindowsServiceManager):
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n[SHUTDOWN] Stopping AI Usage Monitor...")
+        print("\n[SHUTDOWN] Stopping IRIS...")
         running = False
         service_manager.request_graceful_stop()
+        if p2p_beacon:
+            p2p_beacon.stop()
+        if p2p_tunnel:
+            p2p_tunnel.stop()
         if tray:
             tray.stop()
         if ollama_emulator:

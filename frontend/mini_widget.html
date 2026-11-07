@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Usage Monitor Widget</title>
   <link rel="icon" type="image/jpeg" href="/assets/icons/app_icon_johnny5.jpg">
+  <link rel="stylesheet" href="css/themes.css">
+  <link rel="stylesheet" href="css/widget.css">
   <link rel="stylesheet" href="/css/styles.css?v=0.9.1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -315,6 +317,22 @@
           <option value="6m">Last 6 months</option>
           <option value="12m">Last 12 months</option>
         </select>
+        <!-- Bucket Interval Selector -->
+        <select id="bucket-select" class="widget-btn" onchange="window.Widget && window.Widget.setBucket && window.Widget.setBucket(this.value)" title="Select Aggregation Bucket Interval" style="background: rgba(15, 23, 42, 0.9); color: #c084fc; border-color: rgba(192, 132, 252, 0.35); padding: 1px 4px; font-family: var(--font-mono); font-size: 0.68rem;">
+          <option value="1">1m</option>
+          <option value="5" selected>5m</option>
+          <option value="10">10m</option>
+          <option value="15">15m</option>
+          <option value="30">30m</option>
+          <option value="60">60m</option>
+        </select>
+        <!-- Usage Scope Selector -->
+        <select id="scope-select" class="widget-btn" onchange="window.Widget && window.Widget.setScope && window.Widget.setScope(this.value)" title="Select Usage Scope" style="background: rgba(15, 23, 42, 0.9); color: #fbbf24; border-color: rgba(251, 191, 36, 0.35); padding: 1px 4px; font-family: var(--font-mono); font-size: 0.68rem;">
+          <option value="all" selected>All</option>
+          <option value="individual">Personal</option>
+          <option value="team">Team Pool</option>
+          <option value="enterprise">Enterprise</option>
+        </select>
         <button class="widget-btn widget-btn-active" id="btn-mode-multi" onclick="window.Widget.setViewMode('multi')" title="Show All Accounts with Dual Bars">⊞ Accounts</button>
         <button class="widget-btn" id="btn-mode-trends" onclick="window.Widget.setViewMode('trends')" title="Show Cumulative Trend Curves">📈 Trends</button>
         <button class="widget-btn" id="btn-mode-interval" onclick="window.Widget.setViewMode('interval')" title="Show Discrete Token Bursts from 0 Baseline">⚡ Interval</button>
@@ -403,6 +421,10 @@
     </div>
   </div>
 
-  <script src="/js/widget.js?v=0.9.1"></script>
+  <script src="js/core/formatters.js"></script>
+  <script src="js/core/api_client.js"></script>
+  <script src="js/core/chart_renderer.js"></script>
+  <script src="js/core/telemetry_hierarchy.js"></script>
+  <script src="js/widget.js"></script>
 </body>
 </html>

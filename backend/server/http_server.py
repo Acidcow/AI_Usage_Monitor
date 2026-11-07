@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 
 from backend.config import FRONTEND_DIR, DEFAULT_HOST, DEFAULT_PORT
 from backend.diagnostics.logging_engine import ErrorCategory
+from backend.contracts.themes import get_all_themes, LAYOUT_DENSITIES, PROVIDER_PALETTE
 
 MIME_MAP = {
     ".html": "text/html; charset=utf-8",
@@ -219,6 +220,21 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             stats = governor.get_telemetry(node_id) if governor else {}
             return self._send_json(200, {"success": True, "telemetry": stats})
 
+        # IRIS P2P Mesh & Anti-Snooping Tunnel Status
+        if path in ["/api/p2p/mesh", "/api/p2p/status"]:
+            beacon = getattr(srv, "p2p_beacon", None)
+            peers = beacon.get_active_peers() if beacon else []
+            return self._send_json(200, {
+                "success": True,
+                "node_id": getattr(beacon, "node_id", "iris-local") if beacon else "iris-local",
+                "alias": getattr(beacon, "alias", socket.gethostname()) if beacon else socket.gethostname(),
+                "tunnel_port": getattr(beacon, "tunnel_port", 8767) if beacon else 8767,
+                "beacon_port": getattr(beacon, "beacon_port", 8769) if beacon else 8769,
+                "peers": peers,
+                "peer_count": len(peers),
+                "anti_snooping_tls": True
+            })
+
         # AIUM-705: Client Quotas, Burst Windows & Usage Metrics
         if path == "/api/discovery/clients":
             quotas = srv.database.list_client_quotas()
@@ -245,7 +261,10 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             limit = int(query.get("limit", [50])[0])
             provider = query.get("provider", [None])[0]
             sessions = srv.database.get_recent_sessions(limit=limit, provider=provider)
-            return self._send_json(200, sessions)
+            from backend.analytics.cache_analyzer import PromptCacheAnalyzer
+            analyzer = PromptCacheAnalyzer(srv.database)
+            enriched_sessions = [analyzer.enrich_session_cache_metrics(s) for s in sessions]
+            return self._send_json(200, enriched_sessions)
 
         if path == "/api/usage/hourly":
             hours = int(query.get("hours", [24])[0])
@@ -347,6 +366,13 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/settings":
             return self._send_json(200, srv.database.get_all_settings())
+
+        if path == "/api/themes":
+            return self._send_json(200, {
+                "themes": get_all_themes(),
+                "densities": LAYOUT_DENSITIES,
+                "providers": PROVIDER_PALETTE,
+            })
 
         if path == "/api/accounts":
             prov = query.get("provider", [None])[0]
@@ -497,6 +523,18 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             engine = ThroughputAnalyticsEngine(srv.database)
             recs = engine.generate_estate_recommendations()
             return self._send_json(200, {"recommendations": recs})
+
+        # Prompt Cache Efficiency Analytics & Ephemeral TTL Keep-Alive (AIUM-1009)
+        if path == "/api/analytics/cache-efficiency":
+            from backend.analytics.cache_analyzer import PromptCacheAnalyzer
+            provider = query.get("provider", ["claude"])[0]
+            try:
+                hours = int(query.get("hours", [24])[0])
+            except (ValueError, TypeError):
+                hours = 24
+            analyzer = PromptCacheAnalyzer(srv.database)
+            cache_metrics = analyzer.analyze_cache_efficiency(provider=provider, hours=hours)
+            return self._send_json(200, cache_metrics)
 
         # Model Benchmarking & Evaluations Endpoints (AIUM-609)
         if path == "/api/benchmarks/results":
@@ -1019,6 +1057,22 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             else:
                 status_code = 200 if res.get("success") else (res.get("status_code") or 400)
             return self._send_json(status_code, res)
+
+        # IRIS P2P Delegated Inference Handler
+        if path == "/api/p2p/delegate":
+            peer_url = body.get("peer_url")
+            model = body.get("model", "default")
+            prompt = body.get("prompt", "")
+            if not peer_url or not prompt:
+                return self._send_json(400, {"error": "Missing peer_url or prompt in payload"})
+            from backend.discovery.p2p_tunnel import P2PTunnelClient, DEFAULT_CLUSTER_SECRET
+            cluster_secret = srv.vault.get("iris", "cluster_secret") if hasattr(srv, "vault") and srv.vault else None
+            client = P2PTunnelClient(cluster_secret=cluster_secret or DEFAULT_CLUSTER_SECRET)
+            try:
+                res = client.delegate_inference(peer_url=peer_url, model=model, prompt=prompt)
+                return self._send_json(200, res)
+            except Exception as e:
+                return self._send_json(502, {"error": f"P2P delegation failed: {e}"})
 
         if path in ["/api/discovery/proxy/completion", "/api/proxy/remote/completion"]:
             governor = getattr(srv, "governor", None)

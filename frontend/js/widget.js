@@ -8,6 +8,8 @@ window.Widget = {
   viewMode: "multi", // 'multi' | 'trends' | 'interval' | 'single'
   trendWindow: "24h",
   chartGranularity: 5,
+  bucketMins: 5,
+  scopeFilter: "all",
   refreshCadenceSeconds: 30,
   cachedSummary: null,
   cachedProviders: null,
@@ -60,8 +62,25 @@ window.Widget = {
           const winSel = document.getElementById("w-window-select");
           if (winSel) winSel.value = srvWindow;
         }
-        if (st.active_chart_granularity) {
-          this.chartGranularity = parseInt(st.active_chart_granularity, 10) || 5;
+        if (st.bucket_minutes || st.active_chart_granularity) {
+          this.bucketMins = parseInt(st.bucket_minutes || st.active_chart_granularity, 10) || 5;
+          this.chartGranularity = this.bucketMins;
+        } else {
+          try {
+            const localMins = localStorage.getItem("aium_bucket_mins");
+            if (localMins) {
+              this.bucketMins = parseInt(localMins, 10) || 5;
+              this.chartGranularity = this.bucketMins;
+            }
+          } catch (_) {}
+        }
+        if (st.scope_filter || st.active_scope_filter || st.quota_tracking_mode) {
+          this.scopeFilter = st.scope_filter || st.active_scope_filter || st.quota_tracking_mode || "all";
+        } else {
+          try {
+            const localScope = localStorage.getItem("aium_scope_filter");
+            if (localScope) this.scopeFilter = localScope;
+          } catch (_) {}
         }
         if (st.ui_refresh_interval_seconds) {
           this.refreshCadenceSeconds = Math.max(30, Math.min(300, parseInt(st.ui_refresh_interval_seconds, 10) || 30));
@@ -142,35 +161,167 @@ window.Widget = {
     }
   },
 
-  generateSparkline(tokToday, tokWeek, color = "#06b6d4") {
-    const today = Number(tokToday) || 0;
-    const week = Number(tokWeek) || 0;
-    if (today === 0 && week === 0) {
+  formatTokens(n) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatTokens(n);
+    }
+    return Number(n || 0).toLocaleString();
+  },
+
+  formatCurrency(usd, decimals = 2) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatCurrency(usd, decimals);
+    }
+    return `$${Number(usd || 0).toFixed(decimals)}`;
+  },
+
+  formatCountdown(resetEpochOrIso, fallbackStr = "--") {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatCountdown(resetEpochOrIso, fallbackStr);
+    }
+    if (!resetEpochOrIso) return fallbackStr;
+    const sec = Math.max(0, Math.floor(Number(resetEpochOrIso) - (Date.now() / 1000)));
+    return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  },
+
+  formatLocalDateTime(isoStr) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatLocalDateTime(isoStr);
+    }
+    return String(isoStr || "-");
+  },
+
+  formatLocalTime(isoStr) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatLocalTime(isoStr);
+    }
+    return String(isoStr || "-");
+  },
+
+  formatDuration(startIso, endIso) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatDuration(startIso, endIso);
+    }
+    return "-";
+  },
+
+  escapeHtml(str) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.escapeHtml(str);
+    }
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  },
+
+  getChildRealPoints(provKey, childId) {
+    if (window.AIUMCore && window.AIUMCore.TelemetryHierarchy) {
+      return window.AIUMCore.TelemetryHierarchy.extractChildRealPoints(
+        this.cachedHierarchicalTrends || this.cachedTimeseries,
+        provKey,
+        childId
+      );
+    }
+    return [0, 0, 0, 0, 0, 0, 0, 0];
+  },
+
+  async selectAppIcon(iconId) {
+    if (window.AIUMCore && window.AIUMCore.ApiClient) {
+      return await window.AIUMCore.ApiClient.syncActiveIcon(iconId);
+    }
+    try {
+      localStorage.setItem("aium_active_icon", iconId);
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { active_icon: iconId } })
+      });
+    } catch (_) {}
+  },
+
+  async syncActiveIcon(iconId) {
+    return this.selectAppIcon(iconId);
+  },
+
+  setBucketMins(mins) {
+    this.bucketMins = parseInt(mins, 10) || 5;
+    this.chartGranularity = this.bucketMins;
+    try {
+      localStorage.setItem("aium_bucket_mins", String(this.bucketMins));
+    } catch (_) {}
+    if (window.AIUMCore && window.AIUMCore.ApiClient) {
+      window.AIUMCore.ApiClient.saveSettings({
+        bucket_minutes: this.bucketMins,
+        active_chart_granularity: this.bucketMins
+      }).catch(() => {});
+    } else {
+      fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { bucket_minutes: this.bucketMins, active_chart_granularity: this.bucketMins } })
+      }).catch(() => {});
+    }
+    this.refresh();
+  },
+
+  setScopeFilter(scope) {
+    this.scopeFilter = scope || "all";
+    try {
+      localStorage.setItem("aium_scope_filter", this.scopeFilter);
+    } catch (_) {}
+    if (window.AIUMCore && window.AIUMCore.ApiClient) {
+      window.AIUMCore.ApiClient.saveSettings({
+        scope_filter: this.scopeFilter,
+        active_scope_filter: this.scopeFilter
+      }).catch(() => {});
+    } else {
+      fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { scope_filter: this.scopeFilter, active_scope_filter: this.scopeFilter } })
+      }).catch(() => {});
+    }
+    this.refresh();
+  },
+
+  generateSparkline(tokTodayOrPoints, tokWeekOrColor = "#06b6d4", color = "#06b6d4") {
+    let pts = [];
+    let strokeColor = color;
+    if (Array.isArray(tokTodayOrPoints)) {
+      pts = tokTodayOrPoints;
+      strokeColor = typeof tokWeekOrColor === "string" ? tokWeekOrColor : color;
+    } else if (typeof tokTodayOrPoints === "number") {
+      const today = Number(tokTodayOrPoints) || 0;
+      strokeColor = typeof color === "string" ? color : "#06b6d4";
+      pts = today === 0 ? [0, 0, 0, 0, 0, 0, 0, 0] : [0, 0, 0, 0, 0, 0, 0, today];
+    } else {
+      pts = [0, 0, 0, 0, 0, 0, 0, 0];
+    }
+
+    if (window.AIUMCore && window.AIUMCore.ChartRenderer) {
+      return window.AIUMCore.ChartRenderer.generateSparklineSvg(pts, strokeColor, { width: 110, height: 24 });
+    }
+
+    const isAllZero = pts.every(p => p === 0);
+    if (isAllZero) {
       return `
         <svg width="110" height="24" style="overflow: visible; display: block;" title="No activity recorded (0 tokens)">
-          <line x1="0" y1="21" x2="110" y2="21" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+          <line x1="0" y1="21" x2="110" y2="21" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="2,2"/>
           <text x="55" y="14" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
         </svg>
       `;
     }
-    const baseline = week > 0 ? (week / 7) : today;
-    const raw = [
-      baseline * 0.7,
-      baseline * 0.9,
-      baseline * 1.1,
-      baseline * 0.85,
-      baseline * 1.15,
-      baseline * 0.95,
-      today
-    ];
-    const maxVal = Math.max(...raw, 100);
-    const minVal = Math.min(...raw, 0);
+    const maxVal = Math.max(...pts, 1);
+    const minVal = Math.min(...pts, 0);
     const range = (maxVal - minVal) || 1;
     const width = 110;
     const height = 24;
-    const step = width / (raw.length - 1);
+    const step = width / (pts.length - 1);
 
-    const points = raw.map((val, idx) => {
+    const points = pts.map((val, idx) => {
       const x = Math.round(idx * step);
       const y = Math.round(height - ((val - minVal) / range) * (height - 6) - 3);
       return `${x},${y}`;
@@ -178,8 +329,8 @@ window.Widget = {
 
     return `
       <svg width="${width}" height="${height}" style="overflow: visible; display: block;">
-        <polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${points}" />
-        <circle cx="${Math.round((raw.length - 1) * step)}" cy="${Math.round(height - ((today - minVal) / range) * (height - 6) - 3)}" r="3" fill="${color}" />
+        <polyline fill="none" stroke="${strokeColor}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" points="${points}" />
+        <circle cx="${Math.round((pts.length - 1) * step)}" cy="${Math.round(height - ((pts[pts.length - 1] - minVal) / range) * (height - 6) - 3)}" r="3" fill="${strokeColor}" />
       </svg>
     `;
   },
@@ -233,19 +384,22 @@ window.Widget = {
   },
 
   generateMultiSparkline(seriesList, width = 110, height = 26) {
+    if (window.AIUMCore && window.AIUMCore.ChartRenderer) {
+      return window.AIUMCore.ChartRenderer.generateMultiSparklineSvg(seriesList, width, height);
+    }
     if (!seriesList || seriesList.length === 0) return "";
     let allPoints = [];
     seriesList.forEach(s => { allPoints = allPoints.concat(s.points || []); });
-    const isAllZero = allPoints.length > 0 && allPoints.every(p => p === 0);
+    const isAllZero = allPoints.length === 0 || allPoints.every(p => p === 0);
     if (isAllZero) {
       return `
         <svg width="${width}" height="${height}" style="overflow: visible; display: block;" title="No activity in window (0 tokens)">
-          <line x1="0" y1="${height - 4}" x2="${width}" y2="${height - 4}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+          <line x1="0" y1="${height - 4}" x2="${width}" y2="${height - 4}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="2,2"/>
           <text x="${width / 2}" y="${height / 2 + 2}" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
         </svg>
       `;
     }
-    const maxVal = Math.max(...allPoints, 100);
+    const maxVal = Math.max(...allPoints, 1);
     const minVal = Math.min(...allPoints, 0);
     const range = (maxVal - minVal) || 1;
     const n = Math.max(...seriesList.map(s => (s.points || []).length));
@@ -257,11 +411,11 @@ window.Widget = {
         const y = Math.round(height - ((val - minVal) / range) * (height - 6) - 3);
         return `${x},${y}`;
       }).join(" ");
-      const lastVal = s.points ? s.points[s.points.length - 1] : 0;
-      const lastX = Math.round((s.points.length - 1) * step);
+      const lastVal = s.points && s.points.length > 0 ? s.points[s.points.length - 1] : 0;
+      const lastX = Math.round(((s.points || []).length - 1) * step);
       const lastY = Math.round(height - ((lastVal - minVal) / range) * (height - 6) - 3);
       return `
-        <polyline fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${pts}" />
+        <polyline fill="none" stroke="${s.color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" points="${pts}" />
         <circle cx="${lastX}" cy="${lastY}" r="2.5" fill="${s.color}" stroke="#ffffff" stroke-width="0.5" />
       `;
     }).join("");
@@ -373,8 +527,9 @@ window.Widget = {
       ];
       if (isSparklineMode) {
         const winParam = encodeURIComponent(this.trendWindow || "24h");
-        const granParam = encodeURIComponent(this.chartGranularity || 5);
-        fetchPromises.push(fetch(`/api/usage/timeseries?window=${winParam}&bucket_minutes=${granParam}&mode=${tsMode}`));
+        const granParam = encodeURIComponent(this.bucketMins || this.chartGranularity || 5);
+        const scopeParam = encodeURIComponent(this.scopeFilter || "all");
+        fetchPromises.push(fetch(`/api/usage/timeseries?window=${winParam}&bucket_minutes=${granParam}&mode=${tsMode}&scope_filter=${scopeParam}`));
       }
       const [sumRes, provRes, compRes, tsRes] = await Promise.all(fetchPromises);
 
@@ -476,7 +631,7 @@ window.Widget = {
               }
               childSeries.forEach(cs => {
                 const lastVal = cs.points ? cs.points[cs.points.length - 1] : 0;
-                const spk = this.generateSparkline(lastVal, (cs.points[0] || 10) * 7, cs.color);
+                const spk = this.generateSparkline(cs.points, cs.color);
                 branchesHtml += `
                   <div style="margin-top: 4px; padding: 4px; background: rgba(0,0,0,0.2); border-radius: 4px;">
                     <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.62rem; margin-bottom: 2px;">
@@ -629,13 +784,8 @@ window.Widget = {
 
     // Reset countdown
     const resetEl = document.getElementById("w-reset-time");
-    if (provInfo.reset_epoch) {
-      const sec = Math.max(0, Math.floor(provInfo.reset_epoch - (Date.now() / 1000)));
-      const m = Math.floor(sec / 60);
-      const s = sec % 60;
-      if (resetEl) resetEl.innerText = `${m}m ${s}s`;
-    } else {
-      if (resetEl) resetEl.innerText = "--";
+    if (resetEl) {
+      resetEl.innerText = this.formatCountdown(provInfo.reset_epoch, "--");
     }
   },
 

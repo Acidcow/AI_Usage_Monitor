@@ -1,0 +1,343 @@
+/**
+ * AI Usage Monitor - Mini Desktop Widget Stylesheet (AIUM-1008)
+ * Theme-aware & layout-density compatible floating widget styling.
+ */
+
+/* ==========================================================================
+   Widget Container & Base Layout
+   ========================================================================== */
+body.widget-body,
+body {
+  background: var(--bg-main, rgba(8, 11, 17, 0.98));
+  color: var(--text-main, #f1f5f9);
+  margin: 0;
+  padding: 8px;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  height: 100vh;
+  box-sizing: border-box;
+  font-family: var(--font-sans);
+}
+
+.widget-container {
+  background: var(--bg-card, rgba(15, 22, 36, 0.94));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  padding: 10px 12px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), var(--shadow-glow, 0 0 20px rgba(6, 182, 212, 0.15));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  box-sizing: border-box;
+  -webkit-app-region: drag;
+  cursor: grab;
+  position: relative;
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+.widget-container:active {
+  cursor: grabbing;
+}
+
+/* ==========================================================================
+   Widget Header & Toolbar Controls
+   ========================================================================== */
+.widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  -webkit-app-region: drag;
+}
+
+.widget-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-main, #fff);
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.widget-title:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.widget-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  -webkit-app-region: no-drag;
+  flex-wrap: wrap;
+}
+
+.widget-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  color: var(--text-muted, #94a3b8);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-app-region: no-drag;
+}
+
+.widget-btn:hover {
+  color: var(--text-main, #fff);
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.widget-btn-active {
+  background: rgba(94, 106, 210, 0.2);
+  border-color: var(--accent-primary, #5e6ad2);
+  color: var(--accent-primary, #5e6ad2);
+}
+
+.widget-btn-close:hover {
+  color: var(--color-danger, #f43f5e);
+  background: rgba(244, 63, 94, 0.2);
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+/* ==========================================================================
+   Toolbar Selectors (Window, Bucket, Scope)
+   ========================================================================== */
+.widget-select {
+  background: var(--bg-card, rgba(15, 23, 42, 0.9));
+  color: var(--accent-primary, #38bdf8);
+  border: 1px solid var(--border-color, rgba(56, 189, 248, 0.35));
+  border-radius: 6px;
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  cursor: pointer;
+  outline: none;
+  -webkit-app-region: no-drag;
+  transition: border-color 0.2s;
+}
+
+.widget-select:hover,
+.widget-select:focus {
+  border-color: var(--accent-primary, #5e6ad2);
+}
+
+#bucket-select {
+  color: #c084fc;
+  border-color: rgba(192, 132, 252, 0.35);
+}
+
+#scope-select {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+/* ==========================================================================
+   Multi-Account Dual-Bar List
+   ========================================================================== */
+.accounts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.accounts-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.accounts-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.account-row {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.account-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--border-glow, rgba(6, 182, 212, 0.3));
+  transform: translateY(-1px);
+}
+
+/* Dual Bar Containers */
+.dual-bar-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.dual-bar-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.dual-bar-fill-session {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan, #06b6d4), var(--accent-primary, #5e6ad2));
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.dual-bar-fill-weekly {
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #ec4899);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* ==========================================================================
+   Single Account Focus View
+   ========================================================================== */
+.single-focus-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  -webkit-app-region: no-drag;
+}
+
+.widget-tokens {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.widget-tokens .num {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-main, #fff);
+}
+
+.widget-tokens .lbl {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-dim, #8b95a5);
+}
+
+.widget-stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-val {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-main, #fff);
+}
+
+/* ==========================================================================
+   Weather-Style Hover Flyout
+   ========================================================================== */
+.weather-flyout {
+  position: absolute;
+  top: 40px;
+  right: 12px;
+  width: 210px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, rgba(56, 189, 248, 0.3));
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.8), var(--shadow-glow, 0 0 15px rgba(6, 182, 212, 0.2));
+  z-index: 1000;
+  display: none;
+  pointer-events: none;
+  font-size: 0.72rem;
+  backdrop-filter: blur(20px);
+}
+
+.flyout-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+}
+
+.flyout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.flyout-field {
+  color: var(--text-dim, #8b95a5);
+  font-size: 0.62rem;
+}
+
+.flyout-val {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text-main, #fff);
+  font-size: 0.76rem;
+}
+
+/* ==========================================================================
+   Layout Density Overrides for Mini Widget
+   ========================================================================== */
+[data-density="compact"] .widget-container {
+  padding: 6px 8px;
+  gap: 5px;
+}
+
+[data-density="compact"] .account-row {
+  padding: 4px 6px;
+}
+
+[data-density="compact"] .widget-btn {
+  padding: 1px 4px;
+  font-size: 0.68rem;
+}
+
+[data-density="ultrawide"] .widget-container {
+  padding: 14px 16px;
+  gap: 12px;
+}
+
+[data-density="ultrawide"] .account-row {
+  padding: 8px 10px;
+}

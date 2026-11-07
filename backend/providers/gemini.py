@@ -398,7 +398,18 @@ class GeminiProvider(BaseProvider):
         latency_ms: float = 0.0,
     ) -> str:
         """Called by transparent proxy when a Gemini completion completes."""
-        cost = (input_tokens * 0.0000001) + (output_tokens * 0.0000004)
+        try:
+            from backend.contracts.pricing import calculate_event_cost
+            cost = calculate_event_cost(
+                provider="gemini",
+                model=model or "gemini-2.0-flash",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
+            )
+        except Exception:
+            cost = (input_tokens * 0.0000001) + (output_tokens * 0.0000004)
         resolved_tok = token_id or "tok_gem_flash"
 
         account_email = self.vault.get_credential("google", "account_email")

@@ -11,7 +11,8 @@ param(
 )
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "  AI Usage Monitor - Windows Environment Bootstrap       " -ForegroundColor Cyan
+Write-Host "  IRIS: Inter-node Routing, Inference & Security         " -ForegroundColor Cyan
+Write-Host "  Windows Environment Bootstrap & P2P Service Launcher   " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. Verify Python

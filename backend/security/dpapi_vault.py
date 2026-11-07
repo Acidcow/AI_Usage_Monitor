@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import base64
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -19,6 +20,7 @@ class DPAPIVault:
     """
 
     def __init__(self, storage_path: Optional[str] = None):
+        self._lock = threading.RLock()
         self.storage_path = Path(storage_path or CREDENTIALS_FILE)
         self.is_windows = sys.platform == "win32"
         if self.is_windows:
@@ -127,48 +129,71 @@ class DPAPIVault:
 
     def set_credential(self, provider: str, account_id: str, secret: str):
         """Stores encrypted credential."""
-        encrypted = self.encrypt(secret)
-        if provider not in self._store:
-            self._store[provider] = {}
-        self._store[provider][account_id] = encrypted
-        self._save_store()
+        with self._lock:
+            encrypted = self.encrypt(secret)
+            if provider not in self._store:
+                self._store[provider] = {}
+            self._store[provider][account_id] = encrypted
+            self._save_store()
+
+    def store_credential(self, provider: str, account_id: str, secret: str):
+        """Alias for set_credential."""
+        self.set_credential(provider, account_id, secret)
 
     def get_credential(self, provider: str, account_id: str) -> Optional[str]:
         """Retrieves and decrypts credential."""
-        if provider in self._store and account_id in self._store[provider]:
-            encrypted = self._store[provider][account_id]
-            return self.decrypt(encrypted)
-        return None
+        with self._lock:
+            if provider in self._store and account_id in self._store[provider]:
+                encrypted = self._store[provider][account_id]
+                return self.decrypt(encrypted)
+            return None
 
     def delete_credential(self, provider: str, account_id: str):
         """Removes a stored credential."""
-        if provider in self._store and account_id in self._store[provider]:
-            del self._store[provider][account_id]
-            if not self._store[provider]:
-                del self._store[provider]
-            self._save_store()
+        with self._lock:
+            if provider in self._store and account_id in self._store[provider]:
+                del self._store[provider][account_id]
+                if not self._store[provider]:
+                    del self._store[provider]
+                self._save_store()
 
     def list_configured_providers(self) -> List[Dict[str, Any]]:
         """Returns list of configured providers and their accounts (without secrets)."""
-        result = []
-        for prov, accounts in self._store.items():
-            result.append({
-                "provider": prov,
-                "accounts": list(accounts.keys()),
-                "has_credentials": len(accounts) > 0
-            })
-        return result
+        with self._lock:
+            result = []
+            for prov, accounts in self._store.items():
+                result.append({
+                    "provider": prov,
+                    "accounts": list(accounts.keys()),
+                    "has_credentials": len(accounts) > 0
+                })
+            return result
+
+    def list_stored_providers(self) -> List[Dict[str, Any]]:
+        """Alias for list_configured_providers."""
+        return self.list_configured_providers()
 
     def _load_store(self) -> Dict[str, Dict[str, str]]:
-        if not self.storage_path.exists():
-            return {}
-        try:
-            with open(self.storage_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+        with self._lock:
+            if not self.storage_path.exists():
+                return {}
+            try:
+                with open(self.storage_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
 
     def _save_store(self):
-        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.storage_path, "w", encoding="utf-8") as f:
-            json.dump(self._store, f, indent=2)
+        with self._lock:
+            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.storage_path.parent / f"{self.storage_path.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(self._store, f, indent=2)
+                os.replace(tmp_path, self.storage_path)
+            finally:
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass

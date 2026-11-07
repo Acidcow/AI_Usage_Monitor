@@ -8,6 +8,12 @@ import datetime
 from typing import Any, Dict, List, Optional, Union
 from backend.storage.taxonomy import normalize_event_taxonomy
 
+try:
+    from backend.contracts.pricing import calculate_event_cost, estimate_cloud_equivalent_savings_usd
+except ImportError:
+    calculate_event_cost = None  # type: ignore[assignment]
+    estimate_cloud_equivalent_savings_usd = None  # type: ignore[assignment]
+
 
 class ReportingEngineMixin:
     """
@@ -232,7 +238,17 @@ class ReportingEngineMixin:
                 bucket["cache_creation_tokens"] += int(r.get("cache_creation_tokens") or 0)
                 bucket["cache_read_tokens"] += int(r.get("cache_read_tokens") or 0)
                 bucket["total_tokens"] += int(r.get("total_tokens") or 0)
-                bucket["estimated_cost"] += float(r.get("estimated_cost") or 0.0)
+                cost_val = float(r.get("estimated_cost") or 0.0)
+                if cost_val == 0.0 and calculate_event_cost is not None and (int(r.get("input_tokens") or 0) or int(r.get("output_tokens") or 0)):
+                    cost_val = calculate_event_cost(
+                        provider=str(r.get("provider") or ""),
+                        model=str(r.get("model") or ""),
+                        input_tokens=int(r.get("input_tokens") or 0),
+                        output_tokens=int(r.get("output_tokens") or 0),
+                        cache_creation_tokens=int(r.get("cache_creation_tokens") or 0),
+                        cache_read_tokens=int(r.get("cache_read_tokens") or 0),
+                    )
+                bucket["estimated_cost"] += cost_val
                 bucket["request_count"] += int(r.get("request_count") or 0)
 
             raw_rows = sorted(

@@ -5,11 +5,21 @@ import threading
 import uuid
 import json
 import time
+import contextlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from backend.config import DB_PATH
 from backend.storage.reporting_engine import ReportingEngineMixin
+from backend.storage.timeseries_engine import (
+    TimeSeriesEngineMixin,
+    resolve_bucket_seconds,
+    align_timestamp_to_bucket,
+    generate_bucket_grid,
+    get_bucket_index,
+    apply_timeseries_mode,
+    query_sql_bucketed_events,
+)
 from backend.storage.taxonomy import (
     CANONICAL_TAXONOMY_TIERS,
     PROVIDER_TERMINOLOGY_MATRIX,
@@ -19,11 +29,12 @@ from backend.storage.taxonomy import (
     get_full_taxonomy_specification,
 )
 
-class UsageDatabase(ReportingEngineMixin):
+class UsageDatabase(ReportingEngineMixin, TimeSeriesEngineMixin):
     """
     Zero-dependency SQLite Time-Series Database for AI Usage and Telemetry.
     Thread-safe connection handling with ACID persistence.
-    Inherits analytical OLAP reporting, pivot, and CSV export methods from ReportingEngineMixin.
+    Inherits analytical OLAP reporting from ReportingEngineMixin and unified SQL-assisted
+    bucketing time-series telemetry from TimeSeriesEngineMixin.
     """
 
     def __init__(self, db_path: Optional[str] = None):
@@ -36,7 +47,23 @@ class UsageDatabase(ReportingEngineMixin):
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA busy_timeout=5000;")
+            conn.execute("PRAGMA foreign_keys=ON;")
+        except sqlite3.Error:
+            pass
         return conn
+
+    @contextlib.contextmanager
+    def connection(self):
+        """Context manager yielding a database connection with guaranteed closure."""
+        conn = self._get_connection()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _init_schema(self):
         with self._lock:
@@ -59,7 +86,11 @@ class UsageDatabase(ReportingEngineMixin):
                     source TEXT NOT NULL DEFAULT 'direct',
                     instance_id TEXT NOT NULL DEFAULT 'local',
                     external_id TEXT,
-                    is_proxied INTEGER NOT NULL DEFAULT 0
+                    account_id TEXT,
+                    node_id TEXT,
+                    access_route TEXT,
+                    is_proxied INTEGER NOT NULL DEFAULT 0,
+                    metadata TEXT
                 )
             ''')
 
@@ -254,7 +285,6 @@ class UsageDatabase(ReportingEngineMixin):
 
             # Migration for usage_events dimensional attribution and network client context
             for col in [
-                "account_id TEXT",
                 "team_name TEXT",
                 "user_name TEXT",
                 "token_id TEXT",
@@ -265,8 +295,8 @@ class UsageDatabase(ReportingEngineMixin):
                 "client_alias TEXT",
                 "source TEXT NOT NULL DEFAULT 'direct'",
                 "instance_id TEXT NOT NULL DEFAULT 'local'",
-                "external_id TEXT",
-                "is_proxied INTEGER NOT NULL DEFAULT 0"
+                "is_proxied INTEGER NOT NULL DEFAULT 0",
+                "metadata TEXT"
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE usage_events ADD COLUMN {col}")
@@ -284,6 +314,9 @@ class UsageDatabase(ReportingEngineMixin):
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_source ON usage_events(source)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_instance ON usage_events(instance_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_external_id ON usage_events(external_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_dedup ON usage_events(provider, session_id, total_tokens)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_external ON usage_events(provider, external_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_prov_time ON usage_events(provider, recorded_at)')
 
             conn.commit()
             conn.close()
@@ -310,7 +343,8 @@ class UsageDatabase(ReportingEngineMixin):
         source: str = "direct",
         instance_id: str = "local",
         external_id: Optional[str] = None,
-        is_proxied: int = 0
+        is_proxied: int = 0,
+        metadata: Optional[Any] = None,
     ) -> str:
         """Records a single usage event with dimensional attribution, client network context, deduplication, and cache metrics."""
         now_utc = recorded_at or datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -320,35 +354,222 @@ class UsageDatabase(ReportingEngineMixin):
         instance_clean = instance_id or "local"
         proxied_clean = 1 if is_proxied else 0
 
-        # 1. Deduplication by external_id (e.g. Anthropic message ID, OpenAI request ID)
+        # 1. Exact external_id Dedup / Metadata Enrichment
         if external_id:
             with self._lock:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM usage_events WHERE external_id = ? LIMIT 1", (str(external_id),))
+                cursor.execute(
+                    "SELECT id, session_id, project_id, metadata, is_proxied FROM usage_events WHERE (provider = ? AND external_id = ?) OR external_id = ? LIMIT 1",
+                    (prov_clean, str(external_id), str(external_id)),
+                )
                 existing = cursor.fetchone()
-                conn.close()
                 if existing:
-                    return existing["id"]
+                    existing_id = existing["id"]
+                    existing_sess = existing["session_id"] or ""
+                    existing_proj = existing["project_id"]
+                    existing_meta = existing["metadata"]
+                    existing_proxied = existing["is_proxied"] or 0
 
-        # 2. Temporal correlation deduplication (merged within +-60s window for same provider, session, and total_tokens)
+                    generic_prefixes = (
+                        "stream_",
+                        "proxy_",
+                        "cli_proxy_",
+                        "remote_",
+                        "session_evt_",
+                    )
+                    is_existing_generic = any(
+                        existing_sess.startswith(p) for p in generic_prefixes
+                    ) or not existing_sess
+                    is_incoming_generic = any(
+                        str(session_id).startswith(p) for p in generic_prefixes
+                    ) or not session_id
+
+                    if is_existing_generic and not is_incoming_generic:
+                        target_session = str(session_id)
+                    elif not is_existing_generic and is_incoming_generic:
+                        target_session = existing_sess
+                    else:
+                        target_session = str(session_id) if session_id else existing_sess
+
+                    target_project = project_id or existing_proj
+
+                    target_meta = existing_meta
+                    if metadata is not None:
+                        target_meta = (
+                            json.dumps(metadata)
+                            if isinstance(metadata, (dict, list))
+                            else str(metadata)
+                        )
+
+                    target_proxied = 1 if (proxied_clean or existing_proxied) else 0
+
+                    cursor.execute(
+                        "UPDATE usage_events SET session_id = ?, project_id = ?, metadata = ?, is_proxied = ? WHERE id = ?",
+                        (
+                            target_session,
+                            target_project,
+                            target_meta,
+                            target_proxied,
+                            existing_id,
+                        ),
+                    )
+                    conn.commit()
+                    conn.close()
+                    return existing_id
+                conn.close()
+
+        # 2. Cross-Source Temporal + Token Fingerprint Dedup (±15s window)
+        SCANNER_SOURCES = {
+            "local_jsonl_scanner",
+            "local_scanner",
+            "claude_desktop_scanner",
+            "ollama_local_logs",
+            "cli_scanner",
+            "desktop_app",
+            "log_scanner",
+        }
+        PROXY_SOURCES = {
+            "proxy",
+            "transparent_proxy",
+            "traffic_governor",
+            "emulator",
+            "direct",
+        }
+
+        if total_tokens > 0:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, session_id, project_id, metadata, external_id, source, is_proxied, recorded_at
+                    FROM usage_events
+                    WHERE provider = ? AND input_tokens = ? AND output_tokens = ?
+                    ORDER BY recorded_at DESC
+                    """,
+                    (prov_clean, input_tokens, output_tokens),
+                )
+                candidates = cursor.fetchall()
+                if candidates:
+                    try:
+                        cur_dt = datetime.datetime.fromisoformat(
+                            now_utc.replace("Z", "+00:00")
+                        )
+                        for row in candidates:
+                            rec_iso = row["recorded_at"]
+                            if not rec_iso:
+                                continue
+                            try:
+                                row_dt = datetime.datetime.fromisoformat(
+                                    rec_iso.replace("Z", "+00:00")
+                                )
+                            except Exception:
+                                continue
+
+                            time_diff = abs((cur_dt - row_dt).total_seconds())
+                            if time_diff <= 15.0:
+                                c_source = str(row["source"] or "direct")
+                                in_source = str(source_clean)
+                                c_ext_id = row["external_id"]
+
+                                is_cross_source = (
+                                    (
+                                        c_source in PROXY_SOURCES
+                                        and in_source in SCANNER_SOURCES
+                                    )
+                                    or (
+                                        c_source in SCANNER_SOURCES
+                                        and in_source in PROXY_SOURCES
+                                    )
+                                    or (c_source != in_source)
+                                )
+                                has_null_mismatch = (
+                                    c_ext_id is None and external_id is not None
+                                ) or (c_ext_id is not None and external_id is None)
+
+                                if is_cross_source or has_null_mismatch:
+                                    c_id = row["id"]
+                                    c_sess = str(row["session_id"] or "")
+                                    generic_prefixes = (
+                                        "stream_",
+                                        "remote_",
+                                        "proxy_",
+                                        "cli_proxy_",
+                                        "session_evt_",
+                                    )
+                                    is_cand_generic = any(
+                                        c_sess.startswith(p) for p in generic_prefixes
+                                    ) or not c_sess
+                                    is_in_generic = any(
+                                        str(session_id).startswith(p) for p in generic_prefixes
+                                    ) or not session_id
+
+                                    if is_cand_generic and not is_in_generic:
+                                        target_sess = str(session_id)
+                                    elif not is_cand_generic and is_in_generic:
+                                        target_sess = c_sess
+                                    else:
+                                        target_sess = str(session_id) if session_id else c_sess
+                                    target_ext = c_ext_id or external_id
+                                    target_proj = row["project_id"] or project_id
+
+                                    target_meta = row["metadata"]
+                                    if metadata is not None:
+                                        target_meta = (
+                                            json.dumps(metadata)
+                                            if isinstance(metadata, (dict, list))
+                                            else str(metadata)
+                                        )
+
+                                    target_prox = (
+                                        1 if (proxied_clean or row["is_proxied"]) else 0
+                                    )
+
+                                    cursor.execute(
+                                        """
+                                        UPDATE usage_events
+                                        SET external_id = ?, session_id = ?, project_id = ?, metadata = ?, is_proxied = ?
+                                        WHERE id = ?
+                                        """,
+                                        (
+                                            target_ext,
+                                            target_sess,
+                                            target_proj,
+                                            target_meta,
+                                            target_prox,
+                                            c_id,
+                                        ),
+                                    )
+                                    conn.commit()
+                                    conn.close()
+                                    return c_id
+                    except Exception:
+                        pass
+                conn.close()
+
+        # 3. Temporal correlation deduplication (merged within +-60s window for same provider, session, and total_tokens)
         if session_id:
             with self._lock:
                 conn = self._get_connection()
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT id, recorded_at FROM usage_events WHERE provider = ? AND session_id = ? AND total_tokens = ?",
-                    (prov_clean, session_id, total_tokens)
+                    (prov_clean, session_id, total_tokens),
                 )
                 candidates = cursor.fetchall()
                 conn.close()
                 if candidates:
                     try:
-                        cur_dt = datetime.datetime.fromisoformat(now_utc.replace("Z", "+00:00"))
+                        cur_dt = datetime.datetime.fromisoformat(
+                            now_utc.replace("Z", "+00:00")
+                        )
                         for row in candidates:
                             rec_iso = row["recorded_at"]
                             if rec_iso:
-                                row_dt = datetime.datetime.fromisoformat(rec_iso.replace("Z", "+00:00"))
+                                row_dt = datetime.datetime.fromisoformat(
+                                    rec_iso.replace("Z", "+00:00")
+                                )
                                 if abs((cur_dt - row_dt).total_seconds()) <= 60.0:
                                     return row["id"]
                     except Exception:
@@ -358,23 +579,26 @@ class UsageDatabase(ReportingEngineMixin):
 
         # Auto-compute cost if not explicitly provided
         if estimated_cost <= 0.0 and total_tokens > 0:
-            if prov_clean == "ollama":
-                estimated_cost = 0.0
-            else:
-                estimated_cost = round(
-                    (input_tokens * 0.000003) +
-                    (output_tokens * 0.000015) +
-                    (cache_creation_tokens * 0.00000375) +
-                    (cache_read_tokens * 0.0000003),
-                    5
-                )
+            from backend.contracts.pricing import calculate_event_cost
+            estimated_cost = calculate_event_cost(
+                provider=prov_clean,
+                model=model or "",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
+            )
 
         # Defaults
         if not user_name:
-            user_name = "James Eckhardt"
+            user_name = os.environ.get("USERNAME") or os.environ.get("USER") or "Local User"
         if instance_clean in ("local", "") and session_id:
-            if session_id.startswith("remote_node_") or session_id.startswith("stream_node_"):
-                prefix_stripped = session_id.replace("remote_", "", 1).replace("stream_", "", 1)
+            if session_id.startswith("remote_node_") or session_id.startswith(
+                "stream_node_"
+            ):
+                prefix_stripped = session_id.replace("remote_", "", 1).replace(
+                    "stream_", "", 1
+                )
                 parts = prefix_stripped.rsplit("_", 1)
                 if parts[0].startswith("node_"):
                     instance_clean = parts[0]
@@ -384,7 +608,14 @@ class UsageDatabase(ReportingEngineMixin):
             claude_snap = self.get_provider_snapshots().get("claude", {})
             active_mode = self.get_quota_tracking_mode()
             snap_plan = str(claude_snap.get("plan_type") or "")
-            is_pro = ("pro" in snap_plan.lower()) or (active_mode == "individual" and snap_plan not in ("Team Enterprise",))
+            is_pro = ("pro" in snap_plan.lower()) or (
+                active_mode == "individual" and snap_plan not in ("Team Enterprise",)
+            )
+            if not user_name or user_name in ("Local User", os.environ.get("USERNAME"), os.environ.get("USER")):
+                if active_prof and active_prof.get("user_name"):
+                    user_name = active_prof.get("user_name")
+                elif claude_snap.get("user_name"):
+                    user_name = claude_snap.get("user_name")
             if not team_name:
                 if active_prof and active_prof.get("team_name"):
                     team_name = active_prof.get("team_name")
@@ -396,7 +627,7 @@ class UsageDatabase(ReportingEngineMixin):
                 if active_prof and active_prof.get("account_id"):
                     account_id = active_prof.get("account_id")
                 elif is_pro:
-                    account_id = user_name
+                    account_id = claude_snap.get("user_name") or user_name
                 else:
                     account_id = "Synthesis2"
         else:
@@ -405,20 +636,37 @@ class UsageDatabase(ReportingEngineMixin):
                 if active_prof and active_prof.get("account_id"):
                     account_id = active_prof.get("account_id")
                 else:
-                    account_id = "acidcow@gmail.com" if prov_clean == "gemini" else user_name
+                    account_id = (
+                        "acidcow@gmail.com" if prov_clean == "gemini" else user_name
+                    )
 
         # Client IP & Alias Network Attribution
         if not client_ip:
             client_ip = "127.0.0.1"
         if not client_alias:
             client_alias = self.resolve_client_alias(client_ip)
-            if client_alias == client_ip and client_ip in ("127.0.0.1", "localhost", "::1"):
-                client_alias = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "Local Workstation"
+            if client_alias == client_ip and client_ip in (
+                "127.0.0.1",
+                "localhost",
+                "::1",
+            ):
+                client_alias = (
+                    os.environ.get("COMPUTERNAME")
+                    or os.environ.get("HOSTNAME")
+                    or "Local Workstation"
+                )
+
+        metadata_str = (
+            json.dumps(metadata)
+            if isinstance(metadata, (dict, list))
+            else (str(metadata) if metadata is not None else None)
+        )
 
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO usage_events (
                     id, provider, model, session_id,
                     input_tokens, output_tokens, total_tokens,
@@ -426,33 +674,36 @@ class UsageDatabase(ReportingEngineMixin):
                     account_id, team_name, user_name, token_id, project_id,
                     cache_creation_tokens, cache_read_tokens,
                     client_ip, client_alias,
-                    source, instance_id, external_id, is_proxied
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                event_id,
-                prov_clean,
-                model,
-                session_id or f"session_{event_id}",
-                input_tokens,
-                output_tokens,
-                total_tokens,
-                estimated_cost,
-                request_count,
-                now_utc,
-                account_id,
-                team_name,
-                user_name,
-                token_id,
-                project_id,
-                cache_creation_tokens,
-                cache_read_tokens,
-                client_ip,
-                client_alias,
-                source_clean,
-                instance_clean,
-                external_id,
-                proxied_clean
-            ))
+                    source, instance_id, external_id, is_proxied, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    event_id,
+                    prov_clean,
+                    model,
+                    session_id or f"session_{event_id}",
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    estimated_cost,
+                    request_count,
+                    now_utc,
+                    account_id,
+                    team_name,
+                    user_name,
+                    token_id,
+                    project_id,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                    client_ip,
+                    client_alias,
+                    source_clean,
+                    instance_clean,
+                    external_id,
+                    proxied_clean,
+                    metadata_str,
+                ),
+            )
             conn.commit()
             conn.close()
 
@@ -567,6 +818,11 @@ class UsageDatabase(ReportingEngineMixin):
         snaps = self.get_provider_snapshots()
         return snaps.get(provider.lower())
 
+    def get_provider_hierarchies(self, scope: Optional[str] = None) -> Dict[str, Any]:
+        """Returns provider hierarchy and comparative quota metrics map matching the main dashboard."""
+        comp = self.get_comparative_metrics(scope=scope)
+        return comp.get("providers", {})
+
     def get_usage_summary(self, provider: Optional[str] = None) -> Dict[str, Any]:
         """Calculates today's token usage, monthly totals, and session stats."""
         today_date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
@@ -653,6 +909,7 @@ class UsageDatabase(ReportingEngineMixin):
                     COALESCE(MAX(source), 'direct') as source,
                     COALESCE(MAX(instance_id), 'local') as instance_id,
                     COALESCE(MAX(is_proxied), 0) as is_proxied,
+                    COALESCE(MAX(external_id), '') as external_id,
                     COALESCE(MAX(account_id), '') as account_id
                 FROM usage_events
             """
@@ -745,105 +1002,42 @@ class UsageDatabase(ReportingEngineMixin):
           - 'breakdown': 'consolidated' | 'locality' | 'tenant_account' | 'workspace_pool' | 'compute_node' | 'client_host' | 'access_route' | 'model'
           - 'scope_filter': 'all' | 'personal_only' | 'team_only' | 'local_only' | 'remote_only'
         """
-        valid_buckets = (1, 5, 10, 15, 30, 60)
-        try:
-            bucket_min = int(bucket_minutes) if int(bucket_minutes) in valid_buckets else 5
-        except (ValueError, TypeError):
-            bucket_min = 5
-
         mode_val = "cumulative" if str(mode).lower() == "cumulative" else "interval_delta"
         breakdown_val = str(breakdown or "consolidated").strip().lower()
         scope_filter_val = str(scope_filter or "all").strip().lower()
 
-        window_map = {
-            "1h": 60,
-            "3h": 180,
-            "6h": 360,
-            "12h": 720,
-            "24h": 1440,
-            "48h": 2880,
-            "3d": 4320,
-            "5d": 7200,
-            "7d": 10080,
-            "10d": 14400,
-            "15d": 21600,
-            "30d": 43200,
-            "90d": 129600,
-            "3m": 129600,
-            "180d": 259200,
-            "6m": 259200,
-            "365d": 525600,
-            "12m": 525600,
-            "1y": 525600,
-        }
-        win_key = str(window).strip().lower()
-        win_mins = window_map.get(win_key, 1440)
-        # Keep exact bucket_min for <=24h; scale effective bucket for multi-day/month windows to cap bins <= 288
-        effective_bucket_min = bucket_min
-        if win_mins > 1440 and (win_mins // bucket_min) > 288:
-            effective_bucket_min = max(bucket_min, win_mins // 120)
-        num_bins = max(1, win_mins // effective_bucket_min)
-
         now = datetime.datetime.now(datetime.timezone.utc)
-        cutoff = now - datetime.timedelta(minutes=win_mins)
+        grid = self.generate_bucket_grid(
+            window=window,
+            bucket_minutes=bucket_minutes,
+            now=now,
+            is_granular=True,
+        )
+        effective_bucket_min = grid["bucket_minutes"]
+        win_mins = grid["win_mins"]
+        num_bins = grid["num_bins"]
+        bucket_secs = grid["bucket_seconds"]
+        cutoff = grid["cutoff"]
+        cutoff_epoch = grid["cutoff_epoch"]
+        labels = grid["labels"]
+        keys = grid["keys"]
+        bin_start_timestamps = grid["bin_start_timestamps"]
 
-        # Generate continuous bin keys and labels
-        labels = []
-        keys = []
-        bin_start_timestamps = []
-
-        for i in range(num_bins - 1, -1, -1):
-            t_bin = now - datetime.timedelta(minutes=i * effective_bucket_min)
-            t_local = t_bin.astimezone()
-            bin_start_timestamps.append(t_bin)
-            keys.append(t_bin.strftime("%Y-%m-%dT%H:%M"))
-            if win_mins <= 60:
-                labels.append(t_local.strftime("%H:%M"))
-            elif win_mins <= 1440:
-                labels.append(t_local.strftime("%H:%M"))
-            elif win_mins <= 43200:
-                labels.append(t_local.strftime("%b %d %H:%M") if win_mins <= 7200 else t_local.strftime("%b %d"))
-            else:
-                labels.append(t_local.strftime("%Y-%m-%d"))
-
-        # Query events and managed_nodes within the window
+        # Query events and managed_nodes within the window using SQL bucketing helper
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT id, name, endpoint, engine, compute_group FROM managed_nodes")
             nodes_map = {r["id"]: dict(r) for r in cursor.fetchall()}
 
-            query = """
-                SELECT 
-                    recorded_at,
-                    provider,
-                    COALESCE(model, '') as model,
-                    COALESCE(session_id, '') as session_id,
-                    COALESCE(token_id, '') as token_id,
-                    COALESCE(user_name, '') as user_name,
-                    COALESCE(team_name, '') as team_name,
-                    COALESCE(account_id, '') as account_id,
-                    COALESCE(instance_id, 'local') as instance_id,
-                    COALESCE(source, 'direct') as source,
-                    COALESCE(client_ip, '127.0.0.1') as client_ip,
-                    COALESCE(client_alias, '') as client_alias,
-                    COALESCE(is_proxied, 0) as is_proxied,
-                    total_tokens,
-                    estimated_cost
-                FROM usage_events
-                WHERE recorded_at >= ?
-            """
-            params = [cutoff.isoformat()]
-            if provider:
-                query += " AND provider = ?"
-                params.append(provider.lower())
-
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
+            rows = self.query_sql_bucketed_events(
+                conn=conn,
+                start_iso=cutoff.isoformat(),
+                bucket_seconds=bucket_secs,
+                provider=provider,
+                group_by_dimensions=True,
+            )
             conn.close()
-
-        cutoff_epoch = cutoff.timestamp()
-        bucket_secs = effective_bucket_min * 60
 
         total_pts = [0] * num_bins
         total_cost = 0.0
@@ -884,23 +1078,26 @@ class UsageDatabase(ReportingEngineMixin):
         ]
 
         for r in rows:
-            rec_str = r["recorded_at"]
-            try:
-                dt = datetime.datetime.fromisoformat(rec_str.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=datetime.timezone.utc)
-                else:
-                    dt = dt.astimezone(datetime.timezone.utc)
-                evt_epoch = dt.timestamp()
-            except Exception:
-                continue
+            rec_str = r.get("recorded_at") or ""
+            dt = None
+            if rec_str:
+                try:
+                    dt = datetime.datetime.fromisoformat(rec_str.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=datetime.timezone.utc)
+                    else:
+                        dt = dt.astimezone(datetime.timezone.utc)
+                except Exception:
+                    dt = None
 
-            delta_secs = evt_epoch - cutoff_epoch
-            if delta_secs < 0:
+            idx = None
+            if dt is not None:
+                idx = get_bucket_index(dt, cutoff_epoch, bucket_secs, num_bins)
+            elif "bucket_epoch" in r:
+                idx = get_bucket_index(r["bucket_epoch"], cutoff_epoch, bucket_secs, num_bins)
+
+            if idx is None or idx < 0 or idx >= num_bins:
                 continue
-            idx = int(delta_secs // bucket_secs)
-            if idx >= num_bins:
-                idx = num_bins - 1
 
             row_dict = dict(r)
             tax = normalize_event_taxonomy(row_dict, nodes_map=nodes_map)
@@ -1135,7 +1332,7 @@ class UsageDatabase(ReportingEngineMixin):
         return {
             "success": True,
             "window": window,
-            "bucket_minutes": bucket_min,
+            "bucket_minutes": effective_bucket_min,
             "mode": mode_val,
             "breakdown": breakdown_val,
             "scope_filter": scope_filter_val,
@@ -1763,8 +1960,10 @@ class UsageDatabase(ReportingEngineMixin):
                 "daily_allowance": daily_allowance,
                 "weekly_allowance": weekly_allowance,
                 "session_balance_remaining_pct": session_rem_pct,
+                "session_remaining_pct": session_rem_pct,
                 "session_used_pct": round(100.0 - session_rem_pct, 1),
                 "weekly_balance_remaining_pct": weekly_rem_pct,
+                "weekly_remaining_pct": weekly_rem_pct,
                 "weekly_used_pct": round(100.0 - weekly_rem_pct, 1),
                 "session_tokens_used": dyn_quota.get("session_tokens_used", tokens_today),
                 "session_tokens_available": dyn_quota.get("session_tokens_available", max(0, daily_allowance - tokens_today)),
@@ -1876,104 +2075,38 @@ class UsageDatabase(ReportingEngineMixin):
         now = datetime.datetime.now(datetime.timezone.utc)
         win_norm = (window or "24h").strip().lower()
 
-        window_specs = {
-            "1h": (12, 5, "Last 1 Hour", "%H:%M"),
-            "3h": (18, 10, "Last 3 Hours", "%H:%M"),
-            "6h": (12, 30, "Last 6 Hours", "%H:%M"),
-            "12h": (12, 60, "Last 12 Hours", "%H:00"),
-            "24h": (24, 60, "Last 24 Hours", "%H:00"),
-            "48h": (24, 120, "Last 48 Hours", "%b %d %H:00"),
-            "3d": (12, 360, "Last 3 Days", "%a %H:00"),
-            "5d": (10, 720, "Last 5 Days", "%a %d %H:00"),
-            "7d": (7, 1440, "Last 7 Days", "%a %d"),
-            "10d": (10, 1440, "Last 10 Days", "%b %d"),
-            "15d": (15, 1440, "Last 15 Days", "%b %d"),
-            "30d": (30, 1440, "Last 30 Days", "%b %d"),
-            "3m": (15, 8640, "Last 3 Months", "%b %d"),
-            "90d": (15, 8640, "Last 3 Months", "%b %d"),
-            "6m": (12, 21600, "Last 6 Months", "%b %d"),
-            "180d": (12, 21600, "Last 6 Months", "%b %d"),
-            "12m": (12, 43800, "Last 12 Months", "%b '%y"),
-            "365d": (12, 43800, "Last 12 Months", "%b '%y"),
-            "1y": (12, 43800, "Last 12 Months", "%b '%y"),
-        }
-
-        win_mins_map = {
-            "1h": 60, "3h": 180, "6h": 360, "12h": 720, "24h": 1440, "48h": 2880,
-            "3d": 4320, "5d": 7200, "7d": 10080, "10d": 14400, "15d": 21600,
-            "30d": 43200, "90d": 129600, "3m": 129600, "180d": 259200, "6m": 259200,
-            "365d": 525600, "12m": 525600, "1y": 525600,
-        }
-
-        if win_norm in window_specs:
-            window = win_norm
-            num_bins, step_min, window_label, lbl_fmt = window_specs[win_norm]
-        else:
-            window = "24h"
-            num_bins, step_min, window_label, lbl_fmt = window_specs["24h"]
-
-        win_mins = win_mins_map.get(window, 1440)
-        valid_buckets = (1, 5, 10, 15, 30, 60)
-        if bucket_minutes is not None:
-            try:
-                b_min = int(bucket_minutes)
-                if b_min in valid_buckets:
-                    step_min = b_min
-                    if win_mins > 1440 and (win_mins // step_min) > 288:
-                        step_min = max(step_min, win_mins // 120)
-                    num_bins = max(1, win_mins // step_min)
-                    lbl_fmt = "%H:%M" if win_mins <= 1440 else ("%b %d %H:%M" if win_mins <= 7200 else "%b %d")
-            except (ValueError, TypeError):
-                pass
-
-        total_mins = num_bins * step_min
-        cutoff = now - datetime.timedelta(minutes=total_mins)
-        labels = []
-        keys = []
-        for i in range(num_bins - 1, -1, -1):
-            t = now - datetime.timedelta(minutes=i * step_min)
-            t_local = t.astimezone()
-            if win_mins <= 60 or step_min < 60:
-                labels.append(t_local.strftime("%H:%M"))
-            elif win_mins <= 1440:
-                labels.append(t_local.strftime("%H:%M"))
-            elif win_mins <= 43200:
-                labels.append(t_local.strftime("%b %d %H:%M") if win_mins <= 7200 else t_local.strftime("%b %d"))
-            else:
-                labels.append(t_local.strftime("%Y-%m-%d"))
-
-            # Always format keys as canonical ISO 8601 with minutes for accurate JS Date parsing
-            keys.append(t.strftime("%Y-%m-%dT%H:%M"))
+        grid = self.generate_bucket_grid(
+            window=win_norm,
+            bucket_minutes=bucket_minutes,
+            now=now,
+            is_granular=False,
+        )
+        window = grid["window"]
+        window_label = grid["window_label"]
+        win_mins = grid["win_mins"]
+        step_min = grid["bucket_minutes"]
+        bucket_secs = grid["bucket_seconds"]
+        num_bins = grid["num_bins"]
+        cutoff = grid["cutoff"]
+        cutoff_epoch = grid["cutoff_epoch"]
+        labels = grid["labels"]
+        keys = grid["keys"]
 
         key_to_idx = {k: idx for idx, k in enumerate(keys)}
-        cutoff_epoch = cutoff.timestamp()
-        bucket_secs = step_min * 60
 
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT id, name, endpoint, engine, compute_group FROM managed_nodes")
             nodes_map = {r["id"]: dict(r) for r in cursor.fetchall()}
-            cursor.execute("""
-                SELECT 
-                    recorded_at,
-                    provider,
-                    COALESCE(model, '') as model,
-                    COALESCE(session_id, '') as session_id,
-                    COALESCE(token_id, '') as token_id,
-                    COALESCE(user_name, '') as user_name,
-                    COALESCE(team_name, '') as team_name,
-                    COALESCE(account_id, '') as account_id,
-                    COALESCE(instance_id, 'local') as instance_id,
-                    COALESCE(source, 'direct') as source,
-                    COALESCE(client_ip, '127.0.0.1') as client_ip,
-                    COALESCE(client_alias, '') as client_alias,
-                    COALESCE(is_proxied, 0) as is_proxied,
-                    total_tokens as tokens
-                FROM usage_events
-                WHERE provider = ? AND recorded_at >= ?
-            """, (prov_key, cutoff.isoformat()))
-            rows = cursor.fetchall()
+
+            rows = self.query_sql_bucketed_events(
+                conn=conn,
+                start_iso=cutoff.isoformat(),
+                bucket_seconds=bucket_secs,
+                provider=prov_key,
+                group_by_dimensions=True,
+            )
             conn.close()
 
         total_points = [0] * num_bins
@@ -1989,7 +2122,7 @@ class UsageDatabase(ReportingEngineMixin):
         }
 
         for r in rows:
-            rec_str = r["recorded_at"] or ""
+            rec_str = r.get("recorded_at") or ""
             idx = None
             try:
                 dt = datetime.datetime.fromisoformat(rec_str.replace("Z", "+00:00"))
@@ -1997,11 +2130,12 @@ class UsageDatabase(ReportingEngineMixin):
                     dt = dt.replace(tzinfo=datetime.timezone.utc)
                 else:
                     dt = dt.astimezone(datetime.timezone.utc)
-                delta_secs = dt.timestamp() - cutoff_epoch
-                if delta_secs >= 0:
-                    idx = min(num_bins - 1, int(delta_secs // bucket_secs))
+                idx = get_bucket_index(dt, cutoff_epoch, bucket_secs, num_bins)
             except Exception:
                 idx = None
+
+            if idx is None and "bucket_epoch" in r:
+                idx = get_bucket_index(r["bucket_epoch"], cutoff_epoch, bucket_secs, num_bins)
 
             if idx is None:
                 for k, ki in key_to_idx.items():
@@ -2011,7 +2145,7 @@ class UsageDatabase(ReportingEngineMixin):
             if idx is None or idx < 0 or idx >= num_bins:
                 continue
 
-            toks = int(r["tokens"] or 0)
+            toks = int(r.get("tokens") or r.get("total_tokens") or 0)
             total_points[idx] += toks
             row_dict = dict(r)
             tax = normalize_event_taxonomy(row_dict, nodes_map=nodes_map)
@@ -2290,13 +2424,7 @@ class UsageDatabase(ReportingEngineMixin):
         mode_val = "cumulative" if str(mode).lower() == "cumulative" else "interval_delta"
         if mode_val == "cumulative":
             for s in series:
-                pts = s.get("points", [])
-                running = 0
-                cum_pts = []
-                for p in pts:
-                    running += int(p or 0)
-                    cum_pts.append(running)
-                s["points"] = cum_pts
+                s["points"] = self.apply_timeseries_mode(s.get("points", []), mode=mode_val)
 
         return {
             "provider": prov_key,
@@ -3512,5 +3640,6 @@ class UsageDatabase(ReportingEngineMixin):
         return deleted
 
 DatabaseEngine = UsageDatabase
+DatabaseManager = UsageDatabase
 
 

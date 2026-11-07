@@ -8,6 +8,7 @@ import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from backend.providers.base import BaseProvider
+from backend.providers.claude import ScanResult
 
 class OllamaProvider(BaseProvider):
     """
@@ -15,6 +16,7 @@ class OllamaProvider(BaseProvider):
     Monitors local Ollama runtime on http://localhost:11434, detects installed models,
     tracks running VRAM inference, scans local server logs, and ingests real token telemetry.
     """
+    _shared_file_scan_state: Dict[str, Any] = {}
 
     def __init__(self, database, vault, diagnostics, base_url: str = "http://localhost:11434"):
         super().__init__(database, vault, diagnostics)
@@ -22,6 +24,8 @@ class OllamaProvider(BaseProvider):
         self._cached_models: List[Dict[str, Any]] = []
         self._cached_running: List[Dict[str, Any]] = []
         self._last_models_fetch = 0
+        self._file_scan_state: Dict[str, Any] = dict(OllamaProvider._shared_file_scan_state)
+        self._last_scan_summary: Dict[str, Any] = {}
 
 
     @property
@@ -90,12 +94,15 @@ class OllamaProvider(BaseProvider):
         if local_app:
             ollama_dir = Path(local_app) / "Ollama"
             if ollama_dir.exists():
-                # Rotated archives first: server-5.log, server-4.log, ... server-1.log
-                rot = sorted(ollama_dir.glob("server-*.log"), key=lambda x: str(x), reverse=True)
-                candidates.extend(rot)
                 srv = ollama_dir / "server.log"
                 if srv.exists():
                     candidates.append(srv)
+                try:
+                    rot = sorted(ollama_dir.glob("server-*.log"), key=lambda x: x.stat().st_mtime, reverse=True)
+                    if rot:
+                        candidates.append(rot[0])
+                except Exception:
+                    pass
 
         # 2. User home ~/.ollama/logs/
         home_ollama = Path.home() / ".ollama" / "logs"
@@ -109,31 +116,79 @@ class OllamaProvider(BaseProvider):
 
         return candidates
 
-    def scan_local_logs(self, log_paths: Optional[List[str]] = None) -> int:
+    def scan_local_logs(self, log_paths: Optional[List[str]] = None, db: Optional[Any] = None, **kwargs) -> Any:
         """
         Scans Ollama server logs, dynamically tracks active model switches,
         and ingests prompt and evaluation tokens into SQLite idempotently.
+        Supports incremental scanning by caching (mtime, size, cached_summary) per log file.
         """
         files_to_scan = self.find_ollama_logs(log_paths)
         if not files_to_scan:
-            return 0
+            empty_stats = {"sessions_found": 0, "total_tokens": 0, "events_recorded": 0, "ingested_count": 0, "files_scanned": 0, "cached_files": 0}
+            self._last_scan_summary = empty_stats
+            return ScanResult(0, empty_stats) if not kwargs.get("return_dict") else empty_stats
+
+        target_db = db if db is not None else self.db
 
         # Check currently loaded models from Ollama runtime as initial active model
         running_models = self.get_running_models()
         cur_model = running_models[0].get("name") if running_models else "gemma4:e4b"
 
+        # Pre-fetch existing session IDs in a single query to eliminate thousands of connection opens
+        existing_session_ids = set()
+        try:
+            conn = target_db._get_connection()
+            c = conn.cursor()
+            c.execute("SELECT session_id FROM usage_events WHERE provider = 'ollama'")
+            existing_session_ids = {row[0] for row in c.fetchall() if row[0]}
+            conn.close()
+        except Exception:
+            pass
+
         ingested_count = 0
+        total_tokens = 0
+        sessions_found: set = set()
+        files_scanned = 0
+        cached_files = 0
 
         for pth in files_to_scan:
+            try:
+                st = pth.stat()
+                file_key = str(pth.resolve()) if hasattr(pth, "resolve") else str(pth)
+            except Exception:
+                continue
+
+            cached = self._file_scan_state.get(file_key)
+            if (
+                cached is not None
+                and not getattr(self, "_force_full_scan", False)
+                and cached.get("mtime") == st.st_mtime
+                and cached.get("size") == st.st_size
+            ):
+                # Unchanged file: reuse cached summary stats without disk re-reading
+                c_sum = cached.get("cached_summary", {})
+                total_tokens += c_sum.get("total_tokens", 0)
+                for sid in c_sum.get("session_ids", []):
+                    sessions_found.add(sid)
+                cached_files += 1
+                continue
+
             try:
                 with open(pth, "r", encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
             except Exception:
                 continue
 
+            if log_paths is None and len(lines) > 5000:
+                lines = lines[-5000:]
+
             file_stem = pth.stem
             i = 0
             n = len(lines)
+            file_prompt_tok = 0
+            file_eval_tok = 0
+            file_events = 0
+            file_sessions: List[str] = []
 
             while i < n:
                 line = lines[i]
@@ -187,16 +242,13 @@ class OllamaProvider(BaseProvider):
                             iso_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
                     unique_sess_key = f"ollama_{file_stem}_line_{i}_{prompt_tok}_{eval_tok}"
+                    file_prompt_tok += prompt_tok
+                    file_eval_tok += eval_tok
+                    file_sessions.append(unique_sess_key)
 
-                    conn = self.db._get_connection()
-                    c = conn.cursor()
-                    c.execute("SELECT id FROM usage_events WHERE session_id = ?", (unique_sess_key,))
-                    exists = c.fetchone()
-                    conn.close()
-
-                    if not exists:
+                    if unique_sess_key not in existing_session_ids:
                         clean_model = cur_model.strip().replace("registry.ollama.ai/library/", "")
-                        self.db.record_usage_event(
+                        target_db.record_usage_event(
                             provider="ollama",
                             model=clean_model or "local_model",
                             input_tokens=prompt_tok,
@@ -208,11 +260,44 @@ class OllamaProvider(BaseProvider):
                             instance_id="local",
                             is_proxied=0
                         )
+                        existing_session_ids.add(unique_sess_key)
                         ingested_count += 1
+                        file_events += 1
 
                 i += 1
 
-        return ingested_count
+            file_tot_tok = file_prompt_tok + file_eval_tok
+            self._file_scan_state[file_key] = {
+                "mtime": st.st_mtime,
+                "size": st.st_size,
+                "cached_summary": {
+                    "prompt_tokens": file_prompt_tok,
+                    "eval_tokens": file_eval_tok,
+                    "total_tokens": file_tot_tok,
+                    "session_ids": file_sessions,
+                    "events_recorded": file_events
+                }
+            }
+            OllamaProvider._shared_file_scan_state[file_key] = self._file_scan_state[file_key]
+            total_tokens += file_tot_tok
+            for sid in file_sessions:
+                sessions_found.add(sid)
+            files_scanned += 1
+
+        summary_stats = {
+            "sessions_found": len(sessions_found),
+            "total_tokens": total_tokens,
+            "events_recorded": ingested_count,
+            "ingested_count": ingested_count,
+            "files_scanned": files_scanned,
+            "cached_files": cached_files
+        }
+        self._last_scan_summary = summary_stats
+
+        if kwargs.get("return_dict", False) or (db is not None and kwargs.get("as_dict", False)):
+            return summary_stats
+
+        return ScanResult(ingested_count, summary_stats)
 
     def ingest_inference_tokens(
         self,

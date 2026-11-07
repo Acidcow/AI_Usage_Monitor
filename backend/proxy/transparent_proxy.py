@@ -1,3 +1,4 @@
+import datetime
 import http.server
 import json
 import re
@@ -6,10 +7,352 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from backend.diagnostics.logging_engine import ErrorCategory
 from backend.providers.gemini import GeminiProvider
+
+
+class SSEResult(tuple):
+    """Container for parsed SSE stream tokens and upstream response identifier."""
+
+    def __new__(
+        cls,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        model: str = "",
+        external_id: Optional[str] = None,
+    ):
+        return super().__new__(
+            cls,
+            (
+                int(input_tokens or 0),
+                int(output_tokens or 0),
+                str(model or ""),
+                external_id,
+            ),
+        )
+
+    @property
+    def input_tokens(self) -> int:
+        return self[0]
+
+    @property
+    def output_tokens(self) -> int:
+        return self[1]
+
+    @property
+    def model(self) -> str:
+        return self[2]
+
+    @property
+    def external_id(self) -> Optional[str]:
+        return self[3]
+
+    @property
+    def id(self) -> Optional[str]:
+        return self[3]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        m = {
+            "input_tokens": self[0],
+            "in_tokens": self[0],
+            "output_tokens": self[1],
+            "out_tokens": self[1],
+            "model": self[2],
+            "external_id": self[3],
+            "id": self[3],
+        }
+        return m.get(key, default)
+
+
+def extract_sse_tokens(sse_bytes: Union[bytes, str]) -> SSEResult:
+    """
+    Parses SSE byte streams or strings from Anthropic, OpenAI, or Gemini upstreams,
+    extracting input_tokens, output_tokens, model, and the upstream response external_id.
+    """
+    if not sse_bytes:
+        return SSEResult(0, 0, "", None)
+
+    if isinstance(sse_bytes, bytes):
+        text = sse_bytes.decode("utf-8", errors="replace")
+    else:
+        text = str(sse_bytes)
+
+    in_tokens = 0
+    out_tokens = 0
+    model = ""
+    external_id = None
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("data:"):
+            continue
+        raw_data = line[5:].strip()
+        if raw_data == "[DONE]":
+            continue
+        try:
+            payload = json.loads(raw_data)
+        except Exception:
+            continue
+
+        if not isinstance(payload, dict):
+            continue
+
+        # Top-level or OpenAI / Anthropic response ID
+        if not external_id and payload.get("id"):
+            external_id = payload.get("id")
+
+        p_type = payload.get("type")
+        if p_type == "message_start":
+            msg = payload.get("message", {})
+            if msg.get("id"):
+                external_id = msg.get("id")
+            if msg.get("model"):
+                model = msg.get("model")
+            usage = msg.get("usage", {})
+            in_tokens = usage.get("input_tokens", in_tokens)
+        elif p_type == "message_delta":
+            usage = payload.get("usage", {})
+            out_tokens = usage.get("output_tokens", out_tokens)
+        elif "usageMetadata" in payload:
+            # Gemini SSE format
+            u = payload.get("usageMetadata", {})
+            in_tokens = u.get("promptTokenCount", in_tokens)
+            out_tokens = u.get("candidatesTokenCount", out_tokens)
+            if not external_id and payload.get("responseId"):
+                external_id = payload.get("responseId")
+        elif "usage" in payload and payload.get("usage"):
+            # OpenAI / Ollama SSE format
+            u = payload.get("usage", {})
+            in_tokens = u.get("prompt_tokens", in_tokens)
+            out_tokens = u.get("completion_tokens", out_tokens)
+        if not model and payload.get("model"):
+            model = payload.get("model")
+
+    return SSEResult(in_tokens, out_tokens, model, external_id)
+
+
+_extract_sse_tokens = extract_sse_tokens
+
+
+def evaluate_budget_circuit_breaker(
+    database: Any, provider: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Evaluates proxy spend limits against recorded SQLite usage events.
+    Checks proxy_hourly_budget_usd (default 0.0 = unlimited) and proxy_session_budget_usd (default 0.0 = unlimited).
+    """
+    if not database:
+        return {
+            "tripped": False,
+            "reason": "Database not configured",
+            "hourly_spend_usd": 0.0,
+            "budget_limit_usd": 0.0,
+            "session_spend_usd": 0.0,
+        }
+
+    hourly_limit = 0.0
+    session_limit = 0.0
+    try:
+        if hasattr(database, "get_setting"):
+            h_val = database.get_setting("proxy_hourly_budget_usd", 0.0)
+            s_val = database.get_setting("proxy_session_budget_usd", 0.0)
+            hourly_limit = float(h_val or 0.0)
+            session_limit = float(s_val or 0.0)
+    except Exception:
+        pass
+
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    one_hour_ago_iso = (now_dt - datetime.timedelta(hours=1)).isoformat()
+    one_hour_ago_space = (now_dt - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+    hourly_spend_usd = 0.0
+    session_spend_usd = 0.0
+
+    try:
+        conn = database._get_connection() if hasattr(database, "_get_connection") else None
+        lock = getattr(database, "_lock", None)
+
+        def _do_query():
+            nonlocal hourly_spend_usd, session_spend_usd
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(estimated_cost), 0.0)
+                FROM usage_events
+                WHERE recorded_at >= ? OR (recorded_at NOT LIKE '%T%' AND recorded_at >= ?)
+                """,
+                (one_hour_ago_iso, one_hour_ago_space),
+            )
+            row = cursor.fetchone()
+            hourly_spend_usd = float(row[0] if row and row[0] is not None else 0.0)
+
+            if session_id:
+                cursor.execute(
+                    "SELECT COALESCE(SUM(estimated_cost), 0.0) FROM usage_events WHERE session_id = ?",
+                    (str(session_id),),
+                )
+                s_row = cursor.fetchone()
+                session_spend_usd = float(s_row[0] if s_row and s_row[0] is not None else 0.0)
+            conn.close()
+
+        if conn:
+            if lock:
+                with lock:
+                    _do_query()
+            else:
+                _do_query()
+    except Exception:
+        pass
+
+    tripped = False
+    reason = "Within budget limits"
+    budget_limit_usd = 0.0
+
+    if hourly_limit > 0.0 and hourly_spend_usd >= hourly_limit:
+        tripped = True
+        reason = f"Hourly proxy spend limit reached (${hourly_spend_usd:.2f} >= ${hourly_limit:.2f})"
+        budget_limit_usd = hourly_limit
+    elif session_limit > 0.0 and session_id and session_spend_usd >= session_limit:
+        tripped = True
+        reason = f"Session proxy spend limit reached (${session_spend_usd:.2f} >= ${session_limit:.2f})"
+        budget_limit_usd = session_limit
+    else:
+        budget_limit_usd = hourly_limit if hourly_limit > 0.0 else session_limit
+
+    return {
+        "tripped": tripped,
+        "reason": reason,
+        "hourly_spend_usd": round(hourly_spend_usd, 4),
+        "budget_limit_usd": float(budget_limit_usd),
+        "session_spend_usd": round(session_spend_usd, 4),
+    }
+
+
+def evaluate_spillover_target(
+    database: Any, provider: str, nodes_provider: Any = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Evaluates cloud-to-LAN failover/spillover when cloud quotas exceed 85% or cloud provider is in error state.
+    Routes to an online Ollama/vLLM LAN worker node.
+    """
+    if not database:
+        return None
+
+    # 1. Check if cloud_to_lan_spillover_enabled is enabled in settings
+    spillover_enabled = False
+    try:
+        if hasattr(database, "get_setting"):
+            val = database.get_setting("cloud_to_lan_spillover_enabled", False)
+            if isinstance(val, str):
+                spillover_enabled = val.lower() in ("true", "1", "yes", "enabled")
+            else:
+                spillover_enabled = bool(val)
+    except Exception:
+        pass
+
+    if not spillover_enabled:
+        return None
+
+    # 2. Check cloud provider's 5h quota used % >= 85.0 or in ERROR / 429 state
+    prov = (provider or "").lower().strip()
+    snap = None
+    try:
+        if hasattr(database, "get_latest_provider_snapshot"):
+            snap = database.get_latest_provider_snapshot(prov)
+        if not snap and hasattr(database, "get_provider_snapshots"):
+            snaps = database.get_provider_snapshots()
+            if isinstance(snaps, dict):
+                snap = snaps.get(prov)
+    except Exception:
+        pass
+
+    if not snap:
+        try:
+            conn = database._get_connection() if hasattr(database, "_get_connection") else None
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM provider_snapshots WHERE provider = ?", (prov,))
+                r = cursor.fetchone()
+                conn.close()
+                if r:
+                    snap = dict(r)
+        except Exception:
+            pass
+
+    if not snap:
+        return None
+
+    status = str(snap.get("status", "")).upper()
+    is_error = status in ("ERROR", "429", "DEGRADED", "BLOCKED", "RATE_LIMITED")
+
+    used_pct = 0.0
+    if "session_used_pct" in snap and snap["session_used_pct"] is not None:
+        used_pct = float(snap["session_used_pct"])
+    elif "session_remaining_pct" in snap and snap["session_remaining_pct"] is not None:
+        used_pct = 100.0 - float(snap["session_remaining_pct"])
+    elif "used_pct" in snap and snap["used_pct"] is not None:
+        used_pct = float(snap["used_pct"])
+
+    if not (used_pct >= 85.0 or is_error):
+        return None
+
+    # 3. Query get_managed_nodes() for an ONLINE local/LAN Ollama worker node
+    nodes = []
+    if nodes_provider and hasattr(nodes_provider, "get_managed_nodes"):
+        try:
+            nodes = nodes_provider.get_managed_nodes()
+        except Exception:
+            pass
+    if not nodes and hasattr(database, "get_managed_nodes"):
+        try:
+            nodes = database.get_managed_nodes()
+        except Exception:
+            pass
+    if not nodes and hasattr(database, "list_managed_nodes"):
+        try:
+            nodes = database.list_managed_nodes()
+        except Exception:
+            pass
+    if not nodes:
+        try:
+            conn = database._get_connection() if hasattr(database, "_get_connection") else None
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM managed_nodes")
+                nodes = [dict(r) for r in cursor.fetchall()]
+                conn.close()
+        except Exception:
+            pass
+
+    for node in nodes:
+        n_status = str(node.get("status", "")).upper()
+        n_engine = str(node.get("engine", "")).lower()
+        n_endpoint = str(node.get("endpoint", ""))
+        if n_status == "ONLINE" and (n_engine in ("ollama", "local", "vllm") or "11434" in n_endpoint):
+            node_name = node.get("name") or node.get("id") or "ollama-lan-node"
+            endpoint = node.get("endpoint") or "http://127.0.0.1:11434"
+            model = "llama3:8b"
+            models_json = node.get("models_json")
+            if models_json:
+                try:
+                    m_list = json.loads(models_json) if isinstance(models_json, str) else models_json
+                    if isinstance(m_list, list) and len(m_list) > 0:
+                        model = str(m_list[0])
+                except Exception:
+                    pass
+            elif node.get("model"):
+                model = str(node["model"])
+
+            return {
+                "spillover_active": True,
+                "target_node": node_name,
+                "target_endpoint": endpoint,
+                "target_model": model,
+            }
+
+    return None
 
 
 class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
@@ -34,6 +377,24 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
         "auto",
     }
 
+    @property
+    def claude_provider(self):
+        return getattr(self.server, "claude_provider", None)
+
+    @property
+    def gemini_provider(self):
+        return getattr(self.server, "gemini_provider", None)
+
+    @property
+    def database(self):
+        return getattr(self.server, "database", None) or getattr(
+            self.claude_provider, "db", None
+        )
+
+    @staticmethod
+    def _extract_sse_tokens(sse_bytes: Union[bytes, str]) -> SSEResult:
+        return extract_sse_tokens(sse_bytes)
+
     def log_message(self, format, *args):
         # Suppress noisy standard HTTP access logs
         pass
@@ -57,6 +418,42 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
             or self.headers.get("X-Client-Instance")
             or default_id
         )
+
+    def get_managed_nodes(self) -> List[Dict[str, Any]]:
+        """Queries registered worker nodes from database."""
+        proxy_srv = getattr(self.server, "_proxy_server_instance", None)
+        if proxy_srv and hasattr(proxy_srv, "get_managed_nodes"):
+            return proxy_srv.get_managed_nodes()
+        db = self.database
+        if not db:
+            return []
+        if hasattr(db, "get_managed_nodes"):
+            return db.get_managed_nodes()
+        if hasattr(db, "list_managed_nodes"):
+            return db.list_managed_nodes()
+        try:
+            conn = db._get_connection() if hasattr(db, "_get_connection") else None
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM managed_nodes")
+                rows = [dict(r) for r in cursor.fetchall()]
+                conn.close()
+                return rows
+        except Exception:
+            pass
+        return []
+
+    def check_budget_circuit_breaker(
+        self, provider: str, session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Checks hourly and session spend against configured circuit breaker limits."""
+        return evaluate_budget_circuit_breaker(self.database, provider, session_id)
+
+    def resolve_spillover_target(
+        self, provider: str
+    ) -> Optional[Dict[str, Any]]:
+        """Checks cloud quota saturation or error state and resolves healthy LAN failover node."""
+        return evaluate_spillover_target(self.database, provider, self)
 
     def _is_gemini_request(self) -> bool:
         """
@@ -292,6 +689,28 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         raw_body = self.rfile.read(content_length) if content_length > 0 else b""
 
+        # Budget Circuit Breaker Verification (AIUM-1011)
+        prov_target = "gemini" if self._is_gemini_request() else "claude"
+        sess_hdr = self.headers.get("X-Session-ID") or self.headers.get("X-AIUM-Session")
+        cb_status = self.check_budget_circuit_breaker(prov_target, session_id=sess_hdr)
+        if cb_status.get("tripped"):
+            spillover = self.resolve_spillover_target(prov_target)
+            if not spillover:
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                err_resp = json.dumps({
+                    "error": {
+                        "type": "budget_circuit_breaker_tripped",
+                        "message": cb_status.get("reason", "Budget circuit breaker tripped"),
+                        "hourly_spend_usd": cb_status.get("hourly_spend_usd", 0.0),
+                        "budget_limit_usd": cb_status.get("budget_limit_usd", 0.0),
+                    }
+                }).encode("utf-8")
+                self.send_header("Content-Length", str(len(err_resp)))
+                self.end_headers()
+                self.wfile.write(err_resp)
+                return
+
         if self._is_gemini_request():
             upstream_url, upstream_headers, resolved_info = self._prepare_gemini_upstream()
             instance_id = self._get_instance_id(default_id="gemini-proxy")
@@ -492,13 +911,16 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(ev.encode("utf-8"))
                 self.wfile.flush()
 
-            self.server.claude_provider.ingest_proxy_interaction(
-                model=model_name,
-                input_tokens=in_tok,
-                output_tokens=out_tok,
-                session_id=f"stream_{int(time.time())}",
-                client_ip=client_ip,
-            )
+            mock_id = "msg_stream_1"
+            if self.claude_provider:
+                self.claude_provider.ingest_proxy_interaction(
+                    model=model_name,
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                    session_id=f"stream_{int(time.time())}",
+                    client_ip=client_ip,
+                    external_id=mock_id,
+                )
             return
 
         # 2. Test / Mock Non-Streaming Mode
@@ -512,16 +934,19 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-            self.server.claude_provider.ingest_proxy_interaction(
-                model=model_name,
-                input_tokens=in_tok,
-                output_tokens=out_tok,
-                session_id=f"cli_proxy_{int(time.time())}",
-                client_ip=client_ip,
-            )
+            mock_id = "msg_mock_proxy_12345"
+            if self.claude_provider:
+                self.claude_provider.ingest_proxy_interaction(
+                    model=model_name,
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                    session_id=f"cli_proxy_{int(time.time())}",
+                    client_ip=client_ip,
+                    external_id=mock_id,
+                )
 
             mock_response = {
-                "id": "msg_mock_proxy_12345",
+                "id": mock_id,
                 "type": "message",
                 "role": "assistant",
                 "model": model_name,
@@ -564,51 +989,76 @@ class TransparentProxyHandler(http.server.BaseHTTPRequestHandler):
                     in_tokens = 0
                     out_tokens = 0
                     stream_model = "claude"
+                    extracted_id = None
+                    sse_chunks = []
 
                     for line in resp:
                         self.wfile.write(line)
                         self.wfile.flush()
+                        sse_chunks.append(line)
                         line_str = line.decode("utf-8", errors="replace").strip()
                         if line_str.startswith("data:"):
                             try:
                                 payload = json.loads(line_str[5:].strip())
+                                if not extracted_id and payload.get("id"):
+                                    extracted_id = payload.get("id")
                                 p_type = payload.get("type")
                                 if p_type == "message_start":
                                     msg = payload.get("message", {})
                                     stream_model = msg.get("model", stream_model)
                                     in_tokens = msg.get("usage", {}).get("input_tokens", 0)
+                                    if msg.get("id"):
+                                        extracted_id = msg.get("id")
                                 elif p_type == "message_delta":
                                     out_tokens = payload.get("usage", {}).get(
                                         "output_tokens", out_tokens
                                     )
+                                elif "usage" in payload and payload.get("usage"):
+                                    u = payload.get("usage", {})
+                                    in_tokens = u.get("prompt_tokens", in_tokens)
+                                    out_tokens = u.get("completion_tokens", out_tokens)
                             except Exception:
                                 pass
 
-                    self.server.claude_provider.ingest_proxy_interaction(
-                        model=stream_model,
-                        input_tokens=in_tokens,
-                        output_tokens=out_tokens,
-                        rate_limit_headers=resp_headers,
-                        client_ip=client_ip,
-                    )
+                    if not extracted_id or (in_tokens == 0 and out_tokens == 0):
+                        parsed = extract_sse_tokens(b"".join(sse_chunks))
+                        in_tokens = in_tokens or parsed.input_tokens
+                        out_tokens = out_tokens or parsed.output_tokens
+                        extracted_id = extracted_id or parsed.external_id
+                        if stream_model == "claude" and parsed.model:
+                            stream_model = parsed.model
+
+                    if self.claude_provider:
+                        self.claude_provider.ingest_proxy_interaction(
+                            model=stream_model,
+                            input_tokens=in_tokens,
+                            output_tokens=out_tokens,
+                            rate_limit_headers=resp_headers,
+                            client_ip=client_ip,
+                            external_id=extracted_id,
+                        )
 
                 else:
                     # Buffered JSON response
                     resp_body = resp.read()
+                    extracted_id = None
                     try:
                         resp_json = json.loads(resp_body.decode("utf-8"))
                         usage = resp_json.get("usage", {})
                         in_tok = usage.get("input_tokens", 0)
                         out_tok = usage.get("output_tokens", 0)
                         model_val = resp_json.get("model", "claude")
+                        extracted_id = resp_json.get("id")
 
-                        self.server.claude_provider.ingest_proxy_interaction(
-                            model=model_val,
-                            input_tokens=in_tok,
-                            output_tokens=out_tok,
-                            rate_limit_headers=resp_headers,
-                            client_ip=client_ip,
-                        )
+                        if self.claude_provider:
+                            self.claude_provider.ingest_proxy_interaction(
+                                model=model_val,
+                                input_tokens=in_tok,
+                                output_tokens=out_tok,
+                                rate_limit_headers=resp_headers,
+                                client_ip=client_ip,
+                                external_id=extracted_id,
+                            )
                     except Exception:
                         pass
 
@@ -653,9 +1103,11 @@ class TransparentProxyServer:
         host: str = "127.0.0.1",
         port: int = 8766,
         gemini_provider=None,
+        database=None,
     ):
         self.claude_provider = claude_provider
         self.gemini_provider = gemini_provider
+        self.database = database or getattr(claude_provider, "db", None)
         self.host = host
         self.port = port
         self._server: Optional[http.server.ThreadingHTTPServer] = None
@@ -667,11 +1119,46 @@ class TransparentProxyServer:
             return self._server.server_port
         return self.port
 
+    def get_managed_nodes(self) -> List[Dict[str, Any]]:
+        """Queries registered worker nodes from database."""
+        db = self.database
+        if not db:
+            return []
+        if hasattr(db, "get_managed_nodes"):
+            return db.get_managed_nodes()
+        if hasattr(db, "list_managed_nodes"):
+            return db.list_managed_nodes()
+        try:
+            conn = db._get_connection() if hasattr(db, "_get_connection") else None
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM managed_nodes")
+                rows = [dict(r) for r in cursor.fetchall()]
+                conn.close()
+                return rows
+        except Exception:
+            pass
+        return []
+
+    def check_budget_circuit_breaker(
+        self, provider: str, session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Checks hourly and session spend against configured circuit breaker limits."""
+        return evaluate_budget_circuit_breaker(self.database, provider, session_id)
+
+    def resolve_spillover_target(
+        self, provider: str
+    ) -> Optional[Dict[str, Any]]:
+        """Checks cloud quota saturation or error state and resolves healthy LAN failover node."""
+        return evaluate_spillover_target(self.database, provider, self)
+
     def start(self):
         server_address = (self.host, self.port)
         self._server = http.server.ThreadingHTTPServer(server_address, TransparentProxyHandler)
         self._server.claude_provider = self.claude_provider
         self._server.gemini_provider = self.gemini_provider
+        self._server.database = self.database
+        self._server._proxy_server_instance = self
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 

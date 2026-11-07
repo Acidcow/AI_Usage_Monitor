@@ -772,7 +772,7 @@ window.App = {
                           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #60a5fa; flex-shrink: 0;"></span>
                           <strong style="color: #60a5fa; font-size: 0.82rem;">🌐 Google Account Umbrella</strong>
                         </span>
-                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'acidcow@gmail.com'}</span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'local@workstation.local'}</span>
                       </div>
                       <div id="sparkline-gemini-gemini_account" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('gemini', 'gemini_account'), '#60a5fa')}
@@ -823,7 +823,7 @@ window.App = {
                           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #38bdf8; flex-shrink: 0;"></span>
                           <strong style="color: #38bdf8; font-size: 0.82rem;">👤 Individual Member (You)</strong>
                         </span>
-                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'James Eckhardt'}</span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'Local User'}</span>
                       </div>
                       <div id="sparkline-claude-claude_individual" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_individual'), '#38bdf8')}
@@ -851,7 +851,7 @@ window.App = {
                           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #c084fc; flex-shrink: 0;"></span>
                           <strong style="color: #c084fc; font-size: 0.82rem;">👥 Team Workspace Pool</strong>
                         </span>
-                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Synthesis2'}</span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Local Workstation'}</span>
                       </div>
                       <div id="sparkline-claude-claude_team" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_team'), '#c084fc')}
@@ -1112,7 +1112,7 @@ window.App = {
     const hubGeminiStatus = document.getElementById("hub-gemini-status");
     if (providers["gemini"]) {
       const gActive = providers["gemini"].status === "ACTIVE";
-      const isGeminiPro = (providers["gemini"].plan_type || '').includes("Gemini Pro") || (providers["gemini"].account_id === "acidcow@gmail.com");
+      const isGeminiPro = (providers["gemini"].plan_type || '').includes("Gemini Pro");
       if (geminiDot) geminiDot.className = `dot ${gActive ? 'dot-green' : (providers["gemini"].status === 'ERROR' ? 'dot-red' : 'dot-gray')}`;
       if (geminiStatusText) geminiStatusText.innerText = isGeminiPro ? "Gemini Pro (Active)" : (gActive ? "Active" : (providers["gemini"].status || "Ready"));
       if (hubGeminiStatus) {
@@ -1548,6 +1548,14 @@ window.App = {
   },
 
   getChildRealPoints(provKey, childId) {
+    if (window.AIUMCore && window.AIUMCore.TelemetryHierarchy) {
+      const pts = window.AIUMCore.TelemetryHierarchy.extractChildRealPoints(
+        this.cachedHierarchicalTrends || this.trendsCache,
+        provKey,
+        childId
+      );
+      if (pts && pts.length > 0 && pts.some(p => p !== 0)) return pts;
+    }
     const zeroes = [0, 0, 0, 0, 0, 0, 0, 0];
     const bucketMinutes = this.chartGranularity || 5;
     const mode = this.chartMode || "interval_delta";
@@ -1560,8 +1568,13 @@ window.App = {
       const match = cached.series.find(s => {
         const sid = String(s.id || s.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         const sName = String(s.name || s.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        return sid === normChild || sid.includes(normChild) || normChild.includes(sid) ||
-               sName === normChild || sName.includes(normChild) || normChild.includes(sName);
+        if (sid && (sid === normChild || sid.includes(normChild) || (sid.length >= 3 && normChild.includes(sid)))) {
+          return true;
+        }
+        if (sName && (sName === normChild || sName.includes(normChild) || (sName.length >= 3 && normChild.includes(sName)))) {
+          return true;
+        }
+        return false;
       });
       if (match && match.points && match.points.length > 0) {
         return match.points;
@@ -2514,7 +2527,7 @@ window.App = {
           badge.style.background = "rgba(16, 185, 129, 0.2)";
           badge.style.color = "#34d399";
           badge.style.borderColor = "rgba(16, 185, 129, 0.3)";
-          badge.innerText = `Connected: ${data.email || 'acidcow@gmail.com'}`;
+          badge.innerText = `Connected: ${data.email || 'local@workstation.local'}`;
         } else {
           badge.className = "badge";
           badge.style.background = "rgba(239, 68, 68, 0.2)";
@@ -2569,10 +2582,10 @@ window.App = {
       const res = await fetch("/api/auth/google/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email || "acidcow@gmail.com", name: "James Eckhardt" })
+        body: JSON.stringify({ email: email || "local@workstation.local", name: "Local User" })
       });
       if (res.ok) {
-        alert(`✓ Successfully connected Google Account: ${email || "acidcow@gmail.com"}!\nAccount-level usage view and child token telemetry are now active.`);
+        alert(`✓ Successfully connected Google Account: ${email || "local@workstation.local"}!\nAccount-level usage view and child token telemetry are now active.`);
         await this.checkGoogleAuthStatus();
         await this.loadUsageData();
       } else {
@@ -2879,11 +2892,18 @@ window.App = {
 
   toggleAppIcon() {
     const nextIcon = this.activeIcon === 'johnny5' ? 'shield' : 'johnny5';
-    this.applyActiveIcon(nextIcon);
+    this.selectAppIcon(nextIcon);
   },
 
   selectAppIcon(iconName) {
+    if (window.AIUMCore && window.AIUMCore.ApiClient) {
+      window.AIUMCore.ApiClient.syncActiveIcon(iconName).catch(() => {});
+    }
     this.applyActiveIcon(iconName);
+  },
+
+  syncActiveIcon(iconName) {
+    return this.selectAppIcon(iconName);
   },
 
   openIconPickerModal() {
@@ -3676,7 +3696,14 @@ window.App = {
     window.location.href = `/api/reports/history?${params.toString()}`;
   },
 
+  generateSparkline(points, color = "#06b6d4") {
+    return this.generateInlineSparkline(points, color);
+  },
+
   generateInlineSparkline(points, color = "#06b6d4") {
+    if (window.AIUMCore && window.AIUMCore.ChartRenderer) {
+      return window.AIUMCore.ChartRenderer.generateSparklineSvg(points, color);
+    }
     if (!points || points.length < 2) return "";
     const min = Math.min(...points);
     const max = Math.max(...points);
@@ -3732,16 +3759,6 @@ window.App = {
     if (this.lastCompData && window._lastProviders) {
       this.renderComparison(this.lastCompData, window._lastProviders);
     }
-  },
-
-  switchTab(target) {
-    document.querySelectorAll(".nav-tab").forEach(t => {
-      t.classList.toggle("active", t.getAttribute("data-tab") === target);
-    });
-    document.querySelectorAll(".tab-content").forEach(c => {
-      c.classList.toggle("active", c.id === `tab-${target}`);
-    });
-    this.activeTab = target;
   },
 
   async loadSettings() {
@@ -4247,6 +4264,7 @@ window.App = {
   },
 
   switchTab(target) {
+    this.activeTab = target;
     document.querySelectorAll(".nav-tab").forEach(t => {
       if (t.getAttribute("data-tab") === target) {
         t.classList.add("active");
@@ -6043,7 +6061,31 @@ window.App = {
     }
   },
 
+  formatTokens(n) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatTokens(n);
+    }
+    return Number(n || 0).toLocaleString();
+  },
+
+  formatCurrency(usd, decimals = 2) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatCurrency(usd, decimals);
+    }
+    return `$${Number(usd || 0).toFixed(decimals)}`;
+  },
+
+  formatCountdown(resetEpochOrIso, fallbackStr = "") {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatCountdown(resetEpochOrIso, fallbackStr);
+    }
+    return fallbackStr;
+  },
+
   escapeHtml(str) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.escapeHtml(str);
+    }
     if (!str) return "";
     return String(str)
       .replace(/&/g, "&amp;")
@@ -6054,6 +6096,9 @@ window.App = {
   },
 
   formatLocalDateTime(isoStr) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatLocalDateTime(isoStr);
+    }
     if (!isoStr) return "-";
     try {
       let s = String(isoStr).trim();
@@ -6079,6 +6124,9 @@ window.App = {
   },
 
   formatLocalTime(isoStr) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatLocalTime(isoStr);
+    }
     if (!isoStr) return "-";
     try {
       let s = String(isoStr).trim();
@@ -6100,6 +6148,9 @@ window.App = {
   },
 
   formatDuration(startIso, endIso) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatDuration(startIso, endIso);
+    }
     if (!startIso || !endIso) return "-";
     try {
       let s1 = String(startIso).trim();
@@ -6122,6 +6173,121 @@ window.App = {
     } catch (e) {
       return "-";
     }
+  },
+
+  deduplicateDiagnosticErrors(errors) {
+    if (!Array.isArray(errors)) return [];
+    const grouped = new Map();
+    for (const err of errors) {
+      if (!err) continue;
+      const cat = String(err.category || "general");
+      const prov = String(err.provider || "system");
+      const msg = String(err.message || "");
+      const key = `${cat}::${prov}::${msg}`;
+      const ts = String(err.timestamp || "");
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          ...err,
+          category: cat,
+          provider: prov,
+          message: msg,
+          count: 1,
+          latest_timestamp: ts
+        });
+      } else {
+        const entry = grouped.get(key);
+        entry.count += 1;
+        if (ts > entry.latest_timestamp) {
+          entry.latest_timestamp = ts;
+          entry.timestamp = ts;
+        }
+      }
+    }
+    return Array.from(grouped.values());
+  },
+
+  filterDiagnosticLogs() {
+    if (!Array.isArray(this._rawDiagnosticErrors)) return;
+    const searchEl = document.getElementById("diag-log-search");
+    const catEl = document.getElementById("diag-log-category-filter");
+    const query = (searchEl?.value || "").trim().toLowerCase();
+    const catFilter = (catEl?.value || "").trim().toLowerCase();
+    const deduped = this.deduplicateDiagnosticErrors(this._rawDiagnosticErrors);
+    const filtered = deduped.filter(item => {
+      if (catFilter && String(item.category || "").toLowerCase() !== catFilter) return false;
+      if (query) {
+        const hay = `${item.category || ""} ${item.provider || ""} ${item.message || ""}`.toLowerCase();
+        if (!hay.includes(query)) return false;
+      }
+      return true;
+    });
+    const logContainer = document.getElementById("error-log-container");
+    if (!logContainer) return;
+    if (filtered.length === 0) {
+      logContainer.innerHTML = `<div style="color: var(--text-dim); text-align: center; padding: 20px;">No matching diagnostic log entries.</div>`;
+      return;
+    }
+    logContainer.innerHTML = filtered.map(err => `
+      <div class="log-entry" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+        <div>
+          <span class="log-time">[${this.formatLocalDateTime(err.latest_timestamp || err.timestamp)}]</span>
+          <span class="log-cat">[${this.escapeHtml(err.category)} / ${this.escapeHtml(err.provider)}]</span>
+          <span>${this.escapeHtml(err.message)}</span>
+        </div>
+        ${err.count > 1 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 0.7rem;">×${err.count}</span>` : ""}
+      </div>
+    `).join("");
+  },
+
+  applyReportDatePreset(preset) {
+    const rangeSelect = document.getElementById("report-date-range-select");
+    const startInput = document.getElementById("report-filter-start-date") || document.getElementById("report-start-date");
+    const endInput = document.getElementById("report-filter-end-date") || document.getElementById("report-end-date");
+    const now = new Date();
+    const toIsoDate = (d) => d.toISOString().slice(0, 10);
+
+    if (preset === "mtd") {
+      const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      if (rangeSelect) rangeSelect.value = "custom";
+      if (startInput) startInput.value = toIsoDate(mtdStart);
+      if (endInput) endInput.value = toIsoDate(now);
+    } else if (["today", "24h", "7d", "30d", "all"].includes(preset)) {
+      if (rangeSelect) rangeSelect.value = preset;
+      if (startInput) startInput.value = "";
+      if (endInput) endInput.value = "";
+    }
+    if (typeof this.loadHistoricalReport === "function") {
+      this.loadHistoricalReport();
+    }
+  },
+
+  applyTheme(themeId) {
+    const supportedThemes = [
+      "linear-obsidian",
+      "geist-monochrome",
+      "cyberpunk-hud",
+      "catppuccin-mocha",
+      "tokyo-night",
+      "executive-paper"
+    ];
+    const resolved = supportedThemes.includes(themeId) ? themeId : (themeId || "linear-obsidian");
+    document.documentElement.setAttribute("data-theme", resolved);
+    if (document.body) {
+      document.body.setAttribute("data-theme", resolved);
+    }
+    try {
+      localStorage.setItem("aium_active_theme", resolved);
+    } catch (e) {}
+    return resolved;
+  },
+
+  applyLayoutDensity(densityId) {
+    const resolved = ["compact", "balanced", "ultrawide"].includes(densityId) ? densityId : "balanced";
+    document.documentElement.setAttribute("data-density", resolved);
+    try {
+      localStorage.setItem("aium_layout_density", resolved);
+    } catch (e) {}
+    return resolved;
   }
 };
 

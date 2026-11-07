@@ -39,6 +39,15 @@
       </div>
 
       <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span style="font-size: 0.74rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Presets:</span>
+        <div class="report-date-presets" style="display: flex; gap: 4px; flex-wrap: wrap;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.applyReportDatePreset('today')" style="font-size: 0.7rem; padding: 3px 8px;">Today</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.applyReportDatePreset('24h')" style="font-size: 0.7rem; padding: 3px 8px;">24h</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.applyReportDatePreset('7d')" style="font-size: 0.7rem; padding: 3px 8px;">7d</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.applyReportDatePreset('30d')" style="font-size: 0.7rem; padding: 3px 8px;">30d</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.applyReportDatePreset('mtd')" style="font-size: 0.7rem; padding: 3px 8px;">MTD</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.applyReportDatePreset('all')" style="font-size: 0.7rem; padding: 3px 8px;">All</button>
+        </div>
         <span style="font-size: 0.74rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Range:</span>
         <select id="report-date-range-select" onchange="window.App.handleDateRangeChange()" style="background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 5px 10px; border-radius: 6px; font-size: 0.78rem;">
           <option value="1h">Last 1hr</option>
