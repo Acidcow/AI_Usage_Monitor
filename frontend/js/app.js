@@ -356,13 +356,14 @@ window.App = {
       const chartBreakdown = this.chartBreakdown || "locality";
       const chartScopeFilter = this.chartScopeFilter || "all";
 
-      const [summaryRes, providersRes, sessionsRes, errorsRes, timeseriesRes, compRes] = await Promise.all([
+      const [summaryRes, providersRes, sessionsRes, errorsRes, timeseriesRes, compRes, cacheRes] = await Promise.all([
         fetch("/api/usage/summary"),
         fetch("/api/providers"),
         fetch(`/api/usage/sessions${providerParam}`),
         fetch("/api/diagnostics/errors?limit=30"),
         fetch(`/api/usage/timeseries?window=${chartWindow}&bucket_minutes=${bucketMinutes}&mode=${chartMode}&scope=${this.currentScope || 'individual'}&breakdown=${encodeURIComponent(chartBreakdown)}&scope_filter=${encodeURIComponent(chartScopeFilter)}`),
-        fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}&filter_visibility=true`)
+        fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}&filter_visibility=true`),
+        fetch("/api/analytics/cache-efficiency?provider=claude&hours=24")
       ]);
 
       let compData = null;
@@ -380,6 +381,11 @@ window.App = {
         if (compData) {
           this.renderComparison(compData, providers);
         }
+      }
+
+      if (cacheRes && cacheRes.ok) {
+        const cacheData = await cacheRes.json();
+        this.renderCacheEfficiency(cacheData);
       }
 
       if (sessionsRes.ok) {
@@ -400,6 +406,72 @@ window.App = {
       }
     } catch (err) {
       console.warn("[App] Polling error:", err);
+    }
+  },
+
+  renderCacheEfficiency(cacheData) {
+    if (!cacheData) return;
+    const hitPct = Number(cacheData.cache_hit_ratio_pct || 0).toFixed(1);
+    const netSavings = Number(cacheData.net_cache_savings_usd || 0);
+    const rawTtl = cacheData.ttl_status;
+    const isTtlObj = rawTtl && typeof rawTtl === "object";
+    const ttlRem = isTtlObj
+      ? Number(rawTtl.ttl_remaining_seconds || 0)
+      : Number(cacheData.ttl_seconds_remaining || 0);
+    const isWarm = isTtlObj ? !!rawTtl.is_warm : (ttlRem > 0 || rawTtl === "WARM");
+    const ttlStatus = isTtlObj
+      ? (isWarm ? "WARM" : (rawTtl.last_touch_utc ? "EXPIRED" : "INACTIVE"))
+      : String(rawTtl || "INACTIVE");
+    const grade = String(cacheData.efficiency_grade || "N/A");
+    const isBreakEven = !!cacheData.break_even_achieved;
+
+    const savingsFormatted = `${netSavings >= 0 ? "+" : "-"}$${Math.abs(netSavings).toFixed(4)}`;
+    const ttlFormatted = isTtlObj && rawTtl.ttl_formatted && isWarm
+      ? rawTtl.ttl_formatted
+      : (ttlRem > 0 ? `${ttlRem}s` : (ttlStatus === "EXPIRED" ? "Expired" : "Idle"));
+
+    // Dashboard Gauge Banner Elements
+    const hitEl = document.getElementById("val-cache-hit-ratio");
+    if (hitEl) hitEl.innerText = `${hitPct}%`;
+
+    const ttlEl = document.getElementById("val-cache-ttl-remaining");
+    if (ttlEl) ttlEl.innerText = ttlFormatted;
+
+    const savEl = document.getElementById("val-cache-net-savings");
+    if (savEl) {
+      savEl.innerText = savingsFormatted;
+      savEl.style.color = netSavings >= 0 ? "var(--accent-emerald)" : "#fbbf24";
+    }
+
+    const ttlBadge = document.getElementById("val-cache-ttl-badge");
+    if (ttlBadge) {
+      ttlBadge.innerText = `TTL: ${ttlStatus === "WARM" ? `WARM (${ttlRem}s)` : ttlStatus}`;
+    }
+
+    const gradeBadge = document.getElementById("val-cache-grade-badge");
+    if (gradeBadge) {
+      gradeBadge.innerText = `Grade: ${grade}`;
+    }
+
+    // Session Timeline Summary Strip Elements
+    const tlHit = document.getElementById("timeline-cache-hit-ratio");
+    if (tlHit) tlHit.innerText = `${hitPct}%`;
+
+    const tlTtl = document.getElementById("timeline-cache-ttl");
+    if (tlTtl) tlTtl.innerText = `${ttlStatus}${ttlRem > 0 ? ` (${ttlRem}s)` : ""}`;
+
+    const tlSav = document.getElementById("timeline-net-savings");
+    if (tlSav) {
+      tlSav.innerText = savingsFormatted;
+      tlSav.style.color = netSavings >= 0 ? "var(--accent-emerald)" : "#fbbf24";
+    }
+
+    const tlGrade = document.getElementById("timeline-cache-grade-badge");
+    if (tlGrade) tlGrade.innerText = `Grade: ${grade}`;
+
+    const tlBreakEven = document.getElementById("timeline-break-even-status");
+    if (tlBreakEven) {
+      tlBreakEven.innerText = isBreakEven ? "Break-Even Achieved (Read Savings > Write Overhead)" : "Warming Up Cache";
     }
   },
 
@@ -2175,7 +2247,8 @@ window.App = {
 
     const cols = [
       "session_id", "provider", "model", "client_ip",
-      "input_tokens", "output_tokens", "total_tokens", "estimated_cost",
+      "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
+      "total_tokens", "estimated_cost", "net_cache_savings_usd",
       "first_activity", "last_activity", "duration"
     ];
     cols.forEach(c => {
@@ -2222,7 +2295,7 @@ window.App = {
 
     list.sort((a, b) => {
       let vA, vB;
-      if (["input_tokens", "output_tokens", "total_tokens", "estimated_cost"].includes(col)) {
+      if (["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "total_tokens", "estimated_cost", "net_cache_savings_usd"].includes(col)) {
         vA = Number(a[col] || 0);
         vB = Number(b[col] || 0);
         return asc ? vA - vB : vB - vA;
@@ -2263,7 +2336,7 @@ window.App = {
     if (!sessions || sessions.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 32px 20px;">
+          <td colspan="14" style="text-align: center; color: var(--text-dim); padding: 32px 20px;">
             <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
               <img src="/assets/mascot/johnny5_inspecting.jpg" alt="Johnny 5 Inspecting" style="width: 76px; height: 76px; border-radius: 14px; border: 2px solid rgba(6, 182, 212, 0.4); box-shadow: 0 0 18px rgba(6, 182, 212, 0.3); object-fit: cover;">
               <div style="color: var(--text-main); font-weight: 700; font-size: 0.95rem;">Johnny 5 is scanning for token traffic...</div>
@@ -2301,6 +2374,13 @@ window.App = {
         routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(245, 158, 11, 0.15); color: #fbbf24;" title="Discovered via background CLI scanner">📑 Scanner</span>`;
       }
 
+      const cacheReadTok = Number(s.cache_read_tokens || 0);
+      const cacheWriteTok = Number(s.cache_creation_tokens || 0);
+      const netSavUsd = Number(s.net_cache_savings_usd || 0);
+      const cacheBadge = s.cache_badge_label ? `<div style="font-size: 0.64rem; color: var(--text-dim);">${this.escapeHtml(s.cache_badge_label)}</div>` : "";
+      const netSavColor = netSavUsd > 0 ? "var(--accent-emerald)" : (netSavUsd < 0 ? "#fbbf24" : "var(--text-dim)");
+      const netSavSign = netSavUsd > 0 ? "+" : (netSavUsd < 0 ? "-" : "");
+
       return `
         <tr>
           <td><code style="font-family: var(--font-mono); color: var(--accent-cyan); font-size: 0.8rem;">${this.escapeHtml(s.session_id)}</code></td>
@@ -2320,8 +2400,14 @@ window.App = {
           </td>
           <td style="font-family: var(--font-mono); text-align: right;">${Number(s.input_tokens).toLocaleString()}</td>
           <td style="font-family: var(--font-mono); text-align: right;">${Number(s.output_tokens).toLocaleString()}</td>
+          <td style="font-family: var(--font-mono); color: #38bdf8; text-align: right;">${cacheReadTok.toLocaleString()}</td>
+          <td style="font-family: var(--font-mono); color: #c084fc; text-align: right;">${cacheWriteTok.toLocaleString()}</td>
           <td style="font-family: var(--font-mono); font-weight: 700; color: #fff; text-align: right;">${Number(s.total_tokens).toLocaleString()}</td>
           <td style="font-family: var(--font-mono); color: var(--accent-emerald); text-align: right;">$${Number(s.estimated_cost).toFixed(4)}</td>
+          <td style="font-family: var(--font-mono); color: ${netSavColor}; text-align: right;">
+            ${netSavSign}$${Math.abs(netSavUsd).toFixed(4)}
+            ${cacheBadge}
+          </td>
           <td style="font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono);">${firstTime}</td>
           <td style="font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono);">${lastTime}</td>
           <td>
@@ -2333,6 +2419,7 @@ window.App = {
   },
 
   renderErrors(errors) {
+    this._rawDiagnosticErrors = Array.isArray(errors) ? errors : [];
     const container = document.getElementById("error-log-container");
     if (!container) return;
 
@@ -2358,14 +2445,25 @@ window.App = {
       return;
     }
 
-    container.innerHTML = errors.map(err => `
-      <div class="error-item">
-        <div class="meta">
-          <span style="color: var(--accent-rose); font-weight: 700;">[${this.escapeHtml(err.category)}]</span>
-          <span>${this.escapeHtml(err.provider).toUpperCase()}</span>
-          <span>${err.timestamp ? err.timestamp.substring(11, 19) : ''}</span>
+    const searchEl = document.getElementById("diag-log-search");
+    const catEl = document.getElementById("diag-log-category-filter");
+    if ((searchEl && searchEl.value.trim()) || (catEl && catEl.value.trim())) {
+      this.filterDiagnosticLogs();
+      return;
+    }
+
+    const deduped = this.deduplicateDiagnosticErrors(errors);
+    container.innerHTML = deduped.map(err => `
+      <div class="error-item" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+        <div>
+          <div class="meta">
+            <span style="color: var(--accent-rose); font-weight: 700;">[${this.escapeHtml(err.category)}]</span>
+            <span>${this.escapeHtml(err.provider).toUpperCase()}</span>
+            <span>${err.timestamp ? err.timestamp.substring(11, 19) : ''}</span>
+          </div>
+          <div class="msg">${this.escapeHtml(err.message)}</div>
         </div>
-        <div class="msg">${this.escapeHtml(err.message)}</div>
+        ${err.count > 1 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 0.72rem; flex-shrink: 0;">×${err.count}</span>` : ""}
       </div>
     `).join("");
   },
@@ -3787,7 +3885,16 @@ window.App = {
         showAxisLabels.checked = !!st.show_axis_labels;
         this.showAxisLabels = !!st.show_axis_labels;
       }
-      if (themeSelect && st.widget_theme) themeSelect.value = st.widget_theme;
+      if (themeSelect && st.widget_theme) {
+        themeSelect.value = st.widget_theme;
+        this.applyTheme(st.widget_theme);
+        this.highlightThemeSwatch(st.widget_theme);
+      }
+      const densitySelect = document.getElementById("cfg-layout-density");
+      const activeDensity = st.layout_density || "balanced";
+      if (densitySelect) densitySelect.value = activeDensity;
+      this.applyLayoutDensity(activeDensity);
+
       if (pollCadence && st.poll_cadence_seconds) pollCadence.value = st.poll_cadence_seconds;
       if (st.ui_refresh_interval_seconds) {
         const intervalSec = Math.max(30, Math.min(300, parseInt(st.ui_refresh_interval_seconds, 10) || 30));
@@ -4055,12 +4162,21 @@ window.App = {
     const defSessInput = document.getElementById("cfg-default-session-limit");
     const defDailyInput = document.getElementById("cfg-default-daily-limit");
 
+    const densitySelect = document.getElementById("cfg-layout-density");
+    const selectedTheme = themeSelect ? themeSelect.value : "linear-obsidian";
+    const selectedDensity = densitySelect ? densitySelect.value : "balanced";
+
+    this.applyTheme(selectedTheme);
+    this.highlightThemeSwatch(selectedTheme);
+    this.applyLayoutDensity(selectedDensity);
+
     const payload = {
       widget_auto_resize: autoResize ? autoResize.checked : true,
       widget_fade_unpinned: fadeUnpinned ? fadeUnpinned.checked : false,
       widget_hide_parent_chart_on_expand: hideParentExpand ? hideParentExpand.checked : false,
       show_axis_labels: showAxisLabels ? showAxisLabels.checked : true,
-      widget_theme: themeSelect ? themeSelect.value : "obsidian_neon",
+      widget_theme: selectedTheme,
+      layout_density: selectedDensity,
       widget_font_size: checkedFont ? checkedFont.value : "standard",
       poll_cadence_seconds: pollCadence ? parseInt(pollCadence.value, 10) || 4 : 4,
       ui_refresh_interval_seconds: refreshCadence ? Math.max(30, Math.min(300, parseInt(refreshCadence.value, 10) || 30)) : 30,
@@ -4318,10 +4434,25 @@ window.App = {
 
         const r24El = document.getElementById("cap-rolling24-val");
         if (r24El) r24El.innerHTML = `${Number(m.rolling_24h_tokens || 0).toLocaleString()} <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted);">tok</span>`;
+
+        // Populate 5h/7d Rolling Quota Pacing Forecaster & Context-Window Bloat Anomalies (AIUM-1010)
+        const pacingMap = tData.quota_pacing || {};
+        const claudePacing = pacingMap.claude || Object.values(pacingMap)[0] || null;
+        if (claudePacing) {
+          this.renderCapacityQuotaPacing(claudePacing);
+        }
+        const anomalies = tData.context_anomalies || [];
+        this.renderContextBloatAnomalies(anomalies);
       }
 
       if (fRes.ok) {
         const fData = await fRes.json();
+        if (fData.quota_pacing && fData.quota_pacing.claude) {
+          this.renderCapacityQuotaPacing(fData.quota_pacing.claude);
+        }
+        if (Array.isArray(fData.context_anomalies) && fData.context_anomalies.length > 0) {
+          this.renderContextBloatAnomalies(fData.context_anomalies);
+        }
         const provs = fData.providers || {};
         const tbody = document.getElementById("cap-forecast-tbody");
         if (tbody) {
@@ -4770,6 +4901,7 @@ window.App = {
   },
 
   renderBenchmarkResults(evaluations) {
+    this._lastBenchmarkEvaluations = Array.isArray(evaluations) ? evaluations : [];
     const tbody = document.getElementById("benchmark-results-body");
     if (!tbody) return;
 
@@ -4785,9 +4917,9 @@ window.App = {
     }
 
     tbody.innerHTML = evaluations.map(e => `
-      <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+      <tr onclick="window.App.openBenchmarkTranscriptModal('${this.escapeHtml(e.id)}')" title="Click to inspect full evaluation prompt, output transcript, and AST verification" style="border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer;">
         <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.76rem; color: #a5b4fc;">
-          ${this.escapeHtml(e.id)}
+          🔍 ${this.escapeHtml(e.id)}
         </td>
         <td style="padding: 10px 14px; font-weight: 600; color: #f8fafc;">
           ${this.escapeHtml(e.model_name)}
@@ -4809,6 +4941,60 @@ window.App = {
         </td>
       </tr>
     `).join("");
+  },
+
+  openBenchmarkTranscriptModal(evalId) {
+    const modal = document.getElementById("benchmark-transcript-modal");
+    if (!modal) return;
+    const list = this._lastBenchmarkEvaluations || [];
+    const item = list.find(e => String(e.id) === String(evalId)) || list[0];
+    if (!item) return;
+
+    const details = item.details || {};
+    const execMode = String(item.execution_mode || details.execution_mode || "simulated_fallback").toLowerCase();
+    const isLive = execMode.includes("live");
+
+    const badgeEl = document.getElementById("modal-bench-mode-badge");
+    if (badgeEl) {
+      badgeEl.innerText = isLive ? "LIVE_INFERENCE" : "SIMULATED_FALLBACK";
+      badgeEl.style.background = isLive ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)";
+      badgeEl.style.color = isLive ? "#34d399" : "#fbbf24";
+    }
+
+    const modelEl = document.getElementById("modal-bench-model");
+    if (modelEl) modelEl.innerText = item.model_name || "--";
+
+    const provEl = document.getElementById("modal-bench-provider");
+    if (provEl) provEl.innerText = (item.provider || "--").toUpperCase();
+
+    const ttftEl = document.getElementById("modal-bench-ttft");
+    if (ttftEl) ttftEl.innerText = `${item.ttft_ms || 0} ms`;
+
+    const tpsEl = document.getElementById("modal-bench-tps");
+    if (tpsEl) tpsEl.innerText = `${item.tokens_per_second || 0} tok/s`;
+
+    const scoreEl = document.getElementById("modal-bench-score");
+    if (scoreEl) scoreEl.innerText = `${item.score_pct || 0}% (${item.overall_rating || "N/A"})`;
+
+    const suiteDetails = Array.isArray(details.suite_breakdown) ? details.suite_breakdown : [];
+    const firstSuite = suiteDetails[0] || {};
+
+    const promptEl = document.getElementById("modal-bench-prompt");
+    if (promptEl) {
+      promptEl.innerText = item.prompt_transcript || details.prompt_transcript || firstSuite.prompt || `Suite: ${item.suite_name || "full"} evaluation against ${item.model_name}`;
+    }
+
+    const outputEl = document.getElementById("modal-bench-output");
+    if (outputEl) {
+      outputEl.innerText = item.output_transcript || details.output_transcript || firstSuite.output_preview || JSON.stringify(details, null, 2);
+    }
+
+    const astEl = document.getElementById("modal-bench-ast");
+    if (astEl) {
+      astEl.innerText = item.ast_diagnostics || details.ast_diagnostics || firstSuite.verification_note || `Pass: ${item.pass_count || 0}, Fail: ${item.fail_count || 0} | Rating: ${item.overall_rating || "A"}`;
+    }
+
+    modal.style.display = "flex";
   },
 
   rerunBenchmark(provider, modelName) {
@@ -6281,6 +6467,26 @@ window.App = {
     return resolved;
   },
 
+  selectThemeSwatch(themeId) {
+    const sel = document.getElementById("cfg-widget-theme");
+    if (sel) sel.value = themeId;
+    this.applyTheme(themeId);
+    this.highlightThemeSwatch(themeId);
+  },
+
+  highlightThemeSwatch(themeId) {
+    document.querySelectorAll(".theme-swatch-card").forEach(btn => {
+      const id = btn.getAttribute("data-theme-id");
+      if (id === themeId) {
+        btn.style.outline = "2px solid var(--accent-cyan, #38bdf8)";
+        btn.style.boxShadow = "0 0 12px rgba(56, 189, 248, 0.35)";
+      } else {
+        btn.style.outline = "none";
+        btn.style.boxShadow = "none";
+      }
+    });
+  },
+
   applyLayoutDensity(densityId) {
     const resolved = ["compact", "balanced", "ultrawide"].includes(densityId) ? densityId : "balanced";
     document.documentElement.setAttribute("data-density", resolved);
@@ -6288,6 +6494,105 @@ window.App = {
       localStorage.setItem("aium_layout_density", resolved);
     } catch (e) {}
     return resolved;
+  },
+
+  renderCapacityQuotaPacing(pacing) {
+    if (!pacing) return;
+    const status = String(pacing.pacing_status || "SAFE_TILL_RESET");
+    const burnRate = Number(pacing.burn_rate_pct_per_hour || 0).toFixed(1);
+    const exhSec = Number(pacing.time_to_exhaustion_seconds || 0);
+    const rstSec = Number(pacing.time_to_reset_seconds || 0);
+    const sessRem = Number(pacing.session_remaining_pct ?? 100);
+    const weekRem = Number(pacing.weekly_remaining_pct ?? 100);
+
+    const fmtSec = (sec) => {
+      if (!sec || sec <= 0 || sec > 86400 * 7) return "> 24h";
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    };
+
+    const badgeEl = document.getElementById("cap-pacing-badge");
+    if (badgeEl) {
+      badgeEl.innerText = status;
+      if (status === "EXHAUSTION_BEFORE_RESET") {
+        badgeEl.style.background = "rgba(244, 63, 94, 0.2)";
+        badgeEl.style.color = "#f43f5e";
+        badgeEl.style.borderColor = "rgba(244, 63, 94, 0.4)";
+      } else if (status === "ELEVATED_PACE") {
+        badgeEl.style.background = "rgba(245, 158, 11, 0.2)";
+        badgeEl.style.color = "#fbbf24";
+        badgeEl.style.borderColor = "rgba(245, 158, 11, 0.4)";
+      } else {
+        badgeEl.style.background = "rgba(16, 185, 129, 0.2)";
+        badgeEl.style.color = "#34d399";
+        badgeEl.style.borderColor = "rgba(16, 185, 129, 0.4)";
+      }
+    }
+
+    const burnEl = document.getElementById("cap-pacing-burn-rate");
+    if (burnEl) burnEl.innerText = `${burnRate}%/h`;
+
+    const exhEl = document.getElementById("cap-pacing-exhaustion");
+    if (exhEl) exhEl.innerText = fmtSec(exhSec);
+
+    const rstEl = document.getElementById("cap-pacing-reset");
+    if (rstEl) rstEl.innerText = fmtSec(rstSec);
+
+    const sessEl = document.getElementById("cap-pacing-session-rem");
+    if (sessEl) sessEl.innerText = `${sessRem}%`;
+
+    const weekEl = document.getElementById("cap-pacing-weekly-rem");
+    if (weekEl) weekEl.innerText = `${weekRem}%`;
+
+    const recEl = document.getElementById("cap-pacing-recommendation");
+    if (recEl && pacing.recommendation) {
+      recEl.innerText = pacing.recommendation;
+    }
+  },
+
+  renderContextBloatAnomalies(anomalies) {
+    const tbody = document.getElementById("cap-bloat-anomalies-tbody");
+    if (!tbody) return;
+    if (!Array.isArray(anomalies) || anomalies.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="5" style="padding: 16px; text-align: center; color: var(--text-dim);">
+            ✓ No quadratic context bloat (>35:1 input/output) or rapid-fire loops detected in active sessions.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = anomalies.map(a => {
+      const ratioStr = a.io_ratio !== undefined ? `${Number(a.io_ratio).toFixed(1)}:1` : "--";
+      const wasteTok = Number(a.estimated_wasted_tokens || 0).toLocaleString();
+      const wasteUsd = Number(a.estimated_wasted_usd || 0).toFixed(4);
+      const sev = String(a.severity || "WARNING").toUpperCase();
+      const sevCol = sev === "CRITICAL" ? "#f43f5e" : "#fbbf24";
+      return `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+          <td style="padding: 8px 6px; font-family: var(--font-mono); color: var(--accent-cyan);">
+            ${this.escapeHtml(a.session_id || "unknown")}
+          </td>
+          <td style="padding: 8px 6px;">
+            <span class="badge" style="background: ${sevCol}20; color: ${sevCol}; border: 1px solid ${sevCol}40; font-size: 0.65rem;">
+              ${this.escapeHtml(a.anomaly_type || "CONTEXT_BLOAT")}
+            </span>
+          </td>
+          <td style="padding: 8px 6px; text-align: right; font-family: var(--font-mono); color: #f8fafc;">
+            ${ratioStr}
+          </td>
+          <td style="padding: 8px 6px; text-align: right; font-family: var(--font-mono); color: #fbbf24;">
+            ${wasteTok} tok ($${wasteUsd})
+          </td>
+          <td style="padding: 8px 6px; color: var(--text-muted); font-size: 0.72rem;">
+            ${this.escapeHtml(a.remediation || "Run /compact or start fresh session")}
+          </td>
+        </tr>
+      `;
+    }).join("");
   }
 };
 

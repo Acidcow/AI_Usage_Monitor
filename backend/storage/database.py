@@ -899,6 +899,8 @@ class UsageDatabase(ReportingEngineMixin, TimeSeriesEngineMixin):
                     model,
                     SUM(input_tokens) as input_tokens,
                     SUM(output_tokens) as output_tokens,
+                    COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
+                    COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
                     SUM(total_tokens) as total_tokens,
                     SUM(estimated_cost) as estimated_cost,
                     COUNT(*) as request_count,
@@ -925,6 +927,8 @@ class UsageDatabase(ReportingEngineMixin, TimeSeriesEngineMixin):
             rows = cursor.fetchall()
             conn.close()
 
+        from backend.analytics.cache_analyzer import PromptCacheAnalyzer
+        analyzer = PromptCacheAnalyzer(self)
         results = []
         for r in rows:
             d = dict(r)
@@ -933,6 +937,7 @@ class UsageDatabase(ReportingEngineMixin, TimeSeriesEngineMixin):
                 d["client_alias"] = self.resolve_client_alias(ip)
                 if d["client_alias"] == ip and ip in ("127.0.0.1", "localhost", "::1"):
                     d["client_alias"] = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "Local Workstation"
+            analyzer.enrich_session_cache_metrics(d)
             results.append(d)
         return results
 
@@ -2498,6 +2503,7 @@ class UsageDatabase(ReportingEngineMixin, TimeSeriesEngineMixin):
     def get_all_settings(self) -> Dict[str, Any]:
         defaults = {
             "widget_theme": "obsidian_neon",
+            "layout_density": "balanced",
             "widget_font_size": "standard",
             "widget_auto_resize": True,
             "widget_fade_unpinned": False,

@@ -20,6 +20,7 @@ import os
 import sys
 import json
 import time
+import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock, Mock
 import urllib.error
@@ -222,7 +223,7 @@ class TestIncrementalScannerAndPolling(unittest.TestCase):
             f.write(json.dumps({
                 "type": "assistant",
                 "sessionId": "sess-target",
-                "timestamp": "2026-11-07T10:00:00Z",
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "message": {
                     "id": "msg_target",
                     "model": "claude-sonnet-5-5",

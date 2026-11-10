@@ -180,13 +180,58 @@
 
       <div class="form-group" style="margin-bottom: 16px;">
         <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">
-          Widget Color Palette & Theme
+          Platform &amp; Widget Color Theme (6 Ultra-Modern Palettes)
         </label>
-        <select id="cfg-widget-theme" class="form-control" style="width: 100%; background: #131b2e; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
-          <option value="obsidian_neon">Obsidian Neon (Deep Slate & Cyan Glow)</option>
-          <option value="cyberpunk">Cyberpunk (Neon Rose, Violet & Amber)</option>
-          <option value="matrix_emerald">Matrix Emerald (Phosphor Green & Dark Olive)</option>
-          <option value="midnight_slate">Midnight Slate (Navy Blue & Steel Sky)</option>
+        <select id="cfg-widget-theme" class="form-control" onchange="window.App.selectThemeSwatch(this.value)" style="width: 100%; background: #131b2e; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 10px;">
+          <option value="linear-obsidian">Linear Obsidian (Deep Carbon &amp; Indigo Precision)</option>
+          <option value="geist-monochrome">Geist Monochrome (Vercel High-Contrast Ink &amp; Cyan)</option>
+          <option value="cyberpunk-hud">Cyberpunk HUD (Neon Amber, Magenta &amp; Matrix Grid)</option>
+          <option value="catppuccin-mocha">Catppuccin Mocha (Warm Espresso, Mauve &amp; Peach)</option>
+          <option value="tokyo-night">Tokyo Night (Storm Navy, Electric Blue &amp; Cyan)</option>
+          <option value="executive-paper">Executive Paper (Crisp Alabaster Light &amp; Slate Ink)</option>
+          <option value="obsidian_neon">Obsidian Neon (Legacy Deep Slate &amp; Cyan Glow)</option>
+          <option value="cyberpunk">Cyberpunk (Legacy Neon Rose, Violet &amp; Amber)</option>
+          <option value="matrix_emerald">Matrix Emerald (Legacy Phosphor Green &amp; Dark Olive)</option>
+          <option value="midnight_slate">Midnight Slate (Legacy Navy Blue &amp; Steel Sky)</option>
+        </select>
+
+        <!-- Interactive 6-Theme Visual Swatch Grid -->
+        <div id="theme-swatch-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 6px;">
+          <button type="button" class="theme-swatch-card" data-theme-id="linear-obsidian" onclick="window.App.selectThemeSwatch('linear-obsidian')" style="display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px; background: #0b0d13; border: 1px solid rgba(99, 102, 241, 0.45); color: #f8fafc; cursor: pointer; text-align: left; font-size: 0.73rem;">
+            <span style="width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #06b6d4); flex-shrink: 0;"></span>
+            <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Linear Obsidian</span>
+          </button>
+          <button type="button" class="theme-swatch-card" data-theme-id="geist-monochrome" onclick="window.App.selectThemeSwatch('geist-monochrome')" style="display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px; background: #050505; border: 1px solid rgba(255, 255, 255, 0.22); color: #fafafa; cursor: pointer; text-align: left; font-size: 0.73rem;">
+            <span style="width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(135deg, #ffffff, #38bdf8); flex-shrink: 0;"></span>
+            <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Geist Mono</span>
+          </button>
+          <button type="button" class="theme-swatch-card" data-theme-id="cyberpunk-hud" onclick="window.App.selectThemeSwatch('cyberpunk-hud')" style="display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px; background: #0d0618; border: 1px solid rgba(244, 63, 94, 0.45); color: #fdf2f8; cursor: pointer; text-align: left; font-size: 0.73rem;">
+            <span style="width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(135deg, #f43f5e, #f59e0b); flex-shrink: 0;"></span>
+            <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Cyberpunk HUD</span>
+          </button>
+          <button type="button" class="theme-swatch-card" data-theme-id="catppuccin-mocha" onclick="window.App.selectThemeSwatch('catppuccin-mocha')" style="display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px; background: #1e1e2e; border: 1px solid rgba(203, 166, 247, 0.45); color: #cdd6f4; cursor: pointer; text-align: left; font-size: 0.73rem;">
+            <span style="width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(135deg, #cba6f7, #fab387); flex-shrink: 0;"></span>
+            <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Catppuccin</span>
+          </button>
+          <button type="button" class="theme-swatch-card" data-theme-id="tokyo-night" onclick="window.App.selectThemeSwatch('tokyo-night')" style="display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px; background: #1a1b26; border: 1px solid rgba(122, 162, 247, 0.45); color: #c0caf5; cursor: pointer; text-align: left; font-size: 0.73rem;">
+            <span style="width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(135deg, #7aa2f7, #bb9af7); flex-shrink: 0;"></span>
+            <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Tokyo Night</span>
+          </button>
+          <button type="button" class="theme-swatch-card" data-theme-id="executive-paper" onclick="window.App.selectThemeSwatch('executive-paper')" style="display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px; background: #f8fafc; border: 1px solid rgba(15, 23, 42, 0.25); color: #0f172a; cursor: pointer; text-align: left; font-size: 0.73rem;">
+            <span style="width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(135deg, #2563eb, #0f172a); flex-shrink: 0;"></span>
+            <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Executive Paper</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">
+          Workspace Layout Density Mode
+        </label>
+        <select id="cfg-layout-density" class="form-control" onchange="window.App.applyLayoutDensity(this.value)" style="width: 100%; background: #131b2e; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm);">
+          <option value="compact">Compact (High-Density Operations Grid)</option>
+          <option value="balanced" selected>Balanced (Standard Bento Spacing)</option>
+          <option value="ultrawide">Ultrawide (Multi-Column 21:9 / 4K Telemetry Wall)</option>
         </select>
       </div>
 
@@ -528,7 +573,7 @@
       </div>
       <div>
         <label style="font-size: 0.76rem; color: #94a3b8; font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 8px;">Default Time Window:</label>
-        <select id="cfg-default-trend-window" class="form-control" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 12px;">
+        <select id="cfg-visibility-trend-window" class="form-control" onchange="const m=document.getElementById('cfg-default-trend-window'); if(m) m.value=this.value;" style="width: 100%; background: #131b2c; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 12px;">
           <option value="1h">Last 1 Hour</option>
           <option value="24h" selected>Last 24 Hours (Default)</option>
           <option value="7d">Last 7 Days</option>
