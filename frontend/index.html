@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IRIS | Inter-node Routing, Inference & Security</title>
   <meta name="description" content="Zero-dependency sovereign P2P agent mesh, privacy-first desktop monitor, and secure tunneling runtime.">
-  <link rel="icon" id="app-favicon" type="image/jpeg" href="/assets/icons/app_icon_johnny5.jpg">
+  <link rel="icon" id="app-favicon" type="image/png" href="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png">
   <link rel="stylesheet" href="/css/styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,14 +15,14 @@
   <!-- Application Header -->
   <header class="app-header">
     <div class="brand">
-      <div class="brand-icon-wrapper" id="brand-icon-toggle" onclick="window.App.toggleAppIcon()" title="Click to switch app icon (Johnny 5 vs Cyber Shield)">
-        <img id="brand-logo-img" src="/assets/icons/app_icon_johnny5.jpg" alt="AI Usage Monitor Icon" class="brand-avatar-img">
-        <span class="icon-toggle-hint">⇄</span>
+      <div class="brand-icon-wrapper" id="brand-icon-toggle" onclick="window.App.openIconPickerModal()" title="Open IRIS Character Reference & Expression Repository">
+        <img id="brand-logo-img" src="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png" alt="IRIS Sentinel Avatar" class="brand-avatar-img">
+        <span class="icon-toggle-hint">▾</span>
       </div>
       <div class="brand-text">
         <div style="display: flex; align-items: center; gap: 8px;">
           <h1>IRIS</h1>
-          <span class="mascot-tag" title="IRIS Sovereign Mesh Active">Inter-node Routing, Inference & Security</span>
+          <span class="mascot-tag" title="Intelligent Resource & Inference Sentinel">Telemetry &amp; Inference Sentinel</span>
         </div>
         <span>Zero-Dependency • Windows DPAPI • Sovereign P2P Mesh</span>
       </div>
@@ -31,24 +31,32 @@
     <!-- Navigation Tabs -->
     <nav class="nav-tabs">
       <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
-      <button class="nav-tab" data-tab="capacity">⚡ Capacity & Velocity</button>
-      <button class="nav-tab" data-tab="benchmarks">🔬 Model Evals & Benchmarks</button>
-      <button class="nav-tab" data-tab="providers">Accounts & Proxy</button>
-      <button class="nav-tab" data-tab="reports">Reports & Analytics</button>
-      <button class="nav-tab" data-tab="troubleshooting">Troubleshooting</button>
-      <button class="nav-tab" data-tab="settings">⚙ Settings</button>
+      <button class="nav-tab" data-tab="capacity">Capacity &amp; Velocity</button>
+      <button class="nav-tab" data-tab="benchmarks">Benchmarks</button>
+      <button class="nav-tab" data-tab="providers">Accounts &amp; Proxy</button>
+      <button class="nav-tab" data-tab="reports">Reports</button>
+      <button class="nav-tab" data-tab="troubleshooting">Diagnostics</button>
+      <button class="nav-tab" data-tab="settings">Settings</button>
     </nav>
 
     <!-- Header Actions -->
     <div class="header-actions">
-      <button class="btn btn-secondary" onclick="window.App.openIconPickerModal()" title="Choose app icon & mascot theme">
-        🎨 Icons
+      <select id="header-quick-theme-select" onchange="window.App.selectThemeSwatch(this.value)" title="Switch UI Theme (Dark &amp; Light Palettes)" style="background: var(--bg-elevated); border: 1px solid var(--border-subtle); color: var(--text-main); padding: 6px 10px; border-radius: var(--radius-sm); font-size: 0.78rem; font-weight: 500; cursor: pointer;">
+        <option value="linear-obsidian">Theme: Linear Carbon (Dark)</option>
+        <option value="geist-monochrome">Theme: Vercel Geist (Dark)</option>
+        <option value="executive-paper">Theme: Stripe Daylight (Light)</option>
+        <option value="tokyo-night">Theme: Palantir Slate (Dark)</option>
+        <option value="catppuccin-mocha">Theme: Warm Graphite (Dark)</option>
+        <option value="cyberpunk-hud">Theme: Tactical HUD (Dark)</option>
+      </select>
+      <button class="btn btn-secondary" onclick="window.App.openIconPickerModal()" title="Inspect IRIS Pixel-Art Reference Repository, Poses, Outfits &amp; 3-Degree Expression Matrix">
+        IRIS Vault
       </button>
       <button class="btn btn-secondary" onclick="window.App.launchDesktopWidget()" title="Launch native floating desktop widget">
-        🪟 Mini Widget
+        Mini Widget
       </button>
       <button class="btn btn-primary" onclick="window.App.loadUsageData()">
-        🔄 Sync Now
+        Sync
       </button>
     </div>
   </header>
@@ -58,26 +66,26 @@
     <!-- Top Status Pills (Canonical Component Container) -->
     <div id="container-header-status"></div>
 
-    <!-- Johnny 5 Mascot Live Banner -->
+    <!-- IRIS Sentinel Operational Telemetry Briefing Strip -->
     <div class="mascot-banner" id="johnny5-mascot-banner">
       <div class="mascot-banner-avatar">
-        <img src="/assets/mascot/johnny5_pointing.jpg" alt="Johnny 5 Mascot" class="mascot-img-pointing" id="mascot-main-img" onclick="window.App.cycleMascotQuote()" style="cursor: pointer;" title="Click Johnny 5 for more wisdom!">
+        <img src="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png" alt="IRIS Sentinel" class="mascot-img-pointing" id="mascot-main-img" onclick="window.App.cycleMascotQuote()" style="cursor: pointer;" title="Click to cycle operational telemetry brief">
       </div>
       <div class="mascot-banner-content">
         <div class="mascot-speech-bubble">
           <div class="mascot-quote-header">
-            <span class="mascot-name">🤖 Johnny 5</span>
-            <span class="mascot-status-tag" id="mascot-status-tag">STATUS: MALFUNCTION FREE</span>
-            <span class="mascot-tip-pill" onclick="window.App.cycleMascotQuote()" title="Click for more Johnny 5 advice">⚡ Next Quote ↻</span>
+            <span class="mascot-name">IRIS SENTINEL</span>
+            <span class="mascot-status-tag" id="mascot-status-tag">SYSTEM NOMINAL</span>
+            <span class="mascot-tip-pill" onclick="window.App.cycleMascotQuote()" title="Cycle operational brief">Next Brief ↻</span>
           </div>
           <p class="mascot-quote-text" id="mascot-quote-text">
-            "Number 5 is alive! No disassemble! Tracking your token telemetry and locking your API keys inside Windows DPAPI with 256-bit encryption. Input! Need more input!"
+            SQLite WAL telemetry pipeline and Windows DPAPI vault are operating normally. Cross-source deduplication is active across proxy and CLI log streams.
           </p>
         </div>
       </div>
       <div class="mascot-banner-actions">
-        <button class="btn btn-secondary btn-sm" onclick="window.App.openIconPickerModal()" title="Customize App Icon & Mascot">
-          🎨 Switch Icon
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openIconPickerModal()" title="Open IRIS Character Reference &amp; Expression Matrix">
+          Reference Pack
         </button>
       </div>
     </div>
@@ -441,58 +449,163 @@
     </div>
   </div>
 
-  <!-- Icon & Mascot Customizer Modal -->
+  <!-- IRIS Character Reference Repository, Outfits, Poses & 3-Degree Expression Matrix Modal -->
   <div class="modal-overlay" id="icon-picker-modal">
-    <div class="modal-box" style="max-width: 600px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <h3 style="font-size: 1.15rem; font-weight: 700;">App Icon & Mascot Customizer</h3>
+    <div class="modal-box" style="max-width: 860px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 700;">IRIS Character Reference &amp; Contextual Avatar Repository</h3>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">LucasArts &ldquo;The Dig&rdquo; High-Resolution Pixel-Art Asset Pack • Canonical Digital Skin-Suit Anchor</div>
+        </div>
         <button onclick="window.App.closeIconPickerModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
 
-      <p style="font-size: 0.82rem; color: var(--text-muted);">
-        Select your preferred primary application icon and inspect Johnny 5's visual telemetry mascots across UI views.
-      </p>
-
-      <div class="icon-picker-grid">
-        <!-- Option 1: Johnny 5 Glowing Headshot -->
+      <!-- Primary App Avatar Selection -->
+      <div class="icon-picker-grid" style="grid-template-columns: repeat(3, 1fr);">
         <div class="icon-choice-card selected" id="card-choice-johnny5" onclick="window.App.selectAppIcon('johnny5')">
           <span class="icon-selected-badge" id="badge-choice-johnny5">ACTIVE</span>
-          <img src="/assets/icons/app_icon_johnny5.jpg" alt="Johnny 5 Icon" class="icon-choice-preview">
-          <div class="icon-choice-title">Johnny 5 Alive</div>
-          <div class="icon-choice-desc">Cute, glowing cybernetic headshot with cyan optic sensors and electric circuit grid.</div>
+          <img src="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png" alt="IRIS Sentinel Nominal" class="icon-choice-preview">
+          <div class="icon-choice-title">IRIS Sentinel (Nominal)</div>
+          <div class="icon-choice-desc">Canonical pixel-art bust portrait in digital telemetry skin-suit.</div>
         </div>
 
-        <!-- Option 2: Cyber Shield with Purple Slash -->
+        <div class="icon-choice-card" id="card-choice-scanning" onclick="window.App.selectAppIcon('scanning')">
+          <span class="icon-selected-badge" id="badge-choice-scanning" style="display: none;">ACTIVE</span>
+          <img src="/assets/iris_mascot/04_avatars/avatar_scanning_idle.png" alt="IRIS Telemetry Visor" class="icon-choice-preview">
+          <div class="icon-choice-title">IRIS Optic Visor</div>
+          <div class="icon-choice-desc">Active telemetry monocle visor for packet and token stream scanning.</div>
+        </div>
+
         <div class="icon-choice-card" id="card-choice-shield" onclick="window.App.selectAppIcon('shield')">
           <span class="icon-selected-badge" id="badge-choice-shield" style="display: none;">ACTIVE</span>
-          <img src="/assets/icons/app_icon_shield.jpg" alt="Cyber Shield Icon" class="icon-choice-preview">
-          <div class="icon-choice-title">Cyber Shield</div>
-          <div class="icon-choice-desc">Transparent glass shield with bold black outline and vibrant neon purple slash.</div>
+          <img src="/assets/iris_mascot/04_avatars/avatar_guidance_config.png" alt="IRIS Chief Scientist" class="icon-choice-preview">
+          <div class="icon-choice-title">IRIS Chief Scientist</div>
+          <div class="icon-choice-desc">R&amp;D lab coat overlay with holographic DPAPI security key.</div>
         </div>
       </div>
 
-      <div style="margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
-        <div style="font-size: 0.84rem; font-weight: 700; color: #fff; margin-bottom: 8px;">
-          Mascot UI Variations Gallery
+      <!-- 00: Master Canonical Reference Turnaround Sheet -->
+      <div style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="font-size: 0.82rem; color: var(--text-main);">00. Master Canonical Reference Sheet (Digital Skin-Suit Turnaround)</strong>
+          <code style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">/assets/iris_mascot/00_base_reference/</code>
         </div>
-        <div class="mascot-gallery-grid">
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
           <div class="mascot-gallery-item">
-            <img src="/assets/mascot/johnny5_pointing.jpg" alt="Pointing Mascot" class="mascot-gallery-img">
-            <div class="mascot-gallery-label">Point to Insight (Main View)</div>
+            <img src="/assets/iris_mascot/00_base_reference/iris_base_skinsuit_turnaround.png" alt="Master Turnaround" class="iris-pixel-img" style="width: 100%; border-radius: 6px; border: 1px solid var(--border-subtle);">
+            <div class="mascot-gallery-label" style="margin-top: 4px;">Canonical Pixel-Art Turnaround (Wireframe, Front, Rear Profile)</div>
           </div>
           <div class="mascot-gallery-item">
-            <img src="/assets/mascot/johnny5_inspecting.jpg" alt="Inspecting Mascot" class="mascot-gallery-img">
-            <div class="mascot-gallery-label">Telemetry Hologram (Sessions)</div>
-          </div>
-          <div class="mascot-gallery-item">
-            <img src="/assets/mascot/johnny5_success.jpg" alt="Success Mascot" class="mascot-gallery-img">
-            <div class="mascot-gallery-label">Thumbs-Up (0 Errors Log)</div>
+            <img src="/assets/iris_mascot/00_base_reference/user_reference_concept.jpg" alt="Source Concept" style="width: 100%; border-radius: 6px; border: 1px solid var(--border-subtle);">
+            <div class="mascot-gallery-label" style="margin-top: 4px;">Source Character Concept Sheet</div>
           </div>
         </div>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-        <button class="btn btn-primary" onclick="window.App.closeIconPickerModal()">Done</button>
+      <!-- 01 & 02: Operational Poses & Outfit Overlays -->
+      <div style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="font-size: 0.82rem; color: var(--text-main);">01 &amp; 02. Operational Poses &amp; Modular Outfit Overlays</strong>
+          <code style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">01_poses/ &amp; 02_outfits/</code>
+        </div>
+        <div class="mascot-gallery-grid" style="grid-template-columns: repeat(4, 1fr);">
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/01_poses/pose_neutral_standing.png" alt="Neutral Pose" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Pose: Neutral Sentinel</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/01_poses/pose_analytical_console.png" alt="Analytical Console" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Pose: Holo-Telemetry</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/01_poses/pose_alert_defensive.png" alt="Alert Shield" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Pose: 429 Circuit Shield</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/01_poses/pose_diagnostic_repair.png" alt="Diagnostic Calibration" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Pose: Node Calibration</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/02_outfits/outfit_digital_skinsuit.png" alt="Digital Skinsuit" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Outfit: Digital Skin-Suit</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/02_outfits/outfit_field_tactical.png" alt="Field Tactical" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Outfit: Field Tactical Rig</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/02_outfits/outfit_lab_chief_coat.png" alt="Chief Scientist Lab Coat" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Outfit: Chief Lab Coat</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/02_outfits/outfit_eva_astronaut_rig.png" alt="EVA Rig" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Outfit: &ldquo;The Dig&rdquo; EVA Rig</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 03: 3-Degree Severity Facial Expression Matrix -->
+      <div style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="font-size: 0.82rem; color: var(--text-main);">03. Facial Expression Matrix (3 Degrees of Severity Across 4 Telemetry Spectra)</strong>
+          <code style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">/assets/iris_mascot/03_expressions/</code>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/03_expressions/expressions_nominal_3degrees.png" alt="Nominal 3 Degrees" class="iris-pixel-img" style="width: 100%; border-radius: 6px;">
+            <div class="mascot-gallery-label" style="margin-top: 4px;">Nominal Spectrum (Deg 1: Serene • Deg 2: Focused • Deg 3: Optimal)</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/03_expressions/expressions_guidance_3degrees.png" alt="Guidance 3 Degrees" class="iris-pixel-img" style="width: 100%; border-radius: 6px;">
+            <div class="mascot-gallery-label" style="margin-top: 4px;">Guidance Spectrum (Deg 1: Curious • Deg 2: Advising • Deg 3: Eureka)</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/03_expressions/expressions_warning_3degrees.png" alt="Warning 3 Degrees" class="iris-pixel-img" style="width: 100%; border-radius: 6px;">
+            <div class="mascot-gallery-label" style="margin-top: 4px;">Warning Spectrum (Deg 1: Drift • Deg 2: Urgent Burn • Deg 3: Brace)</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/03_expressions/expressions_critical_3degrees.png" alt="Critical 3 Degrees" class="iris-pixel-img" style="width: 100%; border-radius: 6px;">
+            <div class="mascot-gallery-label" style="margin-top: 4px;">Critical Spectrum (Deg 1: Timeout • Deg 2: HTTP 429 • Deg 3: Overload)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 04: Contextual UI Avatars -->
+      <div style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="font-size: 0.82rem; color: var(--text-main);">04. Contextual 1:1 UI Avatars (Auto-Bound to System States)</strong>
+          <code style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">/assets/iris_mascot/04_avatars/</code>
+        </div>
+        <div class="mascot-gallery-grid" style="grid-template-columns: repeat(6, 1fr);">
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png" alt="Nominal" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Nominal</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/04_avatars/avatar_scanning_idle.png" alt="Scanning" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Scanning</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/04_avatars/avatar_guidance_config.png" alt="Config" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Config / Vault</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/04_avatars/avatar_stats_insights.png" alt="Analytics" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Stats / ROI</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/04_avatars/avatar_warning_pacing.png" alt="Warning" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">Pacing Caution</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/04_avatars/avatar_critical_error.png" alt="Critical" class="mascot-gallery-img">
+            <div class="mascot-gallery-label">429 / Fault</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
+        <button class="btn btn-primary" onclick="window.App.closeIconPickerModal()">Close Repository</button>
       </div>
     </div>
   </div>
@@ -688,6 +801,7 @@
   <script src="js/core/api_client.js"></script>
   <script src="js/core/chart_renderer.js"></script>
   <script src="js/core/telemetry_hierarchy.js"></script>
+  <script src="js/core/mascot_repository.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

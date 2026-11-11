@@ -1,0 +1,155 @@
+{
+  "schema_version": "3.0.0",
+  "character_id": "iris_sentinel_v3",
+  "character_name": "IRIS (Intelligent Resource & Inference Sentinel)",
+  "art_style": "1995 LucasArts 'The Dig' High-Resolution Sci-Fi Pixel Art",
+  "visual_signature": {
+    "hair": "Chin-length obsidian-black bob with subtle slate highlights and dual silver telemetry hairpins",
+    "eyes": "High-contrast emerald-cyan pixel clusters",
+    "base_attire": "Matte-charcoal form-fitting digital telemetry skin-suit with subtle cyan conduit seams and choker collar",
+    "rendering_css": "image-rendering: pixelated; image-rendering: crisp-edges;"
+  },
+  "repository_root": "/assets/iris_mascot",
+  "base_references": [
+    {
+      "id": "base_skinsuit_turnaround",
+      "label": "Master Canonical Turnaround (Digital Skin-Suit)",
+      "path": "/assets/iris_mascot/00_base_reference/iris_base_skinsuit_turnaround.png",
+      "role": "Primary canonical proportion, anatomy, and pixel-palette anchor for all derived poses, outfits, and expressions"
+    },
+    {
+      "id": "user_reference_concept",
+      "label": "Original Concept Reference Sheet",
+      "path": "/assets/iris_mascot/00_base_reference/user_reference_concept.jpg",
+      "role": "Source character design sheet (line-art, front tactical, rear profile)"
+    }
+  ],
+  "poses": [
+    {
+      "id": "pose_neutral_standing",
+      "label": "Neutral Sentinel Stance",
+      "path": "/assets/iris_mascot/01_poses/pose_neutral_standing.png",
+      "context": "Default nominal monitoring posture"
+    },
+    {
+      "id": "pose_analytical_console",
+      "label": "Analytical Telemetry Console",
+      "path": "/assets/iris_mascot/01_poses/pose_analytical_console.png",
+      "context": "Inspecting token velocity curves, prompt cache efficiency, and model evaluations"
+    },
+    {
+      "id": "pose_alert_defensive",
+      "label": "Tactical Alert & Circuit Breaker",
+      "path": "/assets/iris_mascot/01_poses/pose_alert_defensive.png",
+      "context": "Quota exhaustion defense, HTTP 429 rate-limit shielding, and budget spillover"
+    },
+    {
+      "id": "pose_diagnostic_repair",
+      "label": "Node Calibration & Diagnostics",
+      "path": "/assets/iris_mascot/01_poses/pose_diagnostic_repair.png",
+      "context": "Hardware node discovery, proxy bridge troubleshooting, and DPAPI vault calibration"
+    }
+  ],
+  "outfits": [
+    {
+      "id": "outfit_digital_skinsuit",
+      "label": "Digital Telemetry Skin-Suit (Base Layer)",
+      "path": "/assets/iris_mascot/02_outfits/outfit_digital_skinsuit.png",
+      "description": "Form-fitting matte-charcoal telemetry skin-suit with subtle cyan fiber-optic conduit seams."
+    },
+    {
+      "id": "outfit_field_tactical",
+      "label": "Field Tactical Utility Rig",
+      "path": "/assets/iris_mascot/02_outfits/outfit_field_tactical.png",
+      "description": "Cropped tactical vest, multi-cartridge leather utility belt, fingerless wrist-comm gloves, and cargo trousers."
+    },
+    {
+      "id": "outfit_lab_chief_coat",
+      "label": "Chief Telemetry Scientist Coat",
+      "path": "/assets/iris_mascot/02_outfits/outfit_lab_chief_coat.png",
+      "description": "Tailored silver-alabaster research trench coat over the digital skin-suit with pocket diagnostic instruments."
+    },
+    {
+      "id": "outfit_eva_astronaut_rig",
+      "label": "Deep-Space EVA Rig ('The Dig' Homage)",
+      "path": "/assets/iris_mascot/02_outfits/outfit_eva_astronaut_rig.png",
+      "description": "Weathered titanium-and-amber EVA chest rig and collar ring inspired by classic LucasArts 'The Dig'."
+    }
+  ],
+  "expression_matrix": {
+    "nominal": {
+      "category": "Nominal / Healthy State",
+      "sheet_path": "/assets/iris_mascot/03_expressions/expressions_nominal_3degrees.png",
+      "degrees": [
+        { "degree": 1, "id": "nominal_deg1_serene", "label": "Degree 1: Serene & Standby", "trigger": "Idle / Zero traffic" },
+        { "degree": 2, "id": "nominal_deg2_focused", "label": "Degree 2: Focused Tracking", "trigger": "Normal token streaming" },
+        { "degree": 3, "id": "nominal_deg3_optimal", "label": "Degree 3: Optimal Efficiency", "trigger": "Cache hit ratio >= 75% (Grade A+)" }
+      ]
+    },
+    "guidance": {
+      "category": "Analytical / Configuration Guidance",
+      "sheet_path": "/assets/iris_mascot/03_expressions/expressions_guidance_3degrees.png",
+      "degrees": [
+        { "degree": 1, "id": "guidance_deg1_curious", "label": "Degree 1: Inquiring / Scanning", "trigger": "Empty state or new provider detected" },
+        { "degree": 2, "id": "guidance_deg2_advising", "label": "Degree 2: Advising / Configuring", "trigger": "Settings, proxy setup, or calibration tips" },
+        { "degree": 3, "id": "guidance_deg3_eureka", "label": "Degree 3: Optimization Insight", "trigger": "High ROI recommendation or benchmark A+" }
+      ]
+    },
+    "warning": {
+      "category": "Caution / Pacing Drift",
+      "sheet_path": "/assets/iris_mascot/03_expressions/expressions_warning_3degrees.png",
+      "degrees": [
+        { "degree": 1, "id": "warning_deg1_concerned", "label": "Degree 1: Mild Pacing Drift", "trigger": "Quota remaining < 50% or cache expired" },
+        { "degree": 2, "id": "warning_deg2_urgent", "label": "Degree 2: Elevated Burn Rate", "trigger": "ELEVATED_PACE or burst factor > 1.5x" },
+        { "degree": 3, "id": "warning_deg3_brace", "label": "Degree 3: Imminent Exhaustion", "trigger": "EXHAUSTION_BEFORE_RESET or context bloat > 35:1" }
+      ]
+    },
+    "critical": {
+      "category": "Critical / Fault & Rate-Limit",
+      "sheet_path": "/assets/iris_mascot/03_expressions/expressions_critical_3degrees.png",
+      "degrees": [
+        { "degree": 1, "id": "critical_deg1_retry", "label": "Degree 1: Transient Timeout", "trigger": "Single upstream timeout or offline local daemon" },
+        { "degree": 2, "id": "critical_deg2_ratelimit", "label": "Degree 2: HTTP 429 Quota Exhausted", "trigger": "Upstream rate limit or quota < 5%" },
+        { "degree": 3, "id": "critical_deg3_overload", "label": "Degree 3: Circuit Breaker Tripped", "trigger": "Hard daily budget ceiling tripped or repeated errors" }
+      ]
+    }
+  },
+  "contextual_avatars": {
+    "nominal": {
+      "id": "avatar_nominal_healthy",
+      "label": "All Systems Nominal",
+      "path": "/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png",
+      "contexts": ["dashboard_healthy", "zero_errors", "tray_nominal"]
+    },
+    "scanning": {
+      "id": "avatar_scanning_idle",
+      "label": "Telemetry Scanner Active",
+      "path": "/assets/iris_mascot/04_avatars/avatar_scanning_idle.png",
+      "contexts": ["empty_sessions", "lan_discovery", "log_scanner"]
+    },
+    "guidance": {
+      "id": "avatar_guidance_config",
+      "label": "Configuration & Security Advisor",
+      "path": "/assets/iris_mascot/04_avatars/avatar_guidance_config.png",
+      "contexts": ["settings", "dpapi_vault", "onboarding", "providers"]
+    },
+    "stats": {
+      "id": "avatar_stats_insights",
+      "label": "Telemetry & Benchmark Analyst",
+      "path": "/assets/iris_mascot/04_avatars/avatar_stats_insights.png",
+      "contexts": ["capacity", "benchmarks", "reports", "cache_efficiency"]
+    },
+    "warning": {
+      "id": "avatar_warning_pacing",
+      "label": "Pacing & Context-Bloat Caution",
+      "path": "/assets/iris_mascot/04_avatars/avatar_warning_pacing.png",
+      "contexts": ["elevated_pace", "context_bloat", "quota_low"]
+    },
+    "critical": {
+      "id": "avatar_critical_error",
+      "label": "Rate-Limit & Circuit-Breaker Alert",
+      "path": "/assets/iris_mascot/04_avatars/avatar_critical_error.png",
+      "contexts": ["error_429", "circuit_breaker", "diagnostics_fault"]
+    }
+  }
+}

@@ -28,12 +28,12 @@ window.App = {
   sessionSortCol: 'last_activity',
   sessionSortAsc: false,
   mascotQuotes: [
-    "\"Number 5 is alive! No disassemble! Tracking your token telemetry and locking your API keys inside Windows DPAPI with 256-bit encryption. Input! Need more input!\"",
-    "\"Hey, laser lips, your API keys are protected by hardware DPAPI! Plaintext credential storage is strictly prohibited!\"",
-    "\"Stephanie! Look at this token velocity graph! Beautiful telemetry! Millions of tokens counted!\"",
-    "\"Zero malfunctions detected! CLI Transparent Proxy listening on port 8766. All neural pathways nominal!\"",
-    "\"Programmed to protect! Route your terminal and IDE tools through http://127.0.0.1:8766/v1 to capture tokens with zero latency!\"",
-    "\"Input! More input! Local Ollama models detected and ready for offline inference!\""
+    "SQLite WAL telemetry pipeline and Windows DPAPI vault are operating normally. Cross-source deduplication is active across proxy and CLI log streams.",
+    "Anthropic ephemeral prompt caches expire after 300 seconds of inactivity. Keeping iterative turns within the 5-minute TTL reduces input token costs by up to 90%.",
+    "Route local IDE agents and CLIs through http://127.0.0.1:8766/v1 for zero-latency SSE token accounting, budget circuit-breakers, and automatic Ollama spillover.",
+    "Sessions exceeding a 35:1 input-to-output token ratio indicate uncompacted history bloat. Trigger /compact or rotate sessions to preserve 5-hour quota windows.",
+    "All API credentials and OAuth tokens are encrypted at rest via Windows DPAPI (crypt32.dll) bound to your workstation security context.",
+    "Multi-account telemetry comparison and 5-hour / 7-day rolling quota pacing are synchronized across the Full Web UI and Mini Widget."
   ],
 
   async init() {
@@ -2338,10 +2338,10 @@ window.App = {
         <tr>
           <td colspan="14" style="text-align: center; color: var(--text-dim); padding: 32px 20px;">
             <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
-              <img src="/assets/mascot/johnny5_inspecting.jpg" alt="Johnny 5 Inspecting" style="width: 76px; height: 76px; border-radius: 14px; border: 2px solid rgba(6, 182, 212, 0.4); box-shadow: 0 0 18px rgba(6, 182, 212, 0.3); object-fit: cover;">
-              <div style="color: var(--text-main); font-weight: 700; font-size: 0.95rem;">Johnny 5 is scanning for token traffic...</div>
-              <div style="color: var(--text-dim); font-size: 0.8rem; max-width: 440px;">
-                Route your agentic IDE, CLI, or API calls through <code style="color: var(--accent-cyan); font-family: var(--font-mono);">http://127.0.0.1:8766/v1</code> or import telemetry logs to populate sessions.
+              <img src="/assets/iris_mascot/04_avatars/avatar_scanning_idle.png" alt="IRIS Telemetry Scanner" class="iris-pixel-img" style="width: 68px; height: 68px; border-radius: 8px; border: 1px solid var(--border-subtle); object-fit: cover;">
+              <div style="color: var(--text-main); font-weight: 600; font-size: 0.9rem;">IRIS Sentinel is scanning for active token streams</div>
+              <div style="color: var(--text-muted); font-size: 0.78rem; max-width: 440px;">
+                Route your agentic IDE, CLI, or API calls through <code style="color: var(--accent-primary); font-family: var(--font-mono);">http://127.0.0.1:8766/v1</code> or import telemetry logs to populate sessions.
               </div>
             </div>
           </td>
@@ -2426,18 +2426,18 @@ window.App = {
     if (!errors || errors.length === 0) {
       container.innerHTML = `
         <div class="mascot-success-card">
-          <img src="/assets/mascot/johnny5_success.jpg" alt="Johnny 5 Success" class="mascot-thumb-img">
+          <img src="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png" alt="IRIS Nominal" class="mascot-thumb-img">
           <div>
-            <h4 style="color: var(--accent-emerald); font-weight: 700; margin-bottom: 6px; font-size: 1.05rem;">
-              ✓ Zero Malfunctions Detected!
+            <h4 style="color: var(--color-success); font-weight: 700; margin-bottom: 4px; font-size: 0.95rem;">
+              ✓ All Telemetry Channels &amp; DPAPI Vaults Nominal
             </h4>
-            <p style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.45;">
-              Johnny 5 reports all API routes, token proxy connections, and DPAPI encrypted vaults are operating at 100% capacity with zero rate limits.
+            <p style="color: var(--text-muted); font-size: 0.82rem; line-height: 1.45;">
+              IRIS reports all upstream API routes, transparent proxy bridges, and Windows DPAPI credential stores are operating with zero rate-limit faults.
             </p>
-            <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
-              <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(52, 211, 153, 0.3);">Proxy Port: 8766 OK</span>
-              <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.3);">DPAPI Vault: Active</span>
-              <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3);">Telemetry: Flowing</span>
+            <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+              <span class="badge" style="background: rgba(16, 185, 129, 0.12); color: var(--color-success); border: 1px solid rgba(16, 185, 129, 0.28);">Proxy Port: 8766 OK</span>
+              <span class="badge" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-subtle);">DPAPI Vault: Encrypted</span>
+              <span class="badge" style="background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border-subtle);">SQLite WAL: Active</span>
             </div>
           </div>
         </div>
@@ -2960,31 +2960,51 @@ window.App = {
 
     const logoImg = document.getElementById("brand-logo-img");
     const favicon = document.getElementById("app-favicon");
-    const iconSrc = iconName === 'shield' 
-      ? '/assets/icons/app_icon_shield.jpg' 
-      : '/assets/icons/app_icon_johnny5.jpg';
+    const mascotMain = document.getElementById("mascot-main-img");
+    let iconSrc = '/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png';
+    if (iconName === 'shield') {
+      iconSrc = '/assets/iris_mascot/04_avatars/avatar_guidance_config.png';
+    } else if (iconName === 'scanning') {
+      iconSrc = '/assets/iris_mascot/04_avatars/avatar_scanning_idle.png';
+    }
 
     if (logoImg) logoImg.src = iconSrc;
     if (favicon) favicon.href = iconSrc;
+    if (mascotMain) mascotMain.src = iconSrc;
 
     // Update modal cards
-    const cardJohnny5 = document.getElementById("card-choice-johnny5");
-    const cardShield = document.getElementById("card-choice-shield");
-    const badgeJohnny5 = document.getElementById("badge-choice-johnny5");
-    const badgeShield = document.getElementById("badge-choice-shield");
-
-    if (cardJohnny5 && cardShield) {
-      if (iconName === 'shield') {
-        cardShield.classList.add("selected");
-        cardJohnny5.classList.remove("selected");
-        if (badgeShield) badgeShield.style.display = "block";
-        if (badgeJohnny5) badgeJohnny5.style.display = "none";
-      } else {
-        cardJohnny5.classList.add("selected");
-        cardShield.classList.remove("selected");
-        if (badgeJohnny5) badgeJohnny5.style.display = "block";
-        if (badgeShield) badgeShield.style.display = "none";
+    const choices = ['johnny5', 'scanning', 'shield'];
+    choices.forEach(c => {
+      const card = document.getElementById(`card-choice-${c}`);
+      const badge = document.getElementById(`badge-choice-${c}`);
+      const isSelected = (c === iconName) || (c === 'johnny5' && !choices.includes(iconName));
+      if (card) {
+        if (isSelected) card.classList.add("selected");
+        else card.classList.remove("selected");
       }
+      if (badge) {
+        badge.style.display = isSelected ? "block" : "none";
+      }
+    });
+  },
+
+  updateContextualIrisAvatar(contextKey, statusLabel, briefText) {
+    const repo = window.AIUMCore && window.AIUMCore.MascotRepository;
+    const avatarObj = repo
+      ? repo.resolveContextualAvatar(contextKey)
+      : { path: `/assets/iris_mascot/04_avatars/avatar_${contextKey || 'nominal'}_healthy.png`, badge_text: statusLabel || "SYSTEM NOMINAL" };
+
+    const mascotImg = document.getElementById("mascot-main-img");
+    if (mascotImg && avatarObj.path) {
+      mascotImg.src = avatarObj.path;
+    }
+    const statusTag = document.getElementById("mascot-status-tag");
+    if (statusTag) {
+      statusTag.innerText = statusLabel || avatarObj.badge_text || "SYSTEM NOMINAL";
+    }
+    const quoteEl = document.getElementById("mascot-quote-text");
+    if (quoteEl && briefText) {
+      quoteEl.innerText = briefText;
     }
   },
 
@@ -4396,10 +4416,18 @@ window.App = {
       }
     });
     if (target === "capacity") {
+      this.updateContextualIrisAvatar("stats", "CAPACITY & PACING", "Analyzing 5-hour / 7-day rolling quota burn rates and scanning active sessions for >35:1 quadratic context-window bloat.");
       this.loadCapacityAnalytics();
-    }
-    if (target === "benchmarks") {
+    } else if (target === "benchmarks") {
+      this.updateContextualIrisAvatar("stats", "MODEL EVALUATIONS", "Click any benchmark evaluation row below to inspect the full prompt, model output transcript, and AST verification notes.");
       this.loadBenchmarkScorecard();
+    } else if (target === "providers" || target === "settings") {
+      this.updateContextualIrisAvatar("guidance", "CONFIGURATION & VAULT", "All API keys and OAuth tokens are encrypted via Windows DPAPI (crypt32.dll). Select any theme or layout density to update all views live.");
+    } else if (target === "troubleshooting") {
+      const hasErr = Array.isArray(this._rawDiagnosticErrors) && this._rawDiagnosticErrors.length > 0;
+      this.updateContextualIrisAvatar(hasErr ? "critical" : "nominal", hasErr ? "DIAGNOSTIC ALERT" : "ZERO FAULTS", hasErr ? "Review deduplicated upstream errors and rate-limit events below." : "All proxy bridges and provider endpoints are operating with zero recorded malfunctions.");
+    } else {
+      this.updateContextualIrisAvatar("nominal", "SYSTEM NOMINAL", this.mascotQuotes[this.currentQuoteIdx]);
     }
   },
 
@@ -6461,6 +6489,10 @@ window.App = {
     if (document.body) {
       document.body.setAttribute("data-theme", resolved);
     }
+    const headerThemeSel = document.getElementById("header-quick-theme-select");
+    if (headerThemeSel && supportedThemes.includes(resolved)) {
+      headerThemeSel.value = resolved;
+    }
     try {
       localStorage.setItem("aium_active_theme", resolved);
     } catch (e) {}
@@ -6470,8 +6502,17 @@ window.App = {
   selectThemeSwatch(themeId) {
     const sel = document.getElementById("cfg-widget-theme");
     if (sel) sel.value = themeId;
+    const headerSel = document.getElementById("header-quick-theme-select");
+    if (headerSel) headerSel.value = themeId;
     this.applyTheme(themeId);
     this.highlightThemeSwatch(themeId);
+    try {
+      fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ widget_theme: themeId })
+      }).catch(() => {});
+    } catch (e) {}
   },
 
   highlightThemeSwatch(themeId) {

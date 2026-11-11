@@ -196,6 +196,7 @@
 [data-theme="executive-paper"],
 [data-theme="high_contrast_light"] {
   --theme-id: "executive-paper";
+  color-scheme: light;
   --bg-main: #F8FAFC;
   --bg-dark: #F8FAFC;
   --bg-card: #FFFFFF;
@@ -263,3 +264,49 @@
 [data-density="ultrawide"] .glass-card {
   padding: var(--density-card-padding);
 }
+
+/* ==========================================================================
+   ENTERPRISE SURFACE NORMALIZATION & PIXEL-ART RENDERING
+   ========================================================================== */
+.pixel-art-asset,
+.brand-avatar-img,
+.mascot-img-pointing,
+.mascot-thumb-img,
+.mascot-gallery-img,
+.iris-pixel-img {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Ensure form controls, tables, and headings respect theme variables in Light Mode */
+[data-theme="executive-paper"] select,
+[data-theme="executive-paper"] input[type="text"],
+[data-theme="executive-paper"] input[type="password"],
+[data-theme="executive-paper"] input[type="number"],
+[data-theme="executive-paper"] input[type="date"],
+[data-theme="executive-paper"] .form-control {
+  background-color: #FFFFFF !important;
+  color: #0F172A !important;
+  border-color: #CBD5E1 !important;
+}
+
+[data-theme="executive-paper"] .glass-card h2,
+[data-theme="executive-paper"] .glass-card h3,
+[data-theme="executive-paper"] .glass-card h4,
+[data-theme="executive-paper"] .glass-card strong,
+[data-theme="executive-paper"] .modal-box h3,
+[data-theme="executive-paper"] .modal-box h4,
+[data-theme="executive-paper"] .mascot-name,
+[data-theme="executive-paper"] table.data-table td {
+  color: var(--text-main) !important;
+}
+
+[data-theme="executive-paper"] .modal-box,
+[data-theme="executive-paper"] .error-log-box,
+[data-theme="executive-paper"] .procure-guide-card,
+[data-theme="executive-paper"] .mascot-speech-bubble {
+  background: #FFFFFF !important;
+  border-color: #E2E8F0 !important;
+  color: #0F172A !important;
+}
+
