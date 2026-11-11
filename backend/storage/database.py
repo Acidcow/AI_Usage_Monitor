@@ -5,15 +5,36 @@ import threading
 import uuid
 import json
 import time
+import contextlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from backend.config import DB_PATH
+from backend.storage.reporting_engine import ReportingEngineMixin
+from backend.storage.timeseries_engine import (
+    TimeSeriesEngineMixin,
+    resolve_bucket_seconds,
+    align_timestamp_to_bucket,
+    generate_bucket_grid,
+    get_bucket_index,
+    apply_timeseries_mode,
+    query_sql_bucketed_events,
+)
+from backend.storage.taxonomy import (
+    CANONICAL_TAXONOMY_TIERS,
+    PROVIDER_TERMINOLOGY_MATRIX,
+    classify_node_locality,
+    classify_account_tier,
+    normalize_event_taxonomy,
+    get_full_taxonomy_specification,
+)
 
-class UsageDatabase:
+class UsageDatabase(ReportingEngineMixin, TimeSeriesEngineMixin):
     """
     Zero-dependency SQLite Time-Series Database for AI Usage and Telemetry.
     Thread-safe connection handling with ACID persistence.
+    Inherits analytical OLAP reporting from ReportingEngineMixin and unified SQL-assisted
+    bucketing time-series telemetry from TimeSeriesEngineMixin.
     """
 
     def __init__(self, db_path: Optional[str] = None):
@@ -26,7 +47,23 @@ class UsageDatabase:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA busy_timeout=5000;")
+            conn.execute("PRAGMA foreign_keys=ON;")
+        except sqlite3.Error:
+            pass
         return conn
+
+    @contextlib.contextmanager
+    def connection(self):
+        """Context manager yielding a database connection with guaranteed closure."""
+        conn = self._get_connection()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _init_schema(self):
         with self._lock:
@@ -45,7 +82,15 @@ class UsageDatabase:
                     total_tokens INTEGER NOT NULL DEFAULT 0,
                     estimated_cost REAL NOT NULL DEFAULT 0.0,
                     request_count INTEGER NOT NULL DEFAULT 1,
-                    recorded_at TEXT NOT NULL
+                    recorded_at TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'direct',
+                    instance_id TEXT NOT NULL DEFAULT 'local',
+                    external_id TEXT,
+                    account_id TEXT,
+                    node_id TEXT,
+                    access_route TEXT,
+                    is_proxied INTEGER NOT NULL DEFAULT 0,
+                    metadata TEXT
                 )
             ''')
 
@@ -240,7 +285,6 @@ class UsageDatabase:
 
             # Migration for usage_events dimensional attribution and network client context
             for col in [
-                "account_id TEXT",
                 "team_name TEXT",
                 "user_name TEXT",
                 "token_id TEXT",
@@ -248,7 +292,11 @@ class UsageDatabase:
                 "cache_creation_tokens INTEGER DEFAULT 0",
                 "cache_read_tokens INTEGER DEFAULT 0",
                 "client_ip TEXT",
-                "client_alias TEXT"
+                "client_alias TEXT",
+                "source TEXT NOT NULL DEFAULT 'direct'",
+                "instance_id TEXT NOT NULL DEFAULT 'local'",
+                "is_proxied INTEGER NOT NULL DEFAULT 0",
+                "metadata TEXT"
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE usage_events ADD COLUMN {col}")
@@ -263,6 +311,12 @@ class UsageDatabase:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_team ON usage_events(team_name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_events(user_name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_client_ip ON usage_events(client_ip)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_source ON usage_events(source)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_instance ON usage_events(instance_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_external_id ON usage_events(external_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_dedup ON usage_events(provider, session_id, total_tokens)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_external ON usage_events(provider, external_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_usage_prov_time ON usage_events(provider, recorded_at)')
 
             conn.commit()
             conn.close()
@@ -285,79 +339,371 @@ class UsageDatabase:
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
         client_ip: Optional[str] = None,
-        client_alias: Optional[str] = None
+        client_alias: Optional[str] = None,
+        source: str = "direct",
+        instance_id: str = "local",
+        external_id: Optional[str] = None,
+        is_proxied: int = 0,
+        metadata: Optional[Any] = None,
     ) -> str:
-        """Records a single usage event with dimensional attribution, client network context, and cache metrics."""
-        event_id = f"evt_{uuid.uuid4().hex[:12]}"
+        """Records a single usage event with dimensional attribution, client network context, deduplication, and cache metrics."""
         now_utc = recorded_at or datetime.datetime.now(datetime.timezone.utc).isoformat()
         total_tokens = input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens
+        prov_clean = (provider or "unknown").lower()
+        source_clean = source or "direct"
+        instance_clean = instance_id or "local"
+        proxied_clean = 1 if is_proxied else 0
+
+        # 1. Exact external_id Dedup / Metadata Enrichment
+        if external_id:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, session_id, project_id, metadata, is_proxied FROM usage_events WHERE (provider = ? AND external_id = ?) OR external_id = ? LIMIT 1",
+                    (prov_clean, str(external_id), str(external_id)),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    existing_id = existing["id"]
+                    existing_sess = existing["session_id"] or ""
+                    existing_proj = existing["project_id"]
+                    existing_meta = existing["metadata"]
+                    existing_proxied = existing["is_proxied"] or 0
+
+                    generic_prefixes = (
+                        "stream_",
+                        "proxy_",
+                        "cli_proxy_",
+                        "remote_",
+                        "session_evt_",
+                    )
+                    is_existing_generic = any(
+                        existing_sess.startswith(p) for p in generic_prefixes
+                    ) or not existing_sess
+                    is_incoming_generic = any(
+                        str(session_id).startswith(p) for p in generic_prefixes
+                    ) or not session_id
+
+                    if is_existing_generic and not is_incoming_generic:
+                        target_session = str(session_id)
+                    elif not is_existing_generic and is_incoming_generic:
+                        target_session = existing_sess
+                    else:
+                        target_session = str(session_id) if session_id else existing_sess
+
+                    target_project = project_id or existing_proj
+
+                    target_meta = existing_meta
+                    if metadata is not None:
+                        target_meta = (
+                            json.dumps(metadata)
+                            if isinstance(metadata, (dict, list))
+                            else str(metadata)
+                        )
+
+                    target_proxied = 1 if (proxied_clean or existing_proxied) else 0
+
+                    cursor.execute(
+                        "UPDATE usage_events SET session_id = ?, project_id = ?, metadata = ?, is_proxied = ? WHERE id = ?",
+                        (
+                            target_session,
+                            target_project,
+                            target_meta,
+                            target_proxied,
+                            existing_id,
+                        ),
+                    )
+                    conn.commit()
+                    conn.close()
+                    return existing_id
+                conn.close()
+
+        # 2. Cross-Source Temporal + Token Fingerprint Dedup (±15s window)
+        SCANNER_SOURCES = {
+            "local_jsonl_scanner",
+            "local_scanner",
+            "claude_desktop_scanner",
+            "ollama_local_logs",
+            "cli_scanner",
+            "desktop_app",
+            "log_scanner",
+        }
+        PROXY_SOURCES = {
+            "proxy",
+            "transparent_proxy",
+            "traffic_governor",
+            "emulator",
+            "direct",
+        }
+
+        if total_tokens > 0:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, session_id, project_id, metadata, external_id, source, is_proxied, recorded_at
+                    FROM usage_events
+                    WHERE provider = ? AND input_tokens = ? AND output_tokens = ?
+                    ORDER BY recorded_at DESC
+                    """,
+                    (prov_clean, input_tokens, output_tokens),
+                )
+                candidates = cursor.fetchall()
+                if candidates:
+                    try:
+                        cur_dt = datetime.datetime.fromisoformat(
+                            now_utc.replace("Z", "+00:00")
+                        )
+                        for row in candidates:
+                            rec_iso = row["recorded_at"]
+                            if not rec_iso:
+                                continue
+                            try:
+                                row_dt = datetime.datetime.fromisoformat(
+                                    rec_iso.replace("Z", "+00:00")
+                                )
+                            except Exception:
+                                continue
+
+                            time_diff = abs((cur_dt - row_dt).total_seconds())
+                            if time_diff <= 15.0:
+                                c_source = str(row["source"] or "direct")
+                                in_source = str(source_clean)
+                                c_ext_id = row["external_id"]
+
+                                is_cross_source = (
+                                    (
+                                        c_source in PROXY_SOURCES
+                                        and in_source in SCANNER_SOURCES
+                                    )
+                                    or (
+                                        c_source in SCANNER_SOURCES
+                                        and in_source in PROXY_SOURCES
+                                    )
+                                    or (c_source != in_source)
+                                )
+                                has_null_mismatch = (
+                                    c_ext_id is None and external_id is not None
+                                ) or (c_ext_id is not None and external_id is None)
+
+                                if is_cross_source or has_null_mismatch:
+                                    c_id = row["id"]
+                                    c_sess = str(row["session_id"] or "")
+                                    generic_prefixes = (
+                                        "stream_",
+                                        "remote_",
+                                        "proxy_",
+                                        "cli_proxy_",
+                                        "session_evt_",
+                                    )
+                                    is_cand_generic = any(
+                                        c_sess.startswith(p) for p in generic_prefixes
+                                    ) or not c_sess
+                                    is_in_generic = any(
+                                        str(session_id).startswith(p) for p in generic_prefixes
+                                    ) or not session_id
+
+                                    if is_cand_generic and not is_in_generic:
+                                        target_sess = str(session_id)
+                                    elif not is_cand_generic and is_in_generic:
+                                        target_sess = c_sess
+                                    else:
+                                        target_sess = str(session_id) if session_id else c_sess
+                                    target_ext = c_ext_id or external_id
+                                    target_proj = row["project_id"] or project_id
+
+                                    target_meta = row["metadata"]
+                                    if metadata is not None:
+                                        target_meta = (
+                                            json.dumps(metadata)
+                                            if isinstance(metadata, (dict, list))
+                                            else str(metadata)
+                                        )
+
+                                    target_prox = (
+                                        1 if (proxied_clean or row["is_proxied"]) else 0
+                                    )
+
+                                    cursor.execute(
+                                        """
+                                        UPDATE usage_events
+                                        SET external_id = ?, session_id = ?, project_id = ?, metadata = ?, is_proxied = ?
+                                        WHERE id = ?
+                                        """,
+                                        (
+                                            target_ext,
+                                            target_sess,
+                                            target_proj,
+                                            target_meta,
+                                            target_prox,
+                                            c_id,
+                                        ),
+                                    )
+                                    conn.commit()
+                                    conn.close()
+                                    return c_id
+                    except Exception:
+                        pass
+                conn.close()
+
+        # 3. Temporal correlation deduplication (merged within +-60s window for same provider, session, and total_tokens)
+        if session_id:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, recorded_at FROM usage_events WHERE provider = ? AND session_id = ? AND total_tokens = ?",
+                    (prov_clean, session_id, total_tokens),
+                )
+                candidates = cursor.fetchall()
+                conn.close()
+                if candidates:
+                    try:
+                        cur_dt = datetime.datetime.fromisoformat(
+                            now_utc.replace("Z", "+00:00")
+                        )
+                        for row in candidates:
+                            rec_iso = row["recorded_at"]
+                            if rec_iso:
+                                row_dt = datetime.datetime.fromisoformat(
+                                    rec_iso.replace("Z", "+00:00")
+                                )
+                                if abs((cur_dt - row_dt).total_seconds()) <= 60.0:
+                                    return row["id"]
+                    except Exception:
+                        pass
+
+        event_id = f"evt_{uuid.uuid4().hex[:12]}"
 
         # Auto-compute cost if not explicitly provided
         if estimated_cost <= 0.0 and total_tokens > 0:
-            if provider.lower() == "ollama":
-                estimated_cost = 0.0
-            else:
-                estimated_cost = round(
-                    (input_tokens * 0.000003) +
-                    (output_tokens * 0.000015) +
-                    (cache_creation_tokens * 0.00000375) +
-                    (cache_read_tokens * 0.0000003),
-                    5
-                )
+            from backend.contracts.pricing import calculate_event_cost
+            estimated_cost = calculate_event_cost(
+                provider=prov_clean,
+                model=model or "",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
+            )
 
         # Defaults
         if not user_name:
-            user_name = "James Eckhardt"
-        if not team_name and provider.lower() == "claude":
-            team_name = "Synthesis2"
-        if not account_id:
-            active_prof = self.get_active_account_profile(provider)
-            if active_prof and active_prof.get("account_id"):
-                account_id = active_prof.get("account_id")
-            else:
-                account_id = "acidcow@gmail.com" if provider.lower() == "gemini" else ("Synthesis2" if provider.lower() == "claude" else user_name)
+            user_name = os.environ.get("USERNAME") or os.environ.get("USER") or "Local User"
+        if instance_clean in ("local", "") and session_id:
+            if session_id.startswith("remote_node_") or session_id.startswith(
+                "stream_node_"
+            ):
+                prefix_stripped = session_id.replace("remote_", "", 1).replace(
+                    "stream_", "", 1
+                )
+                parts = prefix_stripped.rsplit("_", 1)
+                if parts[0].startswith("node_"):
+                    instance_clean = parts[0]
+
+        if prov_clean == "claude":
+            active_prof = self.get_active_account_profile("claude")
+            claude_snap = self.get_provider_snapshots().get("claude", {})
+            active_mode = self.get_quota_tracking_mode()
+            snap_plan = str(claude_snap.get("plan_type") or "")
+            is_pro = ("pro" in snap_plan.lower()) or (
+                active_mode == "individual" and snap_plan not in ("Team Enterprise",)
+            )
+            if not user_name or user_name in ("Local User", os.environ.get("USERNAME"), os.environ.get("USER")):
+                if active_prof and active_prof.get("user_name"):
+                    user_name = active_prof.get("user_name")
+                elif claude_snap.get("user_name"):
+                    user_name = claude_snap.get("user_name")
+            if not team_name:
+                if active_prof and active_prof.get("team_name"):
+                    team_name = active_prof.get("team_name")
+                elif is_pro:
+                    team_name = "Claude Pro"
+                else:
+                    team_name = claude_snap.get("team_name") or "Synthesis2"
+            if not account_id:
+                if active_prof and active_prof.get("account_id"):
+                    account_id = active_prof.get("account_id")
+                elif is_pro:
+                    account_id = claude_snap.get("user_name") or user_name
+                else:
+                    account_id = "Synthesis2"
+        else:
+            if not account_id:
+                active_prof = self.get_active_account_profile(prov_clean)
+                if active_prof and active_prof.get("account_id"):
+                    account_id = active_prof.get("account_id")
+                else:
+                    account_id = (
+                        "acidcow@gmail.com" if prov_clean == "gemini" else user_name
+                    )
 
         # Client IP & Alias Network Attribution
         if not client_ip:
             client_ip = "127.0.0.1"
         if not client_alias:
             client_alias = self.resolve_client_alias(client_ip)
-            if client_alias == client_ip and client_ip in ("127.0.0.1", "localhost", "::1"):
-                client_alias = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "Local Workstation"
+            if client_alias == client_ip and client_ip in (
+                "127.0.0.1",
+                "localhost",
+                "::1",
+            ):
+                client_alias = (
+                    os.environ.get("COMPUTERNAME")
+                    or os.environ.get("HOSTNAME")
+                    or "Local Workstation"
+                )
+
+        metadata_str = (
+            json.dumps(metadata)
+            if isinstance(metadata, (dict, list))
+            else (str(metadata) if metadata is not None else None)
+        )
 
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO usage_events (
                     id, provider, model, session_id,
                     input_tokens, output_tokens, total_tokens,
                     estimated_cost, request_count, recorded_at,
                     account_id, team_name, user_name, token_id, project_id,
                     cache_creation_tokens, cache_read_tokens,
-                    client_ip, client_alias
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                event_id,
-                provider.lower(),
-                model,
-                session_id or f"session_{event_id}",
-                input_tokens,
-                output_tokens,
-                total_tokens,
-                estimated_cost,
-                request_count,
-                now_utc,
-                account_id,
-                team_name,
-                user_name,
-                token_id,
-                project_id,
-                cache_creation_tokens,
-                cache_read_tokens,
-                client_ip,
-                client_alias
-            ))
+                    client_ip, client_alias,
+                    source, instance_id, external_id, is_proxied, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    event_id,
+                    prov_clean,
+                    model,
+                    session_id or f"session_{event_id}",
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    estimated_cost,
+                    request_count,
+                    now_utc,
+                    account_id,
+                    team_name,
+                    user_name,
+                    token_id,
+                    project_id,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                    client_ip,
+                    client_alias,
+                    source_clean,
+                    instance_clean,
+                    external_id,
+                    proxied_clean,
+                    metadata_str,
+                ),
+            )
             conn.commit()
             conn.close()
 
@@ -467,6 +813,16 @@ class UsageDatabase:
             snapshots[r["provider"]] = dict(r)
         return snapshots
 
+    def get_latest_provider_snapshot(self, provider: str) -> Optional[Dict[str, Any]]:
+        """Returns snapshot record for a specific provider if present."""
+        snaps = self.get_provider_snapshots()
+        return snaps.get(provider.lower())
+
+    def get_provider_hierarchies(self, scope: Optional[str] = None) -> Dict[str, Any]:
+        """Returns provider hierarchy and comparative quota metrics map matching the main dashboard."""
+        comp = self.get_comparative_metrics(scope=scope)
+        return comp.get("providers", {})
+
     def get_usage_summary(self, provider: Optional[str] = None) -> Dict[str, Any]:
         """Calculates today's token usage, monthly totals, and session stats."""
         today_date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
@@ -543,13 +899,20 @@ class UsageDatabase:
                     model,
                     SUM(input_tokens) as input_tokens,
                     SUM(output_tokens) as output_tokens,
+                    COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
+                    COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
                     SUM(total_tokens) as total_tokens,
                     SUM(estimated_cost) as estimated_cost,
                     COUNT(*) as request_count,
                     MIN(recorded_at) as first_activity,
                     MAX(recorded_at) as last_activity,
                     COALESCE(MAX(client_ip), '127.0.0.1') as client_ip,
-                    COALESCE(MAX(client_alias), '') as client_alias
+                    COALESCE(MAX(client_alias), '') as client_alias,
+                    COALESCE(MAX(source), 'direct') as source,
+                    COALESCE(MAX(instance_id), 'local') as instance_id,
+                    COALESCE(MAX(is_proxied), 0) as is_proxied,
+                    COALESCE(MAX(external_id), '') as external_id,
+                    COALESCE(MAX(account_id), '') as account_id
                 FROM usage_events
             """
             params = []
@@ -564,6 +927,8 @@ class UsageDatabase:
             rows = cursor.fetchall()
             conn.close()
 
+        from backend.analytics.cache_analyzer import PromptCacheAnalyzer
+        analyzer = PromptCacheAnalyzer(self)
         results = []
         for r in rows:
             d = dict(r)
@@ -572,6 +937,7 @@ class UsageDatabase:
                 d["client_alias"] = self.resolve_client_alias(ip)
                 if d["client_alias"] == ip and ip in ("127.0.0.1", "localhost", "::1"):
                     d["client_alias"] = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "Local Workstation"
+            analyzer.enrich_session_cache_metrics(d)
             results.append(d)
         return results
 
@@ -628,105 +994,130 @@ class UsageDatabase:
         window: str = "24h",
         bucket_minutes: int = 5,
         mode: str = "interval_delta",
-        scope: str = "individual"
+        scope: str = "individual",
+        breakdown: str = "consolidated",
+        scope_filter: str = "all"
     ) -> Dict[str, Any]:
         """
         Returns granular time-series data aggregated into discrete time buckets (1, 5, 10, 15, 30, 60 minutes)
-        for arbitrary sliding windows (1h, 6h, 24h, 7d, 30d).
+        for arbitrary sliding windows (1h..12m).
         Supports:
           - 'interval_delta': token consumption strictly within each bucket interval (idle = 0 baseline)
           - 'cumulative': monotonically non-decreasing running total over the window
+          - 'breakdown': 'consolidated' | 'locality' | 'tenant_account' | 'workspace_pool' | 'compute_node' | 'client_host' | 'access_route' | 'model'
+          - 'scope_filter': 'all' | 'personal_only' | 'team_only' | 'local_only' | 'remote_only'
         """
-        valid_buckets = (1, 5, 10, 15, 30, 60)
-        try:
-            bucket_min = int(bucket_minutes) if int(bucket_minutes) in valid_buckets else 5
-        except (ValueError, TypeError):
-            bucket_min = 5
-
         mode_val = "cumulative" if str(mode).lower() == "cumulative" else "interval_delta"
-
-        window_map = {
-            "1h": 60,
-            "6h": 360,
-            "24h": 1440,
-            "7d": 10080,
-            "30d": 43200
-        }
-        win_mins = window_map.get(str(window).lower(), 1440)
-        num_bins = max(1, win_mins // bucket_min)
+        breakdown_val = str(breakdown or "consolidated").strip().lower()
+        scope_filter_val = str(scope_filter or "all").strip().lower()
 
         now = datetime.datetime.now(datetime.timezone.utc)
-        cutoff = now - datetime.timedelta(minutes=win_mins)
+        grid = self.generate_bucket_grid(
+            window=window,
+            bucket_minutes=bucket_minutes,
+            now=now,
+            is_granular=True,
+        )
+        effective_bucket_min = grid["bucket_minutes"]
+        win_mins = grid["win_mins"]
+        num_bins = grid["num_bins"]
+        bucket_secs = grid["bucket_seconds"]
+        cutoff = grid["cutoff"]
+        cutoff_epoch = grid["cutoff_epoch"]
+        labels = grid["labels"]
+        keys = grid["keys"]
+        bin_start_timestamps = grid["bin_start_timestamps"]
 
-        # Generate continuous bin keys and labels
-        labels = []
-        keys = []
-        bin_start_timestamps = []
-
-        for i in range(num_bins - 1, -1, -1):
-            t_bin = now - datetime.timedelta(minutes=i * bucket_min)
-            bin_start_timestamps.append(t_bin)
-            keys.append(t_bin.strftime("%Y-%m-%dT%H:%M"))
-            if win_mins <= 60:
-                labels.append(t_bin.strftime("%H:%M"))
-            elif win_mins <= 1440:
-                labels.append(t_bin.strftime("%H:%M"))
-            else:
-                labels.append(t_bin.strftime("%b %d %H:%M"))
-
-        # Query events within the window
+        # Query events and managed_nodes within the window using SQL bucketing helper
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
-            query = """
-                SELECT 
-                    recorded_at,
-                    provider,
-                    COALESCE(model, '') as model,
-                    COALESCE(token_id, '') as token_id,
-                    COALESCE(user_name, '') as user_name,
-                    COALESCE(team_name, '') as team_name,
-                    COALESCE(account_id, '') as account_id,
-                    total_tokens,
-                    estimated_cost
-                FROM usage_events
-                WHERE recorded_at >= ?
-            """
-            params = [cutoff.isoformat()]
-            if provider:
-                query += " AND provider = ?"
-                params.append(provider.lower())
+            cursor.execute("SELECT id, name, endpoint, engine, compute_group FROM managed_nodes")
+            nodes_map = {r["id"]: dict(r) for r in cursor.fetchall()}
 
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
+            rows = self.query_sql_bucketed_events(
+                conn=conn,
+                start_iso=cutoff.isoformat(),
+                bucket_seconds=bucket_secs,
+                provider=provider,
+                group_by_dimensions=True,
+            )
             conn.close()
-
-        cutoff_epoch = cutoff.timestamp()
-        bucket_secs = bucket_min * 60
 
         total_pts = [0] * num_bins
         total_cost = 0.0
         prov_buckets: Dict[str, List[int]] = {}
         child_buckets: Dict[str, List[int]] = {}
+        disagg_buckets: Dict[str, Dict[str, Any]] = {}
+        dynamic_breakdown_buckets: Dict[str, Dict[str, Any]] = {}
+
+        def _add_disagg(s_id: str, s_name: str, s_color: str, bin_idx: int, val: int, meta: Optional[Dict[str, Any]] = None):
+            if s_id not in disagg_buckets:
+                disagg_buckets[s_id] = {
+                    "id": s_id,
+                    "key": s_id,
+                    "name": s_name,
+                    "label": s_name,
+                    "color": s_color,
+                    "pts": [0] * num_bins,
+                    "meta": meta or {}
+                }
+            disagg_buckets[s_id]["pts"][bin_idx] += val
+
+        def _add_dynamic(s_id: str, s_name: str, s_color: str, bin_idx: int, val: int, meta: Optional[Dict[str, Any]] = None):
+            if s_id not in dynamic_breakdown_buckets:
+                dynamic_breakdown_buckets[s_id] = {
+                    "id": s_id,
+                    "key": s_id,
+                    "name": s_name,
+                    "label": s_name,
+                    "color": s_color,
+                    "pts": [0] * num_bins,
+                    "meta": meta or {}
+                }
+            dynamic_breakdown_buckets[s_id]["pts"][bin_idx] += val
+
+        dynamic_palette = [
+            "#f59e0b", "#8b5cf6", "#06b6d4", "#10b981", "#ec4899",
+            "#3b82f6", "#f43f5e", "#a855f7", "#14b8a6", "#eab308"
+        ]
 
         for r in rows:
-            rec_str = r["recorded_at"]
-            try:
-                dt = datetime.datetime.fromisoformat(rec_str)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=datetime.timezone.utc)
-                else:
-                    dt = dt.astimezone(datetime.timezone.utc)
-                evt_epoch = dt.timestamp()
-            except Exception:
+            rec_str = r.get("recorded_at") or ""
+            dt = None
+            if rec_str:
+                try:
+                    dt = datetime.datetime.fromisoformat(rec_str.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=datetime.timezone.utc)
+                    else:
+                        dt = dt.astimezone(datetime.timezone.utc)
+                except Exception:
+                    dt = None
+
+            idx = None
+            if dt is not None:
+                idx = get_bucket_index(dt, cutoff_epoch, bucket_secs, num_bins)
+            elif "bucket_epoch" in r:
+                idx = get_bucket_index(r["bucket_epoch"], cutoff_epoch, bucket_secs, num_bins)
+
+            if idx is None or idx < 0 or idx >= num_bins:
                 continue
 
-            delta_secs = evt_epoch - cutoff_epoch
-            if delta_secs < 0:
+            row_dict = dict(r)
+            tax = normalize_event_taxonomy(row_dict, nodes_map=nodes_map)
+            locality = tax["locality"]
+            acct_tier = tax["account_tier"]
+
+            # Apply scope_filter
+            if scope_filter_val == "personal_only" and acct_tier == "team_org":
                 continue
-            idx = int(delta_secs // bucket_secs)
-            if idx >= num_bins:
-                idx = num_bins - 1
+            elif scope_filter_val == "team_only" and acct_tier != "team_org":
+                continue
+            elif scope_filter_val == "local_only" and locality != "local":
+                continue
+            elif scope_filter_val == "remote_only" and locality != "remote_lan":
+                continue
 
             toks = int(r["total_tokens"])
             cost = float(r["estimated_cost"] or 0.0)
@@ -741,12 +1132,95 @@ class UsageDatabase:
                     child_buckets.setdefault("individual", [0] * num_bins)[idx] += toks
                 if r["team_name"]:
                     child_buckets.setdefault("team", [0] * num_bins)[idx] += toks
+                if acct_tier == "personal_pro":
+                    _add_disagg(
+                        "claude_personal_pro",
+                        "Claude Pro — Personal Account",
+                        "#f59e0b",
+                        idx,
+                        toks,
+                        {"provider": "claude", "account_tier": "personal_pro", "locality": "cloud"}
+                    )
+                else:
+                    _add_disagg(
+                        "claude_team_org",
+                        f"Claude — Team/Org Pool ({tax['workspace_pool']})",
+                        "#fb7185",
+                        idx,
+                        toks,
+                        {"provider": "claude", "account_tier": "team_org", "locality": "cloud"}
+                    )
             elif prov == "gemini":
                 t_id = r["token_id"] or "tok_gem_flash"
                 child_buckets.setdefault(t_id, [0] * num_bins)[idx] += toks
             elif prov == "ollama":
                 m_name = r["model"] or "llama3:latest"
                 child_buckets.setdefault(m_name, [0] * num_bins)[idx] += toks
+                child_buckets.setdefault(f"ollama_model_{m_name}", [0] * num_bins)[idx] += toks
+                if locality == "remote_lan":
+                    _add_disagg(
+                        "ollama_remote_lan",
+                        f"Ollama — Remote LAN ({tax['compute_node']})",
+                        "#06b6d4",
+                        idx,
+                        toks,
+                        {"provider": "ollama", "locality": "remote_lan", "node_id": tax["instance_id"]}
+                    )
+                else:
+                    _add_disagg(
+                        "ollama_local_node",
+                        f"Ollama — {tax['compute_node']}",
+                        "#8b5cf6",
+                        idx,
+                        toks,
+                        {"provider": "ollama", "locality": "local", "node_id": tax["instance_id"]}
+                    )
+
+            # Populate dynamic breakdown series according to `breakdown_val`
+            if breakdown_val == "locality":
+                if prov == "ollama":
+                    b_key = f"ollama_{locality}"
+                    b_lbl = f"Ollama · {tax['locality_label']} ({tax['compute_node']})"
+                    b_col = "#06b6d4" if locality == "remote_lan" else "#8b5cf6"
+                elif prov == "claude":
+                    b_key = f"claude_{acct_tier}"
+                    b_lbl = f"Claude · {tax['account_tier_label']}"
+                    b_col = "#f59e0b" if acct_tier == "personal_pro" else "#fb7185"
+                else:
+                    b_key = f"{prov}_{locality}"
+                    b_lbl = f"{prov.capitalize()} · {tax['locality_label']}"
+                    b_col = "#3b82f6"
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "locality": locality})
+            elif breakdown_val == "tenant_account":
+                b_key = f"acct_{prov}_{tax['tenant_account']}".replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['tenant_account']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "tenant_account": tax["tenant_account"]})
+            elif breakdown_val == "workspace_pool":
+                b_key = f"pool_{prov}_{tax['workspace_pool']}".replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['workspace_pool']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "workspace_pool": tax["workspace_pool"]})
+            elif breakdown_val == "compute_node":
+                b_key = f"node_{prov}_{tax['instance_id']}".replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['compute_node']} [{tax['locality_label']}]"
+                b_col = "#06b6d4" if locality == "remote_lan" else ("#8b5cf6" if locality == "local" else "#f59e0b")
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "instance_id": tax["instance_id"], "locality": locality})
+            elif breakdown_val == "client_host":
+                b_key = f"client_{prov}_{tax['client_ip']}".replace(".", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['client_host']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "client_ip": tax["client_ip"]})
+            elif breakdown_val == "access_route":
+                b_key = f"route_{prov}_{tax['access_route']}".replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['access_route_label']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "access_route": tax["access_route"]})
+            elif breakdown_val == "model":
+                b_key = f"mdl_{prov}_{tax['model']}".replace(":", "_").replace(" ", "_").lower()
+                b_lbl = f"{prov.capitalize()} · {tax['model']}"
+                b_col = dynamic_palette[len(dynamic_breakdown_buckets) % len(dynamic_palette)]
+                _add_dynamic(b_key, b_lbl, b_col, idx, toks, {"provider": prov, "model": tax["model"]})
 
         def _apply_mode(pts: List[int]) -> List[int]:
             if mode_val == "cumulative":
@@ -806,17 +1280,74 @@ class UsageDatabase:
                 "max_tokens": max(pts_m) if pts_m else 0
             })
 
+        # Append disaggregated locality & account-tier series
+        existing_ids = {s["id"] for s in series}
+        for d_id, d_obj in disagg_buckets.items():
+            pts_m = _apply_mode(d_obj["pts"])
+            if d_id not in existing_ids:
+                series.append({
+                    "id": d_id,
+                    "key": d_id,
+                    "name": d_obj["name"],
+                    "label": d_obj["label"],
+                    "color": d_obj["color"],
+                    "points": pts_m,
+                    "total_tokens": sum(d_obj["pts"]),
+                    "max_tokens": max(pts_m) if pts_m else 0,
+                    "group": "disaggregated",
+                    **d_obj.get("meta", {})
+                })
+                existing_ids.add(d_id)
+
+        # Build dedicated breakdown_series list for UI Curve Disaggregation modes
+        breakdown_series = []
+        if breakdown_val == "consolidated":
+            for p_name, p_pts in prov_buckets.items():
+                pts_m = _apply_mode(p_pts)
+                breakdown_series.append({
+                    "id": p_name,
+                    "key": p_name,
+                    "name": p_name.capitalize(),
+                    "label": p_name.capitalize(),
+                    "color": colors.get(p_name, "#94a3b8"),
+                    "points": pts_m,
+                    "total_tokens": sum(p_pts),
+                    "max_tokens": max(pts_m) if pts_m else 0
+                })
+        else:
+            for b_id, b_obj in dynamic_breakdown_buckets.items():
+                pts_m = _apply_mode(b_obj["pts"])
+                b_entry = {
+                    "id": b_id,
+                    "key": b_id,
+                    "name": b_obj["name"],
+                    "label": b_obj["label"],
+                    "color": b_obj["color"],
+                    "points": pts_m,
+                    "total_tokens": sum(b_obj["pts"]),
+                    "max_tokens": max(pts_m) if pts_m else 0,
+                    "group": breakdown_val,
+                    **b_obj.get("meta", {})
+                }
+                breakdown_series.append(b_entry)
+                if b_id not in existing_ids:
+                    series.append(b_entry)
+                    existing_ids.add(b_id)
+
         return {
             "success": True,
             "window": window,
-            "bucket_minutes": bucket_min,
+            "bucket_minutes": effective_bucket_min,
             "mode": mode_val,
+            "breakdown": breakdown_val,
+            "scope_filter": scope_filter_val,
             "labels": labels,
             "keys": keys,
             "num_bins": num_bins,
             "total_tokens": sum(total_pts),
             "total_cost": round(total_cost, 4),
-            "series": series
+            "series": series,
+            "breakdown_series": breakdown_series
         }
 
     get_timeseries_analytics = get_granular_timeseries
@@ -1096,6 +1627,44 @@ class UsageDatabase:
             """, (week_cutoff,))
             week_rows = {r["provider"].lower(): dict(r) for r in cursor.fetchall()}
 
+            # Query today stats per provider and account
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(account_id, 'default') as account_id,
+                    COALESCE(SUM(total_tokens), 0) as tokens_today,
+                    COALESCE(SUM(estimated_cost), 0.0) as cost_today
+                FROM usage_events
+                WHERE recorded_at >= ?
+                GROUP BY provider, account_id
+            """, (f"{today_prefix}T00:00:00",))
+            today_acct_rows = [dict(r) for r in cursor.fetchall()]
+
+            # Query today stats per provider and instance
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(instance_id, 'local') as instance_id,
+                    COALESCE(SUM(total_tokens), 0) as tokens_today,
+                    COALESCE(SUM(estimated_cost), 0.0) as cost_today
+                FROM usage_events
+                WHERE recorded_at >= ?
+                GROUP BY provider, instance_id
+            """, (f"{today_prefix}T00:00:00",))
+            today_inst_rows = [dict(r) for r in cursor.fetchall()]
+
+            # Query today stats per provider and traffic source
+            cursor.execute("""
+                SELECT 
+                    provider,
+                    COALESCE(source, 'direct') as source,
+                    COALESCE(SUM(total_tokens), 0) as tokens_today
+                FROM usage_events
+                WHERE recorded_at >= ?
+                GROUP BY provider, source
+            """, (f"{today_prefix}T00:00:00",))
+            today_source_rows = [dict(r) for r in cursor.fetchall()]
+
             conn.close()
 
         # Calculate totals
@@ -1298,6 +1867,89 @@ class UsageDatabase:
 
             is_calibrated = bool(prov == "claude" and snap.get("individual_session_rem_pct") is not None)
 
+            # Fetch managed nodes map for locality resolution
+            conn_n = self._get_connection()
+            cur_n = conn_n.cursor()
+            cur_n.execute("SELECT id, name, endpoint, engine, compute_group FROM managed_nodes")
+            nodes_map = {r["id"]: dict(r) for r in cur_n.fetchall()}
+            conn_n.close()
+
+            # Accounts breakdown enriched with canonical account_tier
+            prov_accts = []
+            for r in today_acct_rows:
+                if r["provider"].lower() == prov:
+                    tier_code, tier_lbl = classify_account_tier(
+                        provider=prov,
+                        account_id=r["account_id"],
+                        team_name=snap.get("team_name") or "",
+                        plan_type=snap.get("plan_type") or ""
+                    )
+                    prov_accts.append({
+                        "account_id": r["account_id"],
+                        "account_tier": tier_code,
+                        "account_tier_label": tier_lbl,
+                        "tokens_today": int(r["tokens_today"]),
+                        "cost_today_usd": round(float(r["cost_today"]), 4)
+                    })
+            if not prov_accts and tokens_today > 0:
+                default_acct = snap.get("account_id") or (snap.get("user_name") if prov == "claude" else "default")
+                tier_code, tier_lbl = classify_account_tier(
+                    provider=prov,
+                    account_id=default_acct,
+                    team_name=snap.get("team_name") or "",
+                    plan_type=snap.get("plan_type") or ""
+                )
+                prov_accts = [{
+                    "account_id": default_acct,
+                    "account_tier": tier_code,
+                    "account_tier_label": tier_lbl,
+                    "tokens_today": tokens_today,
+                    "cost_today_usd": round(td.get("cost_today", 0.0), 4)
+                }]
+
+            # Instances breakdown enriched with locality (local vs remote_lan vs cloud)
+            prov_insts = []
+            locality_bd = {"local": 0, "remote_lan": 0, "cloud": 0}
+            for r in today_inst_rows:
+                if r["provider"].lower() == prov:
+                    inst_id = r["instance_id"]
+                    n_meta = nodes_map.get(inst_id, {})
+                    loc_code, loc_lbl = classify_node_locality(
+                        provider=prov,
+                        instance_id=inst_id,
+                        node_endpoint=n_meta.get("endpoint") or ""
+                    )
+                    tok_cnt = int(r["tokens_today"])
+                    locality_bd[loc_code] = locality_bd.get(loc_code, 0) + tok_cnt
+                    prov_insts.append({
+                        "instance_id": inst_id,
+                        "node_name": n_meta.get("name") or inst_id,
+                        "endpoint": n_meta.get("endpoint") or ("http://127.0.0.1:11434" if prov == "ollama" else ""),
+                        "locality": loc_code,
+                        "locality_label": loc_lbl,
+                        "tokens_today": tok_cnt,
+                        "cost_today_usd": round(float(r["cost_today"]), 4)
+                    })
+            if not prov_insts and tokens_today > 0:
+                loc_code, loc_lbl = classify_node_locality(provider=prov, instance_id="local")
+                locality_bd[loc_code] = locality_bd.get(loc_code, 0) + tokens_today
+                prov_insts = [{
+                    "instance_id": "local",
+                    "node_name": "Local Node (This PC)" if prov == "ollama" else f"{prov.capitalize()} Cloud API",
+                    "endpoint": "http://127.0.0.1:11434" if prov == "ollama" else "",
+                    "locality": loc_code,
+                    "locality_label": loc_lbl,
+                    "tokens_today": tokens_today,
+                    "cost_today_usd": round(td.get("cost_today", 0.0), 4)
+                }]
+
+            # Source breakdown
+            src_bd = {"direct": 0, "proxy": 0, "emulator": 0, "log_scanner": 0, "cli_scanner": 0}
+            for r in today_source_rows:
+                if r["provider"].lower() == prov:
+                    s_key = r["source"] or "direct"
+                    src_bd[s_key] = int(r["tokens_today"])
+
             providers_comparison[prov] = {
                 "provider": prov,
                 "plan_type": snap.get("plan_type", "Active"),
@@ -1313,8 +1965,10 @@ class UsageDatabase:
                 "daily_allowance": daily_allowance,
                 "weekly_allowance": weekly_allowance,
                 "session_balance_remaining_pct": session_rem_pct,
+                "session_remaining_pct": session_rem_pct,
                 "session_used_pct": round(100.0 - session_rem_pct, 1),
                 "weekly_balance_remaining_pct": weekly_rem_pct,
+                "weekly_remaining_pct": weekly_rem_pct,
                 "weekly_used_pct": round(100.0 - weekly_rem_pct, 1),
                 "session_tokens_used": dyn_quota.get("session_tokens_used", tokens_today),
                 "session_tokens_available": dyn_quota.get("session_tokens_available", max(0, daily_allowance - tokens_today)),
@@ -1330,7 +1984,12 @@ class UsageDatabase:
                 "source_description": source_descriptions.get(prov, "Standard API"),
                 "is_calibrated": is_calibrated,
                 "models": prov_models,
-                "hierarchy": hierarchy
+                "hierarchy": hierarchy,
+                "accounts": prov_accts,
+                "instances": prov_insts,
+                "locality_breakdown": locality_bd,
+                "source_breakdown": src_bd,
+                "taxonomy_mapping": PROVIDER_TERMINOLOGY_MATRIX.get(prov, {})
             }
 
         # Local Model (Ollama) Cost Savings Calculation
@@ -1363,7 +2022,8 @@ class UsageDatabase:
             "total_tokens_today": total_tokens_today_all,
             "total_tokens_week": total_tokens_week_all,
             "providers": providers_comparison,
-            "local_savings": local_savings
+            "local_savings": local_savings,
+            "taxonomy": get_full_taxonomy_specification()
         }
 
     def get_estate_visibility(self) -> Dict[str, Any]:
@@ -1407,109 +2067,101 @@ class UsageDatabase:
         self,
         provider: str,
         window: str = "24h",
-        scope: str = "individual"
+        scope: str = "individual",
+        bucket_minutes: Optional[int] = None,
+        mode: str = "interval_delta"
     ) -> Dict[str, Any]:
         """
         Returns multi-series time-bucketed trend curves for a provider and all its child
         hierarchical entities (Organization, Department, Team, Individual, Accounts, API Keys, Models).
+        Supports dynamic bucket_minutes (1..60m) and mode ('interval_delta' | 'cumulative').
         """
         prov_key = provider.lower()
         now = datetime.datetime.now(datetime.timezone.utc)
+        win_norm = (window or "24h").strip().lower()
 
-        if window == "1h":
-            num_bins = 12
-            step_min = 5
-            cutoff = now - datetime.timedelta(hours=1)
-            labels = []
-            keys = []
-            for i in range(num_bins - 1, -1, -1):
-                t = now - datetime.timedelta(minutes=i * step_min)
-                labels.append(t.strftime("%H:%M"))
-                keys.append(t.strftime("%Y-%m-%dT%H:%M")[:15])
-            window_label = "Last 1 Hour"
-        elif window == "7d":
-            num_bins = 7
-            cutoff = now - datetime.timedelta(days=7)
-            labels = []
-            keys = []
-            for i in range(num_bins - 1, -1, -1):
-                t = now - datetime.timedelta(days=i)
-                labels.append(t.strftime("%a %d"))
-                keys.append(t.strftime("%Y-%m-%d"))
-            window_label = "Last 7 Days"
-        elif window == "30d":
-            num_bins = 30
-            cutoff = now - datetime.timedelta(days=30)
-            labels = []
-            keys = []
-            for i in range(num_bins - 1, -1, -1):
-                t = now - datetime.timedelta(days=i)
-                labels.append(t.strftime("%b %d"))
-                keys.append(t.strftime("%Y-%m-%d"))
-            window_label = "Last 30 Days"
-        else:
-            window = "24h"
-            num_bins = 24
-            cutoff = now - datetime.timedelta(hours=24)
-            labels = []
-            keys = []
-            for i in range(num_bins - 1, -1, -1):
-                t = now - datetime.timedelta(hours=i)
-                labels.append(t.strftime("%H:00"))
-                keys.append(t.strftime("%Y-%m-%dT%H"))
-            window_label = "Last 24 Hours"
+        grid = self.generate_bucket_grid(
+            window=win_norm,
+            bucket_minutes=bucket_minutes,
+            now=now,
+            is_granular=False,
+        )
+        window = grid["window"]
+        window_label = grid["window_label"]
+        win_mins = grid["win_mins"]
+        step_min = grid["bucket_minutes"]
+        bucket_secs = grid["bucket_seconds"]
+        num_bins = grid["num_bins"]
+        cutoff = grid["cutoff"]
+        cutoff_epoch = grid["cutoff_epoch"]
+        labels = grid["labels"]
+        keys = grid["keys"]
 
         key_to_idx = {k: idx for idx, k in enumerate(keys)}
 
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
-            if window in ("7d", "30d"):
-                group_expr = "substr(recorded_at, 1, 10)"
-            elif window == "1h":
-                group_expr = "substr(recorded_at, 1, 15)"
-            else:
-                group_expr = "substr(recorded_at, 1, 13)"
+            cursor.execute("SELECT id, name, endpoint, engine, compute_group FROM managed_nodes")
+            nodes_map = {r["id"]: dict(r) for r in cursor.fetchall()}
 
-            cursor.execute(f"""
-                SELECT 
-                    {group_expr} as time_key,
-                    COALESCE(model, '') as model,
-                    COALESCE(token_id, '') as token_id,
-                    COALESCE(user_name, '') as user_name,
-                    COALESCE(team_name, '') as team_name,
-                    COALESCE(account_id, '') as account_id,
-                    SUM(total_tokens) as tokens
-                FROM usage_events
-                WHERE provider = ? AND recorded_at >= ?
-                GROUP BY time_key, model, token_id, user_name, team_name, account_id
-            """, (prov_key, cutoff.isoformat()))
-            rows = cursor.fetchall()
+            rows = self.query_sql_bucketed_events(
+                conn=conn,
+                start_iso=cutoff.isoformat(),
+                bucket_seconds=bucket_secs,
+                provider=prov_key,
+                group_by_dimensions=True,
+            )
             conn.close()
 
         total_points = [0] * num_bins
         child_buckets: Dict[str, List[int]] = {}
+        locality_buckets: Dict[str, List[int]] = {
+            "local": [0] * num_bins,
+            "remote_lan": [0] * num_bins,
+        }
+        node_buckets: Dict[str, Dict[str, Any]] = {}
+        claude_tier_buckets: Dict[str, List[int]] = {
+            "personal_pro": [0] * num_bins,
+            "team_org": [0] * num_bins,
+        }
 
         for r in rows:
-            tk = r["time_key"]
-            idx = key_to_idx.get(tk)
+            rec_str = r.get("recorded_at") or ""
+            idx = None
+            try:
+                dt = datetime.datetime.fromisoformat(rec_str.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                else:
+                    dt = dt.astimezone(datetime.timezone.utc)
+                idx = get_bucket_index(dt, cutoff_epoch, bucket_secs, num_bins)
+            except Exception:
+                idx = None
+
+            if idx is None and "bucket_epoch" in r:
+                idx = get_bucket_index(r["bucket_epoch"], cutoff_epoch, bucket_secs, num_bins)
+
             if idx is None:
                 for k, ki in key_to_idx.items():
-                    if tk.startswith(k[:13]):
+                    if rec_str.startswith(k[:10]):
                         idx = ki
                         break
             if idx is None or idx < 0 or idx >= num_bins:
                 continue
 
-            toks = int(r["tokens"])
+            toks = int(r.get("tokens") or r.get("total_tokens") or 0)
             total_points[idx] += toks
+            row_dict = dict(r)
+            tax = normalize_event_taxonomy(row_dict, nodes_map=nodes_map)
 
             if prov_key == "claude":
-                user = r["user_name"]
-                team = r["team_name"]
-                if user:
+                tier = tax["account_tier"]
+                if tier == "personal_pro":
+                    claude_tier_buckets["personal_pro"][idx] += toks
                     child_buckets.setdefault("individual", [0] * num_bins)[idx] += toks
-                if team:
+                else:
+                    claude_tier_buckets["team_org"][idx] += toks
                     child_buckets.setdefault("team", [0] * num_bins)[idx] += toks
             elif prov_key == "gemini":
                 tok_id = r["token_id"] or "tok_gem_flash"
@@ -1517,6 +2169,19 @@ class UsageDatabase:
             elif prov_key == "ollama":
                 m_name = r["model"] or "llama3:latest"
                 child_buckets.setdefault(m_name, [0] * num_bins)[idx] += toks
+                loc = tax["locality"]
+                if loc == "remote_lan":
+                    locality_buckets["remote_lan"][idx] += toks
+                else:
+                    locality_buckets["local"][idx] += toks
+                inst_key = tax["instance_id"]
+                if inst_key not in node_buckets:
+                    node_buckets[inst_key] = {
+                        "label": f"{tax['compute_node']} [{tax['locality_label']}]",
+                        "locality": loc,
+                        "pts": [0] * num_bins
+                    }
+                node_buckets[inst_key]["pts"][idx] += toks
             else:
                 child_buckets.setdefault(f"{prov_key}_main", [0] * num_bins)[idx] += toks
 
@@ -1533,22 +2198,35 @@ class UsageDatabase:
                 "total_tokens": sum(total_points)
             })
 
-            ind_pts = child_buckets.get("individual")
+            ind_pts = claude_tier_buckets["personal_pro"] if sum(claude_tier_buckets["personal_pro"]) > 0 else child_buckets.get("individual")
             if not ind_pts or sum(ind_pts) == 0:
                 ind_pts = [int(p * 0.6) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
             series.append({
                 "id": "claude_individual",
                 "key": "claude_individual",
-                "name": "Individual Member (You)",
-                "label": "Individual Member (You)",
+                "name": "Personal Account (Claude Pro)",
+                "label": "Personal Account (Claude Pro)",
                 "color": "#60a5fa",
                 "points": ind_pts,
                 "total_tokens": sum(ind_pts)
             })
 
-            team_pts = child_buckets.get("team")
+            team_pts = claude_tier_buckets["team_org"] if sum(claude_tier_buckets["team_org"]) > 0 else child_buckets.get("team")
             if not team_pts or sum(team_pts) == 0:
-                team_pts = [int(p * 0.9) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+                # Disaggregate team workspace pool: when no external team events are recorded on this node,
+                # estimate shared team burn based on team session snapshot ratio rather than cloning individual usage 1:1
+                snap = self.get_provider_snapshots().get("claude", {})
+                team_rem = snap.get("team_session_rem_pct")
+                ind_rem = snap.get("individual_session_rem_pct")
+                if team_rem is not None and ind_rem is not None and sum(ind_pts) > 0:
+                    team_used = max(1.0, 100.0 - float(team_rem))
+                    ind_used = max(1.0, 100.0 - float(ind_rem))
+                    ratio = min(10.0, max(1.5, round(team_used / ind_used, 2)))
+                    team_pts = [int(p * ratio) for p in ind_pts]
+                elif sum(total_points) > 0:
+                    team_pts = [int(p * 2.0) for p in ind_pts]
+                else:
+                    team_pts = [0] * num_bins
             series.append({
                 "id": "claude_team",
                 "key": "claude_team",
@@ -1559,27 +2237,30 @@ class UsageDatabase:
                 "total_tokens": sum(team_pts)
             })
 
-            dept_pts = [int(p * 1.4) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
-            series.append({
-                "id": "claude_department",
-                "key": "claude_department",
-                "name": "Department (Technology & AI)",
-                "label": "Department (Technology & AI)",
-                "color": "#34d399",
-                "points": dept_pts,
-                "total_tokens": sum(dept_pts)
-            })
+            is_individual_mode = (scope == "individual" or self.get_quota_tracking_mode() == "individual")
 
-            ent_pts = [int(p * 2.2) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
-            series.append({
-                "id": "claude_enterprise",
-                "key": "claude_enterprise",
-                "name": "Enterprise Pool (Synthesis)",
-                "label": "Enterprise Pool (Synthesis)",
-                "color": "#fbbf24",
-                "points": ent_pts,
-                "total_tokens": sum(ent_pts)
-            })
+            if not is_individual_mode:
+                dept_pts = [int(p * 1.4) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+                series.append({
+                    "id": "claude_department",
+                    "key": "claude_department",
+                    "name": "Department (Technology & AI)",
+                    "label": "Department (Technology & AI)",
+                    "color": "#34d399",
+                    "points": dept_pts,
+                    "total_tokens": sum(dept_pts)
+                })
+
+                ent_pts = [int(p * 2.2) for p in total_points] if sum(total_points) > 0 else [0] * num_bins
+                series.append({
+                    "id": "claude_enterprise",
+                    "key": "claude_enterprise",
+                    "name": "Enterprise Pool (Synthesis)",
+                    "label": "Enterprise Pool (Synthesis)",
+                    "color": "#fbbf24",
+                    "points": ent_pts,
+                    "total_tokens": sum(ent_pts)
+                })
 
         elif prov_key == "gemini":
             series.append({
@@ -1640,12 +2321,47 @@ class UsageDatabase:
             series.append({
                 "id": "ollama_total",
                 "key": "ollama_total",
-                "name": "Local Hardware Total",
-                "label": "Local Hardware Total",
+                "name": "On-Premise Ollama Total (All Nodes)",
+                "label": "On-Premise Ollama Total (All Nodes)",
                 "color": "#a855f7",
                 "points": total_points,
                 "total_tokens": sum(total_points)
             })
+
+            # Explicit Local vs. Remote LAN Node separation
+            series.append({
+                "id": "ollama_local_node",
+                "key": "ollama_local_node",
+                "name": "Local Node (This PC · 127.0.0.1)",
+                "label": "Local Node (This PC · 127.0.0.1)",
+                "color": "#8b5cf6",
+                "points": locality_buckets["local"],
+                "total_tokens": sum(locality_buckets["local"]),
+                "locality": "local"
+            })
+            series.append({
+                "id": "ollama_remote_lan",
+                "key": "ollama_remote_lan",
+                "name": "Remote LAN Nodes (Non-Local)",
+                "label": "Remote LAN Nodes (Non-Local)",
+                "color": "#22d3ee",
+                "points": locality_buckets["remote_lan"],
+                "total_tokens": sum(locality_buckets["remote_lan"]),
+                "locality": "remote_lan"
+            })
+
+            for n_id, n_info in node_buckets.items():
+                if n_id != "local":
+                    series.append({
+                        "id": f"ollama_node_{n_id}",
+                        "key": f"ollama_node_{n_id}",
+                        "name": f"Node: {n_info['label']}",
+                        "label": f"Node: {n_info['label']}",
+                        "color": "#14b8a6" if n_info["locality"] == "remote_lan" else "#c084fc",
+                        "points": n_info["pts"],
+                        "total_tokens": sum(n_info["pts"]),
+                        "locality": n_info["locality"]
+                    })
 
             model_palette = {
                 "llama3:latest": ("Llama 3 (8B)", "#38bdf8"),
@@ -1710,217 +2426,24 @@ class UsageDatabase:
                 "total_tokens": sum(s_pts)
             })
 
+        mode_val = "cumulative" if str(mode).lower() == "cumulative" else "interval_delta"
+        if mode_val == "cumulative":
+            for s in series:
+                s["points"] = self.apply_timeseries_mode(s.get("points", []), mode=mode_val)
+
         return {
             "provider": prov_key,
             "window": window,
             "window_label": window_label,
+            "bucket_minutes": step_min,
+            "mode": mode_val,
             "labels": labels,
             "keys": keys,
             "series": series
         }
 
-    def query_historical_report(
-        self,
-        group_by: str = "day",
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        provider: Optional[str] = None,
-        account_id: Optional[str] = None,
-        team_name: Optional[str] = None,
-        user_name: Optional[str] = None,
-        token_id: Optional[str] = None,
-        model: Optional[str] = None,
-        project_id: Optional[str] = None,
-        dimension: Optional[str] = None,
-        limit: int = 500
-    ) -> Dict[str, Any]:
-        """
-        Executes multi-dimensional historical analytics across time periods and operational dimensions.
-        """
-        if group_by == "hour":
-            time_expr = "strftime('%Y-%m-%d %H:00', recorded_at)"
-        elif group_by == "week":
-            time_expr = "strftime('%Y-W%W', recorded_at)"
-        elif group_by == "month":
-            time_expr = "strftime('%Y-%m', recorded_at)"
-        elif group_by == "year":
-            time_expr = "strftime('%Y', recorded_at)"
-        else: # default day
-            time_expr = "strftime('%Y-%m-%d', recorded_at)"
-
-        conditions = ["1=1"]
-        params = []
-
-        if start_date:
-            conditions.append("recorded_at >= ?")
-            params.append(start_date)
-        if end_date:
-            conditions.append("recorded_at <= ?")
-            params.append(end_date)
-        if provider:
-            conditions.append("LOWER(provider) = ?")
-            params.append(provider.lower())
-        if account_id:
-            conditions.append("account_id = ?")
-            params.append(account_id)
-        if team_name:
-            conditions.append("team_name = ?")
-            params.append(team_name)
-        if user_name:
-            conditions.append("user_name = ?")
-            params.append(user_name)
-        if token_id:
-            conditions.append("token_id = ?")
-            params.append(token_id)
-        if model:
-            conditions.append("model LIKE ?")
-            params.append(f"%{model}%")
-        if project_id:
-            conditions.append("project_id = ?")
-            params.append(project_id)
-
-        where_clause = " AND ".join(conditions)
-
-        valid_dims = {"provider", "account_id", "team_name", "user_name", "model", "project_id"}
-        dim_col = dimension if dimension in valid_dims else None
-
-        if dim_col:
-            select_group = f"{time_expr} AS period, {dim_col} AS dimension_value, provider"
-            group_by_clause = f"GROUP BY {time_expr}, {dim_col}, provider ORDER BY period ASC, total_tokens DESC"
-        else:
-            select_group = f"{time_expr} AS period, provider, account_id, team_name, user_name, model"
-            group_by_clause = f"GROUP BY {time_expr}, provider, account_id, team_name, user_name, model ORDER BY period ASC"
-
-        query_sql = f'''
-            SELECT
-                {select_group},
-                SUM(input_tokens) AS input_tokens,
-                SUM(output_tokens) AS output_tokens,
-                SUM(COALESCE(cache_creation_tokens, 0)) AS cache_creation_tokens,
-                SUM(COALESCE(cache_read_tokens, 0)) AS cache_read_tokens,
-                SUM(total_tokens) AS total_tokens,
-                SUM(estimated_cost) AS total_cost_usd,
-                SUM(request_count) AS request_count,
-                COUNT(id) AS event_count,
-                COUNT(DISTINCT session_id) AS session_count
-            FROM usage_events
-            WHERE {where_clause}
-            {group_by_clause}
-            LIMIT ?
-        '''
-        params.append(limit)
-
-        with self._lock:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(query_sql, params)
-            rows = cursor.fetchall()
-            conn.close()
-
-        records = []
-        tot_tok = 0
-        tot_in = 0
-        tot_out = 0
-        tot_cache_create = 0
-        tot_cache_read = 0
-        tot_cost = 0.0
-        tot_events = 0
-
-        for r in rows:
-            d = dict(r)
-            d["total_cost_usd"] = round(float(d.get("total_cost_usd") or 0.0), 4)
-            group_key = d.get("dimension_value") or d.get("account_id") or d.get("team_name") or d.get("user_name") or d.get("provider") or "All"
-            d["group_key"] = group_key
-            d["estimated_cost"] = d["total_cost_usd"]
-            d["input_tokens"] = int(d.get("input_tokens") or 0)
-            d["output_tokens"] = int(d.get("output_tokens") or 0)
-            d["cache_creation_tokens"] = int(d.get("cache_creation_tokens") or 0)
-            d["cache_read_tokens"] = int(d.get("cache_read_tokens") or 0)
-            tot_tok += int(d.get("total_tokens") or 0)
-            tot_in += d["input_tokens"]
-            tot_out += d["output_tokens"]
-            tot_cache_create += d["cache_creation_tokens"]
-            tot_cache_read += d["cache_read_tokens"]
-            tot_cost += float(d.get("total_cost_usd") or 0.0)
-            tot_events += int(d.get("event_count") or 0)
-            records.append(d)
-
-        summary = {
-            "total_tokens": tot_tok,
-            "input_tokens": tot_in,
-            "output_tokens": tot_out,
-            "cache_creation_tokens": tot_cache_create,
-            "cache_read_tokens": tot_cache_read,
-            "total_estimated_cost": round(tot_cost, 4),
-            "total_cost_usd": round(tot_cost, 4),
-            "total_events": tot_events,
-            "distinct_dimensions": len(set(r.get("group_key") for r in records))
-        }
-
-        return {
-            "group_by": group_by,
-            "dimension": dim_col,
-            "filters": {
-                "start_date": start_date,
-                "end_date": end_date,
-                "provider": provider,
-                "account_id": account_id,
-                "team_name": team_name,
-                "user_name": user_name,
-                "model": model,
-                "project_id": project_id
-            },
-            "record_count": len(records),
-            "totals": summary,
-            "summary": summary,
-            "records": records,
-            "rows": records
-        }
-
-    def export_historical_csv(
-        self,
-        group_by: str = "day",
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        provider: Optional[str] = None,
-        account_id: Optional[str] = None,
-        team_name: Optional[str] = None,
-        user_name: Optional[str] = None,
-        model: Optional[str] = None
-    ) -> str:
-        """Exports historical report as RFC-4180 compliant CSV string."""
-        report = self.query_historical_report(
-            group_by=group_by,
-            start_date=start_date,
-            end_date=end_date,
-            provider=provider,
-            account_id=account_id,
-            team_name=team_name,
-            user_name=user_name,
-            model=model,
-            limit=2000
-        )
-        lines = [
-            "Period,Provider,Account,Team,User,Model,Input Tokens,Output Tokens,Cache Create Tokens,Cache Read Tokens,Total Tokens,Total Cost (USD),Sessions,Events"
-        ]
-        for r in report.get("records", []):
-            period = r.get("period", "")
-            prov = r.get("provider", "")
-            acct = r.get("account_id") or ""
-            team = r.get("team_name") or ""
-            user = r.get("user_name") or ""
-            mdl = r.get("model") or ""
-            in_t = r.get("input_tokens", 0)
-            out_t = r.get("output_tokens", 0)
-            cc_t = r.get("cache_creation_tokens", 0)
-            cr_t = r.get("cache_read_tokens", 0)
-            tot_t = r.get("total_tokens", 0)
-            cost = r.get("total_cost_usd", 0.0)
-            sess = r.get("session_count", 0)
-            evt = r.get("event_count", 0)
-            lines.append(f'"{period}","{prov}","{acct}","{team}","{user}","{mdl}",{in_t},{out_t},{cc_t},{cr_t},{tot_t},{cost:.4f},{sess},{evt}')
-
-        return "\r\n".join(lines)
+    # Historical Reporting, Pivot & CSV Export methods are provided by ReportingEngineMixin
+    # (see backend/storage/reporting_engine.py)
 
     # -------------------------------------------------------------
     # App Settings & Preferences
@@ -1980,10 +2503,15 @@ class UsageDatabase:
     def get_all_settings(self) -> Dict[str, Any]:
         defaults = {
             "widget_theme": "obsidian_neon",
+            "layout_density": "balanced",
             "widget_font_size": "standard",
             "widget_auto_resize": True,
             "widget_fade_unpinned": False,
             "widget_view_mode": "balances",
+            "active_trend_window": "24h",
+            "default_trend_window": "24h",
+            "active_chart_granularity": 5,
+            "active_chart_mode": "interval_delta",
             "poll_cadence_seconds": 4,
             "refresh_cadence_seconds": 4,
             "ui_refresh_interval_seconds": 30,
@@ -3118,5 +3646,6 @@ class UsageDatabase:
         return deleted
 
 DatabaseEngine = UsageDatabase
+DatabaseManager = UsageDatabase
 
 

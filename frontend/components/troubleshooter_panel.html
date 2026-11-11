@@ -6,7 +6,15 @@
         All sensitive keys, session tokens, and personal Windows usernames are <strong>automatically redacted</strong> before logging.
       </p>
     </div>
-    <div style="display: flex; gap: 8px;">
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <input type="text" id="diag-log-search" placeholder="Search error logs..." oninput="window.App.filterDiagnosticLogs && window.App.filterDiagnosticLogs()" style="background: var(--bg-main, #0b101b); border: 1px solid var(--border-color, #1e293b); color: var(--text-main, #f8fafc); padding: 6px 10px; border-radius: 6px; font-size: 0.78rem; min-width: 180px;">
+      <select id="diag-log-category-filter" onchange="window.App.filterDiagnosticLogs && window.App.filterDiagnosticLogs()" style="background: var(--bg-main, #0b101b); border: 1px solid var(--border-color, #1e293b); color: var(--text-main, #f8fafc); padding: 6px 10px; border-radius: 6px; font-size: 0.78rem;">
+        <option value="">All Categories</option>
+        <option value="rate_limit">Rate Limit</option>
+        <option value="auth">Authentication</option>
+        <option value="network">Network / Timeout</option>
+        <option value="log_parser_error">Log Parser</option>
+      </select>
       <button class="btn btn-primary" onclick="window.App.copyDiagnosticBundle()">📋 Copy Diagnostic Bundle</button>
       <button class="btn btn-secondary" onclick="window.App.downloadDiagnosticBundle()">💾 Download Report</button>
       <button class="btn btn-danger" onclick="window.App.clearDiagnostics()">Clear Log</button>

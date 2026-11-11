@@ -1,0 +1,265 @@
+/**
+ * AI Usage Monitor - Canonical Themes & Layout Density Engine (AIUM-1008)
+ * 6 Ultra-Modern Selectable Themes + Backward-Compatible Legacy Aliases + Densities
+ */
+
+:root {
+  /* Canonical Provider Palette Across All Themes */
+  --provider-claude: #F59E0B;
+  --provider-ollama: #10B981;
+  --provider-gemini: #3B82F6;
+  --provider-copilot: #8B5CF6;
+  --provider-chatgpt: #10B981;
+
+  /* Legacy Provider Aliases */
+  --claude-color: #F59E0B;
+  --ollama-color: #10B981;
+  --gemini-color: #3B82F6;
+  --copilot-color: #8B5CF6;
+  --chatgpt-color: #10B981;
+
+  /* Default Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+}
+
+/* ==========================================================================
+   1. LINEAR OBSIDIAN (Default Ultra-Modern Dark)
+   ========================================================================== */
+:root,
+[data-theme="linear-obsidian"],
+[data-theme="glass_slate"],
+[data-theme="obsidian_neon"] {
+  --theme-id: "linear-obsidian";
+  --bg-main: #090A0F;
+  --bg-dark: #090A0F;
+  --bg-card: #12141C;
+  --bg-card-hover: #1A1D28;
+  --bg-elevated: #181B26;
+  --bg-header: rgba(9, 10, 15, 0.88);
+
+  --accent-primary: #5E6AD2;
+  --accent-cyan: #5E6AD2;
+  --accent-blue: #5E6AD2;
+  --accent-purple: #8B5CF6;
+  --accent-secondary: #8B5CF6;
+
+  --text-main: #F3F4F6;
+  --text-muted: #9CA3AF;
+  --text-dim: #8B95A5; /* WCAG AA >= 4.5:1 on #090A0F */
+
+  --border-color: #1F2430;
+  --border-subtle: #1F2430;
+  --border-glow: rgba(94, 106, 210, 0.35);
+  --shadow-glow: 0 0 25px rgba(94, 106, 210, 0.18);
+
+  --color-success: #10B981;
+  --color-danger: #F43F5E;
+  --color-warning: #F59E0B;
+}
+
+/* ==========================================================================
+   2. VERCEL GEIST MONOCHROME (Dark OLED / Deep Minimal)
+   ========================================================================== */
+[data-theme="geist-monochrome"],
+[data-theme="matrix_emerald"] {
+  --theme-id: "geist-monochrome";
+  --bg-main: #000000;
+  --bg-dark: #000000;
+  --bg-card: #0A0A0A;
+  --bg-card-hover: #141414;
+  --bg-elevated: #111111;
+  --bg-header: rgba(0, 0, 0, 0.92);
+
+  --accent-primary: #00E599;
+  --accent-cyan: #00E599;
+  --accent-blue: #00E599;
+  --accent-purple: #52525B;
+  --accent-secondary: #52525B;
+
+  --text-main: #FFFFFF;
+  --text-muted: #A1A1AA;
+  --text-dim: #8E8E98; /* WCAG AA >= 4.5:1 on #000000 */
+
+  --border-color: #27272A;
+  --border-subtle: #27272A;
+  --border-glow: rgba(0, 229, 153, 0.35);
+  --shadow-glow: 0 0 25px rgba(0, 229, 153, 0.18);
+
+  --color-success: #00E599;
+  --color-danger: #EF4444;
+  --color-warning: #F59E0B;
+}
+
+/* ==========================================================================
+   3. CYBERPUNK NEO-HUD (Dark Tactical / High Voltage)
+   ========================================================================== */
+[data-theme="cyberpunk-hud"],
+[data-theme="cyberpunk_dark"],
+[data-theme="cyberpunk"] {
+  --theme-id: "cyberpunk-hud";
+  --bg-main: #07090E;
+  --bg-dark: #07090E;
+  --bg-card: #0D121F;
+  --bg-card-hover: #151D30;
+  --bg-elevated: #11182B;
+  --bg-header: rgba(7, 9, 14, 0.90);
+
+  --accent-primary: #00F0FF;
+  --accent-cyan: #00F0FF;
+  --accent-blue: #00F0FF;
+  --accent-purple: #F43F5E;
+  --accent-secondary: #F43F5E;
+
+  --text-main: #E2F1FF;
+  --text-muted: #7C9CBF;
+  --text-dim: #6989AC; /* WCAG AA >= 4.5:1 on #07090E */
+
+  --border-color: #1B2A4A;
+  --border-subtle: #1B2A4A;
+  --border-glow: rgba(0, 240, 255, 0.40);
+  --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.25);
+
+  --color-success: #00F0FF;
+  --color-danger: #FF0055;
+  --color-warning: #FFE600;
+}
+
+/* ==========================================================================
+   4. CATPPUCCIN MOCHA (Warm Dark / Aesthetic Pastel)
+   ========================================================================== */
+[data-theme="catppuccin-mocha"] {
+  --theme-id: "catppuccin-mocha";
+  --bg-main: #1E1E2E;
+  --bg-dark: #1E1E2E;
+  --bg-card: #181825;
+  --bg-card-hover: #232338;
+  --bg-elevated: #1F1F30;
+  --bg-header: rgba(30, 30, 46, 0.90);
+
+  --accent-primary: #CBA6F7;
+  --accent-cyan: #89DCEB;
+  --accent-blue: #89B4FA;
+  --accent-purple: #CBA6F7;
+  --accent-secondary: #F5C2E7;
+
+  --text-main: #CDD6F4;
+  --text-muted: #A6ADC8;
+  --text-dim: #9399B2; /* WCAG AA >= 4.5:1 on #1E1E2E */
+
+  --border-color: #313244;
+  --border-subtle: #313244;
+  --border-glow: rgba(203, 166, 247, 0.35);
+  --shadow-glow: 0 0 25px rgba(203, 166, 247, 0.20);
+
+  --color-success: #A6E3A1;
+  --color-danger: #F38BA8;
+  --color-warning: #F9E2AF;
+}
+
+/* ==========================================================================
+   5. TOKYO NIGHT STORM (Oceanic Dark / Clean Indigo)
+   ========================================================================== */
+[data-theme="tokyo-night"],
+[data-theme="midnight_slate"] {
+  --theme-id: "tokyo-night";
+  --bg-main: #1A1B26;
+  --bg-dark: #1A1B26;
+  --bg-card: #24283B;
+  --bg-card-hover: #2F354D;
+  --bg-elevated: #282C42;
+  --bg-header: rgba(26, 27, 38, 0.90);
+
+  --accent-primary: #7AA2F7;
+  --accent-cyan: #7DCFFF;
+  --accent-blue: #7AA2F7;
+  --accent-purple: #BB9AF7;
+  --accent-secondary: #BB9AF7;
+
+  --text-main: #C0CAF5;
+  --text-muted: #9AA5CE;
+  --text-dim: #828BB8; /* WCAG AA >= 4.5:1 on #1A1B26 */
+
+  --border-color: #3B4261;
+  --border-subtle: #3B4261;
+  --border-glow: rgba(122, 162, 247, 0.35);
+  --shadow-glow: 0 0 25px rgba(122, 162, 247, 0.20);
+
+  --color-success: #9ECE6A;
+  --color-danger: #F7768E;
+  --color-warning: #E0AF68;
+}
+
+/* ==========================================================================
+   6. EXECUTIVE PAPER (Daylight High-Contrast Light)
+   ========================================================================== */
+[data-theme="executive-paper"],
+[data-theme="high_contrast_light"] {
+  --theme-id: "executive-paper";
+  --bg-main: #F8FAFC;
+  --bg-dark: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F1F5F9;
+  --bg-elevated: #FFFFFF;
+  --bg-header: rgba(248, 250, 252, 0.92);
+
+  --accent-primary: #2563EB;
+  --accent-cyan: #0284C7;
+  --accent-blue: #2563EB;
+  --accent-purple: #4F46E5;
+  --accent-secondary: #4F46E5;
+
+  --text-main: #0F172A;
+  --text-muted: #475569;
+  --text-dim: #64748B; /* WCAG AA >= 4.5:1 on #F8FAFC */
+
+  --border-color: #E2E8F0;
+  --border-subtle: #E2E8F0;
+  --border-glow: rgba(37, 99, 235, 0.20);
+  --shadow-glow: 0 4px 20px rgba(15, 23, 42, 0.08);
+
+  --color-success: #16A34A;
+  --color-danger: #DC2626;
+  --color-warning: #D97706;
+}
+
+/* ==========================================================================
+   LAYOUT DENSITY ENGINE
+   ========================================================================== */
+[data-density="compact"] {
+  --density-card-padding: 10px 14px;
+  --density-gap: 8px;
+  --density-font-scale: 0.92;
+  --density-btn-padding: 3px 8px;
+  --density-table-padding: 6px 8px;
+}
+
+[data-density="compact"] .glass-card {
+  padding: var(--density-card-padding);
+  gap: var(--density-gap);
+}
+
+[data-density="compact"] .metric-card {
+  padding: 12px 14px;
+}
+
+[data-density="balanced"],
+:root:not([data-density]) {
+  --density-card-padding: 18px 20px;
+  --density-gap: 16px;
+  --density-font-scale: 1.0;
+  --density-btn-padding: 6px 12px;
+  --density-table-padding: 10px 14px;
+}
+
+[data-density="ultrawide"] {
+  --density-card-padding: 24px 28px;
+  --density-gap: 24px;
+  --density-font-scale: 1.05;
+  --density-btn-padding: 8px 16px;
+  --density-table-padding: 14px 18px;
+}
+
+[data-density="ultrawide"] .glass-card {
+  padding: var(--density-card-padding);
+}

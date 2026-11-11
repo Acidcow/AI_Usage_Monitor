@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Usage Monitor | Token & Quota Tracker</title>
-  <meta name="description" content="Zero-dependency, privacy-first desktop monitor and taskbar widget for AI tokens, sessions, quotas, and rates.">
+  <title>IRIS | Inter-node Routing, Inference & Security</title>
+  <meta name="description" content="Zero-dependency sovereign P2P agent mesh, privacy-first desktop monitor, and secure tunneling runtime.">
   <link rel="icon" id="app-favicon" type="image/jpeg" href="/assets/icons/app_icon_johnny5.jpg">
   <link rel="stylesheet" href="/css/styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,10 +21,10 @@
       </div>
       <div class="brand-text">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <h1>AI Usage Monitor</h1>
-          <span class="mascot-tag" title="Johnny 5 Guard Mascot Active">Number 5 is alive!</span>
+          <h1>IRIS</h1>
+          <span class="mascot-tag" title="IRIS Sovereign Mesh Active">Inter-node Routing, Inference & Security</span>
         </div>
-        <span>Zero-Dependency • Windows Native • Multi-Provider</span>
+        <span>Zero-Dependency • Windows DPAPI • Sovereign P2P Mesh</span>
       </div>
     </div>
 
@@ -181,100 +181,6 @@
     </div>
   </div>
 
-  <!-- Claude Quota & Team Limits Calibration Modal -->
-  <div class="modal-overlay" id="claude-quota-modal">
-    <div class="modal-box" style="max-width: 620px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 1.25rem;">⚖️</span>
-          <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff;">Calibrate Claude Quota & Limits</h3>
-        </div>
-        <button onclick="window.App.closeClaudeQuotaModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
-      </div>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
-        Anthropic separates <strong style="color: #38bdf8;">Individual Member limits</strong> (found in your <em>claude.ai &rarr; Settings &rarr; Usage</em>) from the shared <strong style="color: #a855f7;">Team / Organization Pool</strong>. Calibrate both below to enable seamless drill-down!
-      </p>
-
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
-        <div class="form-group">
-          <label for="claude-quota-scope-select" style="font-size: 0.8rem; color: var(--text-muted);">Default Active Scope</label>
-          <select id="claude-quota-scope-select" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 8px 10px; border-radius: 6px;">
-            <option value="individual" selected>👤 Individual (My Personal Quota)</option>
-            <option value="team">👥 Team Workspace Pool</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="claude-quota-plan" style="font-size: 0.8rem; color: var(--text-muted);">Plan Type</label>
-          <select id="claude-quota-plan" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #f8fafc; padding: 8px 10px; border-radius: 6px;">
-            <option value="Team Enterprise" selected>Team Enterprise (or Team Plan)</option>
-            <option value="Pro">Pro Plan</option>
-            <option value="Enterprise">Enterprise</option>
-            <option value="Free">Free Tier</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Section: 👤 Individual Member Quota -->
-      <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-          <span style="font-size: 0.82rem; font-weight: 700; color: #38bdf8;">👤 Individual Member Quota (claude.ai &rarr; Settings &rarr; Usage)</span>
-          <span style="font-size: 0.7rem; color: var(--text-dim);">Personal Seat</span>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-          <div class="form-group" style="margin-bottom: 0;">
-            <label for="claude-quota-ind-session-used" style="font-size: 0.75rem; color: var(--text-muted);">Session % Used</label>
-            <input type="number" id="claude-quota-ind-session-used" placeholder="60" value="60" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #38bdf8; padding: 6px 10px; border-radius: 6px; font-weight: bold;">
-            <span style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; display: block;">e.g. 60% used = 40% remaining</span>
-          </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <label for="claude-quota-ind-weekly-used" style="font-size: 0.75rem; color: var(--text-muted);">Weekly % Used</label>
-            <input type="number" id="claude-quota-ind-weekly-used" placeholder="27" value="27" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #38bdf8; padding: 6px 10px; border-radius: 6px; font-weight: bold;">
-            <span style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; display: block;">e.g. 27% used = 73% remaining</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Section: 👥 Team Workspace Pool Quota -->
-      <div id="claude-quota-team-section" style="background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-          <span style="font-size: 0.82rem; font-weight: 700; color: #c084fc;">👥 Team Workspace Pool Quota (Aggregated Division Pool)</span>
-          <span style="font-size: 0.7rem; color: var(--text-dim);">Shared Workspace</span>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-          <div class="form-group" style="margin-bottom: 0;">
-            <label for="claude-quota-team-session-used" style="font-size: 0.75rem; color: var(--text-muted);">Team Session % Used</label>
-            <input type="number" id="claude-quota-team-session-used" placeholder="56" value="56" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #c084fc; padding: 6px 10px; border-radius: 6px; font-weight: bold;">
-            <span style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; display: block;">e.g. 56% used = 44% remaining</span>
-          </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <label for="claude-quota-team-weekly-used" style="font-size: 0.75rem; color: var(--text-muted);">Team Weekly % Used</label>
-            <input type="number" id="claude-quota-team-weekly-used" placeholder="26" value="26" min="0" max="100" step="0.5" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #c084fc; padding: 6px 10px; border-radius: 6px; font-weight: bold;">
-            <span style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; display: block;">e.g. 26% used = 74% remaining</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Resets & Schedules -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-        <div class="form-group">
-          <label for="claude-quota-session-reset-mins" style="font-size: 0.8rem; color: var(--text-muted);">Session Reset In (Minutes)</label>
-          <input type="number" id="claude-quota-session-reset-mins" placeholder="126" value="126" min="1" max="300" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #cbd5e1; padding: 8px 10px; border-radius: 6px;">
-          <span style="font-size: 0.7rem; color: var(--text-dim); margin-top: 3px; display: block;">e.g. 2 hr 6 min = 126 mins</span>
-        </div>
-        <div class="form-group">
-          <label for="claude-quota-weekly-reset-str" style="font-size: 0.8rem; color: var(--text-muted);">Weekly Resets Schedule</label>
-          <input type="text" id="claude-quota-weekly-reset-str" placeholder="Mon 3:00 AM" value="Mon 3:00 AM" style="width: 100%; background: #0b101b; border: 1px solid #1e293b; color: #cbd5e1; padding: 8px 10px; border-radius: 6px;">
-          <span style="font-size: 0.7rem; color: var(--text-dim); margin-top: 3px; display: block;">e.g. Mon 3:00 AM</span>
-        </div>
-      </div>
-
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
-        <button class="btn btn-secondary" onclick="window.App.closeClaudeQuotaModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="window.App.saveClaudeQuotaCalibration()" style="background: linear-gradient(135deg, #d97706, #b45309); border: none;">Save & Sync Limits</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Google Gemini Modal -->
   <div class="modal-overlay" id="gemini-config-modal">
     <div class="modal-box">
@@ -283,53 +189,26 @@
         <button onclick="window.App.closeConfigureGeminiModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
 
-      <!-- Quick Procurement Guide Banner -->
-      <div class="procure-guide-card" style="border-left: 3px solid var(--gemini-color);">
-        <div class="procure-header">
-          <span class="procure-badge" style="background: rgba(37, 99, 235, 0.2); color: #93c5fd; border-color: rgba(96, 165, 250, 0.4);">Procure Key</span>
-          <span style="font-weight: 600; font-size: 0.88rem;">Need a Google Gemini API Key?</span>
-        </div>
-        <p class="procure-desc">
-          Google AI Studio provides free and pay-as-you-go API keys with instant activation for Gemini 1.5 Pro, Flash, and 2.0.
-        </p>
-        <div class="procure-steps">
-          <div class="step-item"><span class="step-num">1</span> Click <strong>Open Google AI Studio</strong> below.</div>
-          <div class="step-item"><span class="step-num">2</span> Sign in with your Google account and click <strong>"Create API key"</strong>.</div>
-          <div class="step-item"><span class="step-num">3</span> Copy the key and paste it into the field below.</div>
-        </div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini">
-            <span>🚀</span> Open Google AI Studio ↗
-          </a>
-          <a href="https://ai.google.dev/gemini-api/docs" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
-            <span>📚</span> AI Studio Docs ↗
-          </a>
-          <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
-            <span>💰</span> Quotas & Pricing ↗
-          </a>
-          <a href="https://console.cloud.google.com/iam-admin/quotas" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" title="Open Google Cloud Console to inspect project-wide and account-wide API quotas">
-            <span>🌐</span> GCP Quotas Console ↗
-          </a>
-        </div>
-      </div>
-
-      <!-- Google Account Sign-In (OAuth 2.0 PKCE & Account-Level Hierarchy) -->
-      <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+      <!-- 1. PRIMARY: Google Account Sign-In (Gemini Pro Subscription - No API Key Required) -->
+      <div style="background: rgba(59, 130, 246, 0.12); border: 2px solid rgba(59, 130, 246, 0.4); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 16px; box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.2rem;">🌐</span>
-            <strong style="color: #60a5fa; font-size: 0.92rem;">Google Account Single Sign-On (Account-Level View)</strong>
+            <span style="font-size: 1.3rem;">⭐</span>
+            <div>
+              <strong style="color: #60a5fa; font-size: 0.96rem;">Subscribed Gemini Pro Account (acidcow@gmail.com)</strong>
+              <div style="font-size: 0.72rem; color: #93c5fd;">Primary & Recommended: Direct Google Account SSO (No API Keys or prepaid charges)</div>
+            </div>
           </div>
-          <span id="gemini-oauth-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+          <span id="gemini-oauth-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 0.75rem;">
             Connected: acidcow@gmail.com
           </span>
         </div>
-        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
-          Authenticate with your Google account via local OAuth 2.0 loopback. This unlocks an account-level umbrella view with collapsible child tokens for each project and key.
+        <p style="font-size: 0.8rem; color: #cbd5e1; margin-bottom: 12px; line-height: 1.45;">
+          Your subscribed <strong>Gemini Pro</strong> account on <strong>acidcow@gmail.com</strong> connects directly via Google Account authentication. You do not need an AI Studio API key or prepaid credit card.
         </p>
         <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-          <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.startGoogleOAuth()" style="border-color: rgba(96, 165, 250, 0.4); color: #93c5fd;">
-            🔐 Sign In with Google (Browser)
+          <button type="button" class="btn btn-primary btn-sm" onclick="window.App.startGoogleOAuth()" style="background: linear-gradient(135deg, #2563eb, #1d4ed8); border: 1px solid #3b82f6;">
+            🔐 Sign In with Google Account
           </button>
           <button type="button" class="btn btn-secondary btn-sm" onclick="window.App.simulateGoogleAccount('acidcow@gmail.com')" style="border-color: rgba(16, 185, 129, 0.4); color: #34d399;">
             ⚡ Fast Connect (acidcow@gmail.com)
@@ -339,6 +218,30 @@
           </button>
         </div>
       </div>
+
+      <!-- 2. Optional / Alternative: Google AI Studio API Keys (Prepaid / Developer) -->
+      <details style="background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px;">
+        <summary style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); cursor: pointer;">
+          Optional / Alternative: Google AI Studio API Keys (Prepaid / Developer)
+        </summary>
+        <div class="procure-guide-card" style="border-left: 3px solid var(--gemini-color); margin-top: 10px;">
+          <div class="procure-header">
+            <span class="procure-badge" style="background: rgba(37, 99, 235, 0.2); color: #93c5fd; border-color: rgba(96, 165, 250, 0.4);">Developer API</span>
+            <span style="font-weight: 600; font-size: 0.85rem;">Google AI Studio API Keys</span>
+          </div>
+          <p class="procure-desc">
+            Use this only if you want to connect dedicated developer API keys or GCP projects alongside your main Gemini Pro Google Account.
+          </p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-procure btn-procure-gemini btn-sm">
+              <span>🚀</span> Open Google AI Studio ↗
+            </a>
+            <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+              <span>💰</span> Quotas & Pricing ↗
+            </a>
+          </div>
+        </div>
+      </details>
 
       <!-- Child Named API Tokens Registry -->
       <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
@@ -781,6 +684,10 @@
     </div>
   </div>
 
-  <script src="/js/app.js"></script>
+  <script src="js/core/formatters.js"></script>
+  <script src="js/core/api_client.js"></script>
+  <script src="js/core/chart_renderer.js"></script>
+  <script src="js/core/telemetry_hierarchy.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

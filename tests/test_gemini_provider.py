@@ -37,5 +37,24 @@ class TestGeminiProvider(unittest.TestCase):
         self.assertTrue(self.gemini.is_configured)
         self.assertEqual(self.vault.get_credential("gemini", "default"), fake_key)
 
+    def test_gemini_account_level_pro_subscription_sync(self):
+        """Assert Gemini connects via Google Account SSO (Gemini Pro) without needing any API key."""
+        self.vault.set_credential("google", "account_email", "acidcow@gmail.com")
+        self.vault.set_credential("google", "profile", '{"email": "acidcow@gmail.com", "name": "James Eckhardt"}')
+
+        res = self.gemini.sync_usage()
+        self.assertTrue(res["success"])
+        self.assertEqual(res["status"], "ACTIVE")
+        self.assertEqual(res["mode"], "account")
+        self.assertEqual(res["account_id"], "acidcow@gmail.com")
+        self.assertIn("Gemini Pro", res["plan_type"])
+
+        snap = self.db.get_latest_provider_snapshot("gemini")
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["status"], "ACTIVE")
+        self.assertEqual(snap["account_id"], "acidcow@gmail.com")
+        self.assertIn("Gemini Pro", snap["plan_type"])
+        self.assertEqual(snap["tokens_remaining"], 2000000)
+
 if __name__ == "__main__":
     unittest.main()

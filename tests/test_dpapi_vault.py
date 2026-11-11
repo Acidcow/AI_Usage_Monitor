@@ -37,9 +37,12 @@ class TestDPAPIVault(unittest.TestCase):
             self.vault.decrypt("corrupted_invalid_hex_string!!!")
 
     def test_store_and_retrieve_credential(self):
-        self.vault.set_credential("claude", "default", "sk-ant-secret-999")
-        retrieved = self.vault.get_credential("claude", "default")
-        self.assertEqual(retrieved, "sk-ant-secret-999")
+        try:
+            self.vault.set_credential("claude", "default", "sk-ant-secret-999")
+            retrieved = self.vault.get_credential("claude", "default")
+            self.assertEqual(retrieved, "sk-ant-secret-999")
+        finally:
+            self.vault.delete_credential("claude", "default")
 
         # Non-existent credential
         self.assertIsNone(self.vault.get_credential("non_existent", "account"))

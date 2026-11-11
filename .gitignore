@@ -27,6 +27,7 @@ wheels/
 # Data & Runtime DBs (Keep roadmap tracked, ignore local telemetry/logs)
 data/
 usage_stats.db
+ai_usage.db
 diagnostic_bundles/
 *.log
 

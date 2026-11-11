@@ -307,5 +307,53 @@ class TestProxyBridgesUIGuidesAndDynamicConfig(unittest.TestCase):
         usage = self.db.get_client_token_usage("10.10.10.5")
         self.assertEqual(usage.get("session_tokens_used"), 0)
 
+    def test_21_html_component_contains_antigravity_mcp_config_guide(self):
+        """Assert provider_hub.html contains Antigravity MCP JSON snippet and global path."""
+        hub_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "components", "provider_hub.html")
+        with open(hub_path, "r", encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn("Google Antigravity IDE &amp; Antigravity CLI Integration", html)
+        self.assertIn("mcp_config.json", html)
+        self.assertIn("get_usage_summary", html)
+        self.assertIn("get_provider_quotas", html)
+        self.assertIn("get_proxy_endpoints", html)
+        self.assertIn("backend.mcp.server", html)
+
+    def test_22_html_component_contains_vscode_and_funneling_guides(self):
+        """Assert provider_hub.html contains VSCode Cline, Continue.dev, and proxy funneling."""
+        hub_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "components", "provider_hub.html")
+        with open(hub_path, "r", encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn("cline_mcp_settings.json", html)
+        self.assertIn("Continue.dev Model Provider", html)
+        self.assertIn("$env:HTTP_PROXY='http://127.0.0.1:8766'", html)
+        self.assertIn("ANTHROPIC_BASE_URL", html)
+
+    def test_23_mcp_server_http_rpc_endpoint(self):
+        """Assert POST /api/mcp/rpc executes JSON-RPC 2.0 requests over HTTP."""
+        req_payload = {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/list",
+            "params": {}
+        }
+        req = urllib.request.Request(
+            self._url("/api/mcp/rpc"),
+            data=json.dumps(req_payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(data.get("jsonrpc"), "2.0")
+            self.assertEqual(data.get("id"), 99)
+            tools = data.get("result", {}).get("tools", [])
+            tool_names = [t["name"] for t in tools]
+            self.assertIn("get_usage_summary", tool_names)
+            self.assertIn("get_provider_quotas", tool_names)
+            self.assertIn("get_proxy_endpoints", tool_names)
+
 if __name__ == "__main__":
     unittest.main()
+

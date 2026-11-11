@@ -16,6 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from backend.contracts.themes import THEMES_CATALOG, resolve_theme_id, PROVIDER_PALETTE
+
 THEMES = {
     "obsidian_neon": {
         "bg": "#080b11",
@@ -79,12 +81,17 @@ THEMES = {
     }
 }
 
+# Merge all canonical and aliased themes from THEMES_CATALOG
+for _tid, _tconfig in THEMES_CATALOG.items():
+    if _tid not in THEMES:
+        THEMES[_tid] = dict(_tconfig)
+
 PROVIDER_COLORS = {
-    "claude": "#f59e0b",
-    "gemini": "#38bdf8",
-    "chatgpt": "#10b981",
-    "ollama": "#a855f7",
-    "copilot": "#06b6d4"
+    "claude": PROVIDER_PALETTE.get("claude", "#f59e0b"),
+    "gemini": PROVIDER_PALETTE.get("gemini", "#38bdf8"),
+    "chatgpt": PROVIDER_PALETTE.get("chatgpt", "#10b981"),
+    "ollama": PROVIDER_PALETTE.get("ollama", "#10b981"),
+    "copilot": PROVIDER_PALETTE.get("copilot", "#8b5cf6")
 }
 
 class NativeTaskbarWidget:
@@ -93,6 +100,29 @@ class NativeTaskbarWidget:
     Displays live multi-account dual-bar telemetry, local AI cost savings, hover tooltips,
     right-click pinning, dynamic height auto-resizing, and sparkline trend charts.
     """
+
+    WINDOW_OPTIONS = [
+        "1h", "3h", "6h", "12h", "24h", "48h",
+        "3d", "5d", "7d", "10d", "15d", "30d",
+        "3m", "6m", "12m"
+    ]
+    WINDOW_LABELS = {
+        "1h": "Last 1hr",
+        "3h": "Last 3hrs",
+        "6h": "Last 6hrs",
+        "12h": "Last 12hrs",
+        "24h": "Last 24hrs",
+        "48h": "Last 48hrs",
+        "3d": "Last 3 days",
+        "5d": "Last 5 days",
+        "7d": "Last 7 days",
+        "10d": "Last 10 days",
+        "15d": "Last 15 days",
+        "30d": "Last 30 days",
+        "3m": "Last 3 months",
+        "6m": "Last 6 months",
+        "12m": "Last 12 months",
+    }
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8765, width: int = 370, height: int = 390):
         self.host = host
@@ -113,17 +143,37 @@ class NativeTaskbarWidget:
         self.auto_resize = True
         self.fade_unpinned = False
         self.view_mode = "balances" # "balances" or "trends"
+        self.trend_window = "24h"
+        self.chart_granularity = 5
         self.pinned_items = set(["claude", "gemini", "ollama"])
         self.hide_parent_chart_on_expand = False
         self.hidden_platforms = set()
         self.quota_tracking_mode = "individual"
+        self.poll_interval_ms = 10000
         self.has_focus = True
         self._hit_boxes = []
         self._pin_hit_boxes = []
 
     @property
     def theme(self) -> Dict[str, str]:
-        return THEMES.get(self.theme_name, THEMES["obsidian_neon"])
+        resolved = resolve_theme_id(self.theme_name)
+        return THEMES.get(self.theme_name) or THEMES.get(resolved) or THEMES.get("linear-obsidian") or THEMES["obsidian_neon"]
+
+    def _is_hidpi(self) -> bool:
+        """Detects whether running on a HiDPI / display-scaled screen (>96 DPI / >1.0x)."""
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                user32 = ctypes.windll.user32
+                if hasattr(user32, "GetDpiForSystem") and user32.GetDpiForSystem() > 96:
+                    return True
+            if hasattr(self, "root") and self.root:
+                fp = self.root.winfo_fpixels('1i')
+                if fp > 96:
+                    return True
+        except Exception:
+            pass
+        return False
 
     def _get_font(self, base_size: int, weight: str = "normal") -> tuple:
         if isinstance(self.font_scale, (int, float)):
@@ -131,6 +181,8 @@ class NativeTaskbarWidget:
         else:
             scale = {"small": -1, "standard": 0, "large": 2}.get(self.font_scale, 0)
             size = max(6, base_size + scale)
+        if self._is_hidpi() and size < 9:
+            size = 9
         return ("Segoe UI", size, weight)
 
     def calculate_position(self) -> tuple:
@@ -193,7 +245,11 @@ class NativeTaskbarWidget:
             if self.view_mode in ("trends", "interval"):
                 try:
                     ts_mode = "interval_delta" if self.view_mode == "interval" else "cumulative"
-                    req_ts = urllib.request.Request(f"http://{self.host}:{self.active_port}/api/usage/timeseries?window=1h&bucket_minutes=5&mode={ts_mode}")
+                    win_val = getattr(self, "trend_window", "24h") or "24h"
+                    gran_val = getattr(self, "chart_granularity", 5) or 5
+                    req_ts = urllib.request.Request(
+                        f"http://{self.host}:{self.active_port}/api/usage/timeseries?window={win_val}&bucket_minutes={gran_val}&mode={ts_mode}"
+                    )
                     with urllib.request.urlopen(req_ts, timeout=1.5) as resp:
                         if resp.status == 200:
                             self.cached_timeseries = json.loads(resp.read().decode("utf-8"))
@@ -205,16 +261,42 @@ class NativeTaskbarWidget:
     def _apply_settings_from_server(self, st: dict):
         if not isinstance(st, dict):
             return
+        theme_changed = False
+        new_theme = self.theme_name
+        new_font = self.font_scale
         if "widget_theme" in st and st["widget_theme"] in THEMES:
-            self.theme_name = st["widget_theme"]
+            if st["widget_theme"] != self.theme_name:
+                new_theme = st["widget_theme"]
+                theme_changed = True
+            else:
+                self.theme_name = st["widget_theme"]
         if "widget_font_size" in st:
-            self.font_scale = st["widget_font_size"]
+            if st["widget_font_size"] != self.font_scale:
+                new_font = st["widget_font_size"]
+                theme_changed = True
+            else:
+                self.font_scale = st["widget_font_size"]
+        if theme_changed:
+            self.apply_theme(new_theme, new_font)
         if "widget_auto_resize" in st:
             self.auto_resize = bool(st["widget_auto_resize"])
         if "widget_fade_unpinned" in st:
             self.fade_unpinned = (st["widget_fade_unpinned"] is True or st["widget_fade_unpinned"] == "true")
         if "widget_view_mode" in st:
             self.view_mode = st["widget_view_mode"]
+        win_srv = st.get("active_trend_window") or st.get("default_trend_window")
+        if win_srv and str(win_srv).strip().lower() in self.WINDOW_OPTIONS:
+            self.trend_window = str(win_srv).strip().lower()
+            if hasattr(self, "btn_window_select") and self.btn_window_select:
+                try:
+                    self.btn_window_select.configure(text=f"⏱ {self.trend_window}")
+                except Exception:
+                    pass
+        if "active_chart_granularity" in st:
+            try:
+                self.chart_granularity = int(st["active_chart_granularity"])
+            except Exception:
+                pass
         if "widget_hide_parent_chart_on_expand" in st:
             self.hide_parent_chart_on_expand = bool(st["widget_hide_parent_chart_on_expand"])
         if "pinned_items" in st and isinstance(st["pinned_items"], list):
@@ -225,6 +307,12 @@ class NativeTaskbarWidget:
                 self.hidden_platforms = set(p.lower().strip() for p in ev["hidden_platforms"] if isinstance(p, str))
         if "quota_tracking_mode" in st:
             self.quota_tracking_mode = st["quota_tracking_mode"]
+        if "ui_refresh_interval_seconds" in st:
+            try:
+                sec = float(st["ui_refresh_interval_seconds"])
+                self.poll_interval_ms = int(max(5000, min(60000, sec * 1000)))
+            except Exception:
+                pass
 
     def _save_settings_async(self, payload: dict):
         def _post():
@@ -342,6 +430,18 @@ class NativeTaskbarWidget:
         self.btn_view_mode.pack(side="right", padx=4)
         self.btn_view_mode.bind("<Button-1>", lambda e: self._toggle_view_mode())
 
+        self.btn_window_select = tk.Label(
+            header,
+            text=f"⏱ {getattr(self, 'trend_window', '24h')}",
+            bg=th["header_bg"],
+            fg=th["cyan"],
+            font=self._get_font(8, "bold"),
+            cursor="hand2"
+        )
+        self.btn_window_select.pack(side="right", padx=4)
+        self.btn_window_select.bind("<Button-1>", self._show_window_menu)
+        self.btn_window_select.bind("<Button-3>", lambda e: self.cycle_trend_window())
+
         # Accounts List Canvas
         self.canvas = tk.Canvas(main_frame, bg=th["container_bg"], highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, padx=8, pady=6)
@@ -419,6 +519,60 @@ class NativeTaskbarWidget:
                 self.btn_view_mode.configure(text=icons.get(self.view_mode, "📊"))
             self._save_settings_async({"widget_view_mode": self.view_mode})
             self.render_canvas()
+
+    def set_trend_window(self, window: str):
+        """Sets the time-span window for trends/charts and syncs with Web UI via /api/settings."""
+        win_norm = str(window or "24h").strip().lower()
+        if win_norm in self.WINDOW_OPTIONS:
+            self.trend_window = win_norm
+            if hasattr(self, "btn_window_select") and self.btn_window_select:
+                try:
+                    self.btn_window_select.configure(text=f"⏱ {self.trend_window}")
+                except Exception:
+                    pass
+            self._save_settings_async({
+                "active_trend_window": self.trend_window,
+                "default_trend_window": self.trend_window,
+            })
+            if hasattr(self, "canvas") and self.canvas:
+                self.render_canvas()
+
+    def cycle_trend_window(self) -> str:
+        """Cycles to the next time-span window in WINDOW_OPTIONS and syncs with Web UI."""
+        try:
+            idx = self.WINDOW_OPTIONS.index(self.trend_window)
+        except ValueError:
+            idx = 4
+        next_win = self.WINDOW_OPTIONS[(idx + 1) % len(self.WINDOW_OPTIONS)]
+        self.set_trend_window(next_win)
+        return next_win
+
+    def _show_window_menu(self, event=None):
+        """Displays a popup menu allowing the user to select any of the 15 time-span windows."""
+        if not self.root:
+            return
+        try:
+            import tkinter as tk
+            menu = tk.Menu(
+                self.root,
+                tearoff=0,
+                bg="#0f172a",
+                fg="#f8fafc",
+                activebackground="#06b6d4",
+                activeforeground="#0b0f19",
+                font=self._get_font(8)
+            )
+            for code in self.WINDOW_OPTIONS:
+                lbl = self.WINDOW_LABELS.get(code, code)
+                prefix = "● " if code == self.trend_window else "   "
+                menu.add_command(
+                    label=f"{prefix}{lbl} ({code})",
+                    command=lambda c=code: self.set_trend_window(c)
+                )
+            if event:
+                menu.tk_popup(event.x_root, event.y_root)
+        except Exception:
+            self.cycle_trend_window()
 
     def _on_focus_in(self, event=None):
         if not self.has_focus:
@@ -524,8 +678,14 @@ class NativeTaskbarWidget:
 
     def apply_theme(self, theme_name: str, font_scale: Any = "standard"):
         """Applies a theme palette and font scaling."""
-        if theme_name in THEMES:
+        if theme_name in ["cyberpunk_dark", "glass_slate", "high_contrast_light"]:
+            self.theme_name = resolve_theme_id(theme_name)
+        elif theme_name in THEMES:
             self.theme_name = theme_name
+        else:
+            resolved = resolve_theme_id(theme_name)
+            if resolved in THEMES:
+                self.theme_name = resolved
         self.font_scale = font_scale
         if hasattr(self, "root") and self.root:
             th = self.theme
@@ -547,16 +707,13 @@ class NativeTaskbarWidget:
     def _get_sparkline_points(self, tok_today: int, tok_week: int, width: int = 90, height: int = 22) -> list:
         today = int(tok_today)
         week = int(tok_week)
-        base = (week / 7.0) if week > 0 else max(100.0, float(today))
-        raw = [
-            base * 0.7,
-            base * 0.9,
-            base * 1.1,
-            base * 0.85,
-            base * 1.15,
-            base * 0.95,
-            float(today)
-        ]
+        if today == 0 and week == 0:
+            raw = [0.0] * 7
+        elif week == 0 or today == week:
+            raw = [0.0] * 6 + [float(today)]
+        else:
+            base = float(week) / 7.0
+            raw = [base] * 6 + [float(today)]
         min_v = min(raw)
         max_v = max(raw)
         rng = max(1.0, max_v - min_v)
@@ -586,7 +743,7 @@ class NativeTaskbarWidget:
         """Draws a sleek sparkline line-chart depicting recent usage trends."""
         self.canvas.create_rectangle(x, y, x + w, y + h, fill="#0b121e", outline="#1e293b", width=1)
         if not points or len(points) < 2:
-            points = [12, 18, 15, 32, 28, 48, 35, 62]
+            points = [0.0] * 8
         min_v = min(points)
         max_v = max(points)
         rng = max(1.0, float(max_v - min_v))
@@ -672,25 +829,28 @@ class NativeTaskbarWidget:
             team_pts = find_points("team")
             ind_pts = find_points("individual")
             if team_pts is None:
-                team_pts = [int(t_seed * f) for f in [0.2, 0.45, 0.35, 0.6, 0.55, 0.85, 0.7, 0.95]]
+                team_pts = zero_bins
             if ind_pts is None:
-                ind_pts = [int(t_seed * f) for f in [0.1, 0.25, 0.18, 0.35, 0.32, 0.55, 0.45, 0.65]]
+                ind_pts = zero_bins
+            team_name = h.get("team_name") or f"Team {os.environ.get('COMPUTERNAME', 'Local')}"
+            user_name = h.get("user_name") or os.environ.get("USERNAME") or os.environ.get("USER") or "Local User"
             return [
-                (team_pts, "#c084fc", "Synthesis2 (Team)"),
-                (ind_pts, "#38bdf8", "James Eckhardt (Individual)")
+                (team_pts, "#c084fc", f"{team_name} (Team)"),
+                (ind_pts, "#38bdf8", f"{user_name} (Individual)")
             ]
         elif p_key == "gemini":
             acct_pts = find_points("gemini")
             k1_pts = find_points("tok_gem_flash")
             k2_pts = find_points("tok_gem_pro")
             if acct_pts is None:
-                acct_pts = [int(t_seed * f) for f in [0.25, 0.35, 0.5, 0.4, 0.65, 0.55, 0.8, 0.9]]
+                acct_pts = zero_bins
             if k1_pts is None:
-                k1_pts = [int(t_seed * f) for f in [0.1, 0.15, 0.28, 0.22, 0.38, 0.3, 0.45, 0.55]]
+                k1_pts = zero_bins
             if k2_pts is None:
-                k2_pts = [int(t_seed * f) for f in [0.08, 0.12, 0.16, 0.14, 0.22, 0.2, 0.28, 0.32]]
+                k2_pts = zero_bins
+            acct_name = h.get("account_name") or h.get("account_id") or "Account Pool"
             return [
-                (acct_pts, "#60a5fa", "acidcow@gmail.com (Account)"),
+                (acct_pts, "#60a5fa", f"{acct_name} (Account)"),
                 (k1_pts, "#34d399", "Gemini 2.0 Flash"),
                 (k2_pts, "#f472b6", "Gemini 1.5 Pro")
             ]
@@ -713,17 +873,42 @@ class NativeTaskbarWidget:
             result = []
             for idx, m in enumerate(active_models[:3]):
                 m_name = m.get("model") or m.get("name") or "Local Model"
-                m_toks = int(m.get("tokens_today", 0))
                 color = colors[idx % len(colors)]
-                pts = [int(m_toks * f) for f in [0.1, 0.2, 0.15, 0.3, 0.25, 0.45, 0.35, 0.5]] if m_toks > 0 else zero_bins
+                pts = zero_bins
                 result.append((pts, color, m_name))
             return result if result else [(zero_bins, "#06b6d4", "Ollama")]
         elif p_key == "chatgpt":
-            pts = find_points("chatgpt") or [int(t_seed * f) for f in [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6]]
+            pts = find_points("chatgpt") or zero_bins
             return [(pts, "#10b981", "Default Project")]
         else:
-            co_pts = find_points("copilot") or [int(t_seed * f) for f in [0.15, 0.2, 0.18, 0.28, 0.24, 0.35, 0.3, 0.4]]
+            co_pts = find_points("copilot") or zero_bins
             return [(co_pts, "#06b6d4", "Enterprise E5")]
+
+    def calculate_card_height(self, p_key: str, is_expanded: bool, item: Optional[dict] = None) -> int:
+        """Calculates optimal card height based on expanded state, tracking mode, and child hierarchy."""
+        item = item or {}
+        h = item.get("hierarchy", {})
+        child_series = self._get_provider_child_series(p_key, item)
+        if self.view_mode in ("trends", "interval"):
+            if not is_expanded:
+                return 74
+            child_count = len(child_series)
+            child_height = child_count * 44
+            if self.hide_parent_chart_on_expand:
+                return 32 + child_height
+            return 76 + child_height
+        else:
+            if not is_expanded:
+                return 58
+            if p_key == "claude":
+                tracking_mode = getattr(self, "quota_tracking_mode", "individual")
+                if tracking_mode == "individual":
+                    return 66
+                return 106
+            elif p_key == "gemini":
+                num_toks = len(h.get("tokens", [])) or 2
+                return 62 + (num_toks * 36)
+            return 62
 
     def render_canvas(self):
         """Draws the accounts cards with click-to-expand multi-level bars, sparklines, and pin badges."""
@@ -787,34 +972,14 @@ class NativeTaskbarWidget:
 
             account_label = ""
             if p_key == "claude":
-                account_label = h.get("account_name") or "Synthesis2"
+                account_label = h.get("account_name") or h.get("team_name") or f"Team {os.environ.get('COMPUTERNAME', 'Pool')}"
             elif p_key == "gemini":
-                account_label = h.get("account_name") or "acidcow@gmail.com"
+                account_label = h.get("account_name") or h.get("account_id") or "Account Pool"
 
             child_series = self._get_provider_child_series(p_key, item)
 
             # Determine card height based on expanded state and view mode
-            if self.view_mode in ("trends", "interval"):
-                if not is_expanded:
-                    card_h = 74
-                else:
-                    child_count = len(child_series)
-                    child_height = child_count * 44
-                    if self.hide_parent_chart_on_expand:
-                        card_h = 32 + child_height
-                    else:
-                        card_h = 76 + child_height
-            else:
-                if not is_expanded:
-                    card_h = 58
-                else:
-                    if p_key == "claude":
-                        card_h = 106
-                    elif p_key == "gemini":
-                        num_toks = len(h.get("tokens", [])) or 2
-                        card_h = 62 + (num_toks * 36)
-                    else:
-                        card_h = 62
+            card_h = self.calculate_card_height(p_key, is_expanded, item)
 
             # Main Card Box
             self.canvas.create_rectangle(
@@ -921,7 +1086,8 @@ class NativeTaskbarWidget:
                             t_sess = team_info.get("session_remaining_pct", 44.0)
                             t_week = team_info.get("weekly_remaining_pct", 74.0)
                             self.canvas.create_rectangle(8, card_y + 26, card_w - 6, card_y + 62, fill="#131b2c", outline="#1e293b")
-                            self.canvas.create_text(14, card_y + 34, text="👥 Synthesis2 (Team Pool)", anchor="w", fill="#c084fc", font=self._get_font(7, "bold"))
+                            team_label = h.get("team_name") or f"Team {os.environ.get('COMPUTERNAME', 'Pool')}"
+                            self.canvas.create_text(14, card_y + 34, text=f"👥 {team_label} (Team Pool)", anchor="w", fill="#c084fc", font=self._get_font(7, "bold"))
                             self._draw_sub_bar(14, card_y + 42, card_w - 22, t_sess, "Team Sess:", th["accent"])
                             self._draw_sub_bar(14, card_y + 51, card_w - 22, t_week, "Team Wk:", th["accent2"])
 
@@ -943,7 +1109,8 @@ class NativeTaskbarWidget:
 
                     elif p_key == "gemini":
                         self.canvas.create_rectangle(8, card_y + 26, card_w - 6, card_y + 58, fill="#0d1b30", outline="#1e293b")
-                        self.canvas.create_text(14, card_y + 34, text="🌐 acidcow@gmail.com (Account Pool)", anchor="w", fill="#60a5fa", font=self._get_font(7, "bold"))
+                        acct_label = h.get("account_name") or h.get("account_id") or "Account Pool"
+                        self.canvas.create_text(14, card_y + 34, text=f"🌐 {acct_label}", anchor="w", fill="#60a5fa", font=self._get_font(7, "bold"))
                         self._draw_sub_bar(14, card_y + 42, card_w - 22, item.get("session_balance_remaining_pct", 88.0), "Account:", "#3b82f6")
 
                         sub_y = card_y + 62
@@ -1215,8 +1382,6 @@ class NativeTaskbarWidget:
         for rk in ("sess_quota", "sess_reset", "week_quota", "week_reset"):
             if rk in lines:
                 self.flyout_labels[rk].configure(text=lines[rk]["text"], fg=lines[rk]["fg"])
-            if rk in lines:
-                self.flyout_labels[rk].configure(text=lines[rk]["text"], fg=lines[rk]["fg"])
 
         self.flyout_labels["tokens_info"].configure(
             text=f"• Tokens: {tokens_today:,} today  |  {tokens_week:,} weekly",
@@ -1238,7 +1403,7 @@ class NativeTaskbarWidget:
             self.flyout_window.withdraw()
 
     def update_loop(self):
-        """Polls every 2 seconds and refreshes the canvas UI."""
+        """Polls periodically based on poll_interval_ms and refreshes the canvas UI."""
         if not self.is_running:
             return
 
@@ -1249,7 +1414,7 @@ class NativeTaskbarWidget:
 
         threading.Thread(target=_worker, daemon=True).start()
         if self.root and self.is_running:
-            self.root.after(2000, self.update_loop)
+            self.root.after(self.poll_interval_ms, self.update_loop)
 
     def _apply_update(self, c, p):
         if c:

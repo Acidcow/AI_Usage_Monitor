@@ -12,6 +12,8 @@ window.App = {
   chartGranularity: 5,
   chartMode: 'interval_delta',
   chartWindow: '24h',
+  chartBreakdown: 'locality',
+  chartScopeFilter: 'all',
   refreshCadenceSeconds: 30,
   hierarchyGroupMode: 'all', // 'all' | 'platforms' | 'groups' | 'filtered'
   filteredItemIds: new Set(['claude', 'gemini', 'chatgpt', 'ollama', 'copilot', 'group-production', 'group-development', 'group-research']),
@@ -70,6 +72,37 @@ window.App = {
 
     // Start background auto-refresh respecting user-configured cadence (minimum 30s)
     this.resetPollingInterval(this.refreshCadenceSeconds || 30);
+
+    // Setup ResizeObserver for responsive non-stretching SVG charts
+    if (window.ResizeObserver) {
+      let resizeTimer = null;
+      const ro = new ResizeObserver(() => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (this._lastTimeseriesData) {
+            this.renderSvgChart(this._lastTimeseriesData);
+          }
+          if (this.lastCompData) {
+            Object.keys(this.expandedHierarchy).forEach(k => {
+              if (this.expandedHierarchy[k]) {
+                const bucketMinutes = this.chartGranularity || 5;
+                const mode = this.chartMode || "interval_delta";
+                const cachedData = this.cachedHierarchicalTrends[`${k}_${this.trendWindow}_${bucketMinutes}_${mode}_${this.currentScope}`]
+                  || this.cachedHierarchicalTrends[`${k}_${this.trendWindow}_${this.currentScope}`]
+                  || Object.values(this.cachedHierarchicalTrends).find(c => c && c.provider === k);
+                if (cachedData) {
+                  this.renderMultiSeriesTrendChart(`trend-chart-svg-${k}`, cachedData, k);
+                }
+              }
+            });
+          }
+        }, 50);
+      });
+      const chartCont = document.getElementById("svg-chart-container");
+      if (chartCont) ro.observe(chartCont);
+      const gaugesCont = document.getElementById("container-usage-gauges");
+      if (gaugesCont) ro.observe(gaugesCont);
+    }
   },
 
   resetPollingInterval(seconds) {
@@ -102,34 +135,92 @@ window.App = {
 
   changeChartGranularity(val) {
     this.chartGranularity = parseInt(val, 10) || 5;
+    this.cachedHierarchicalTrends = {};
+    this._lastLocalWindowUpdateTs = Date.now();
     const gSelect = document.getElementById("chart-granularity-select");
     const tSelect = document.getElementById("trend-granularity-select");
     if (gSelect) gSelect.value = this.chartGranularity;
     if (tSelect) tSelect.value = this.chartGranularity;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_chart_granularity: this.chartGranularity } })
+    }).catch(() => {});
     this.loadUsageData();
   },
 
   changeChartMode(mode) {
     this.chartMode = mode === "cumulative" ? "cumulative" : "interval_delta";
+    this.cachedHierarchicalTrends = {};
+    this._lastLocalWindowUpdateTs = Date.now();
     const mSelect = document.getElementById("chart-mode-select");
     const tSelect = document.getElementById("trend-mode-select");
     if (mSelect) mSelect.value = this.chartMode;
     if (tSelect) tSelect.value = this.chartMode;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_chart_mode: this.chartMode } })
+    }).catch(() => {});
     this.loadUsageData();
   },
 
   changeChartWindow(win) {
     this.chartWindow = win || "24h";
     this.trendWindow = this.chartWindow;
+    this.cachedHierarchicalTrends = {};
+    this._lastLocalWindowUpdateTs = Date.now();
     const wSelect = document.getElementById("chart-window-select");
     const tSelect = document.getElementById("trend-window-select");
+    const cfgWinSelect = document.getElementById("cfg-default-trend-window");
     if (wSelect) wSelect.value = this.chartWindow;
     if (tSelect) tSelect.value = this.chartWindow;
+    if (cfgWinSelect) cfgWinSelect.value = this.chartWindow;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        settings: {
+          active_trend_window: this.chartWindow,
+          default_trend_window: this.chartWindow
+        }
+      })
+    }).catch(() => {});
     this.loadUsageData();
   },
 
   changeTrendGranularity(val) {
     this.changeChartGranularity(val);
+  },
+
+  changeChartBreakdown(val) {
+    this.chartBreakdown = val || 'locality';
+    const bSel = document.getElementById("chart-breakdown-select");
+    if (bSel) bSel.value = this.chartBreakdown;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_chart_breakdown: this.chartBreakdown } })
+    }).catch(() => {});
+    this.loadUsageData();
+  },
+
+  changeChartScopeFilter(val) {
+    this.chartScopeFilter = val || 'all';
+    const sSel = document.getElementById("chart-scope-filter-select");
+    if (sSel) sSel.value = this.chartScopeFilter;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { active_chart_scope_filter: this.chartScopeFilter } })
+    }).catch(() => {});
+    this.loadUsageData();
+  },
+
+  toggleTaxonomyDrawer() {
+    const drawer = document.getElementById("unified-taxonomy-drawer");
+    if (!drawer) return;
+    drawer.style.display = drawer.style.display === "none" ? "block" : "none";
   },
 
   changeTrendMode(mode) {
@@ -207,20 +298,72 @@ window.App = {
 
   async loadUsageData() {
     try {
+      // Bidirectional alignment with Mini Widget settings (AIUM-903)
+      if (!this._lastLocalWindowUpdateTs || (Date.now() - this._lastLocalWindowUpdateTs > 2500)) {
+        try {
+          const stRes = await fetch("/api/settings");
+          if (stRes && stRes.ok) {
+            const st = await stRes.json();
+            this.appSettings = st;
+            const remoteWin = st.active_trend_window || st.default_trend_window;
+            if (remoteWin && remoteWin !== this.chartWindow) {
+              this.chartWindow = remoteWin;
+              this.trendWindow = remoteWin;
+              this.cachedHierarchicalTrends = {};
+              const wSel = document.getElementById("chart-window-select");
+              const tSel = document.getElementById("trend-window-select");
+              const cfgWinSel = document.getElementById("cfg-default-trend-window");
+              if (wSel) wSel.value = remoteWin;
+              if (tSel) tSel.value = remoteWin;
+              if (cfgWinSel) cfgWinSel.value = remoteWin;
+            }
+            if (st.active_chart_granularity && Number(st.active_chart_granularity) !== Number(this.chartGranularity)) {
+              this.chartGranularity = parseInt(st.active_chart_granularity, 10) || 5;
+              const gSel = document.getElementById("chart-granularity-select");
+              const tgSel = document.getElementById("trend-granularity-select");
+              if (gSel) gSel.value = this.chartGranularity;
+              if (tgSel) tgSel.value = this.chartGranularity;
+            }
+            if (st.active_chart_mode && st.active_chart_mode !== this.chartMode) {
+              this.chartMode = st.active_chart_mode;
+              const mSel = document.getElementById("chart-mode-select");
+              const tmSel = document.getElementById("trend-mode-select");
+              if (mSel) mSel.value = this.chartMode;
+              if (tmSel) tmSel.value = this.chartMode;
+            }
+            if (st.widget_view_mode && (st.widget_view_mode === "balances" || st.widget_view_mode === "trends") && st.widget_view_mode !== this.dashboardViewMode) {
+              this.dashboardViewMode = st.widget_view_mode;
+              const btnBal = document.getElementById("view-mode-btn-balances");
+              const btnTrd = document.getElementById("view-mode-btn-trends");
+              const trendWinCtrl = document.getElementById("trend-window-control");
+              if (btnBal) btnBal.className = this.dashboardViewMode === "balances" ? "btn btn-sm btn-primary" : "btn btn-sm btn-secondary";
+              if (btnTrd) btnTrd.className = this.dashboardViewMode === "trends" ? "btn btn-sm btn-primary" : "btn btn-sm btn-secondary";
+              if (trendWinCtrl) trendWinCtrl.style.display = this.dashboardViewMode === "trends" ? "flex" : "none";
+            }
+          }
+        } catch (_syncErr) {}
+      }
+
       const provSelect = document.getElementById("filter-session-provider");
       const providerParam = provSelect && provSelect.value ? `?provider=${provSelect.value}` : '';
+
+      // Invalidate cached hierarchical trends so refresh/poll interrogates live backend data
+      this.cachedHierarchicalTrends = {};
 
       const bucketMinutes = this.chartGranularity || 5;
       const chartMode = this.chartMode || "interval_delta";
       const chartWindow = this.chartWindow || "24h";
+      const chartBreakdown = this.chartBreakdown || "locality";
+      const chartScopeFilter = this.chartScopeFilter || "all";
 
-      const [summaryRes, providersRes, sessionsRes, errorsRes, timeseriesRes, compRes] = await Promise.all([
+      const [summaryRes, providersRes, sessionsRes, errorsRes, timeseriesRes, compRes, cacheRes] = await Promise.all([
         fetch("/api/usage/summary"),
         fetch("/api/providers"),
         fetch(`/api/usage/sessions${providerParam}`),
         fetch("/api/diagnostics/errors?limit=30"),
-        fetch(`/api/usage/timeseries?window=${chartWindow}&bucket_minutes=${bucketMinutes}&mode=${chartMode}&scope=${this.currentScope || 'individual'}`),
-        fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}&filter_visibility=true`)
+        fetch(`/api/usage/timeseries?window=${chartWindow}&bucket_minutes=${bucketMinutes}&mode=${chartMode}&scope=${this.currentScope || 'individual'}&breakdown=${encodeURIComponent(chartBreakdown)}&scope_filter=${encodeURIComponent(chartScopeFilter)}`),
+        fetch(`/api/usage/comparison?scope=${this.currentScope || 'individual'}&filter_visibility=true`),
+        fetch("/api/analytics/cache-efficiency?provider=claude&hours=24")
       ]);
 
       let compData = null;
@@ -240,6 +383,11 @@ window.App = {
         }
       }
 
+      if (cacheRes && cacheRes.ok) {
+        const cacheData = await cacheRes.json();
+        this.renderCacheEfficiency(cacheData);
+      }
+
       if (sessionsRes.ok) {
         const sessions = await sessionsRes.json();
         this.rawSessions = sessions || [];
@@ -253,10 +401,77 @@ window.App = {
 
       if (timeseriesRes.ok) {
         const timeseries = await timeseriesRes.json();
+        this._lastTimeseriesData = timeseries;
         this.renderSvgChart(timeseries);
       }
     } catch (err) {
       console.warn("[App] Polling error:", err);
+    }
+  },
+
+  renderCacheEfficiency(cacheData) {
+    if (!cacheData) return;
+    const hitPct = Number(cacheData.cache_hit_ratio_pct || 0).toFixed(1);
+    const netSavings = Number(cacheData.net_cache_savings_usd || 0);
+    const rawTtl = cacheData.ttl_status;
+    const isTtlObj = rawTtl && typeof rawTtl === "object";
+    const ttlRem = isTtlObj
+      ? Number(rawTtl.ttl_remaining_seconds || 0)
+      : Number(cacheData.ttl_seconds_remaining || 0);
+    const isWarm = isTtlObj ? !!rawTtl.is_warm : (ttlRem > 0 || rawTtl === "WARM");
+    const ttlStatus = isTtlObj
+      ? (isWarm ? "WARM" : (rawTtl.last_touch_utc ? "EXPIRED" : "INACTIVE"))
+      : String(rawTtl || "INACTIVE");
+    const grade = String(cacheData.efficiency_grade || "N/A");
+    const isBreakEven = !!cacheData.break_even_achieved;
+
+    const savingsFormatted = `${netSavings >= 0 ? "+" : "-"}$${Math.abs(netSavings).toFixed(4)}`;
+    const ttlFormatted = isTtlObj && rawTtl.ttl_formatted && isWarm
+      ? rawTtl.ttl_formatted
+      : (ttlRem > 0 ? `${ttlRem}s` : (ttlStatus === "EXPIRED" ? "Expired" : "Idle"));
+
+    // Dashboard Gauge Banner Elements
+    const hitEl = document.getElementById("val-cache-hit-ratio");
+    if (hitEl) hitEl.innerText = `${hitPct}%`;
+
+    const ttlEl = document.getElementById("val-cache-ttl-remaining");
+    if (ttlEl) ttlEl.innerText = ttlFormatted;
+
+    const savEl = document.getElementById("val-cache-net-savings");
+    if (savEl) {
+      savEl.innerText = savingsFormatted;
+      savEl.style.color = netSavings >= 0 ? "var(--accent-emerald)" : "#fbbf24";
+    }
+
+    const ttlBadge = document.getElementById("val-cache-ttl-badge");
+    if (ttlBadge) {
+      ttlBadge.innerText = `TTL: ${ttlStatus === "WARM" ? `WARM (${ttlRem}s)` : ttlStatus}`;
+    }
+
+    const gradeBadge = document.getElementById("val-cache-grade-badge");
+    if (gradeBadge) {
+      gradeBadge.innerText = `Grade: ${grade}`;
+    }
+
+    // Session Timeline Summary Strip Elements
+    const tlHit = document.getElementById("timeline-cache-hit-ratio");
+    if (tlHit) tlHit.innerText = `${hitPct}%`;
+
+    const tlTtl = document.getElementById("timeline-cache-ttl");
+    if (tlTtl) tlTtl.innerText = `${ttlStatus}${ttlRem > 0 ? ` (${ttlRem}s)` : ""}`;
+
+    const tlSav = document.getElementById("timeline-net-savings");
+    if (tlSav) {
+      tlSav.innerText = savingsFormatted;
+      tlSav.style.color = netSavings >= 0 ? "var(--accent-emerald)" : "#fbbf24";
+    }
+
+    const tlGrade = document.getElementById("timeline-cache-grade-badge");
+    if (tlGrade) tlGrade.innerText = `Grade: ${grade}`;
+
+    const tlBreakEven = document.getElementById("timeline-break-even-status");
+    if (tlBreakEven) {
+      tlBreakEven.innerText = isBreakEven ? "Break-Even Achieved (Read Savings > Write Overhead)" : "Warming Up Cache";
     }
   },
 
@@ -573,8 +788,12 @@ window.App = {
                       ${key === 'ollama' ? 'LOCAL HARDWARE INFERENCE' : (isIndividualMode ? '1:1 INDIVIDUAL DIRECT TELEMETRY' : ('Active View: ' + (comp.active_scope || 'individual').toUpperCase()))}
                     </span>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #94a3b8; font-family: var(--font-mono);">
+                  <div style="display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: #94a3b8; font-family: var(--font-mono); flex-wrap: wrap;">
                     <span>Window: <strong style="color: #38bdf8;">${this.trendWindow.toUpperCase()}</strong></span>
+                    <span>•</span>
+                    <span>Bucket: <strong style="color: #c084fc;">${this.chartGranularity || 5}m</strong></span>
+                    <span>•</span>
+                    <span>Mode: <strong style="color: #34d399;">${this.chartMode === 'cumulative' ? 'Cumulative Run' : 'Delta Bursts'}</strong></span>
                   </div>
                 </div>
 
@@ -592,6 +811,7 @@ window.App = {
                       const mCol = m.color || ["#c084fc", "#34d399", "#38bdf8", "#f59e0b"][mIdx % 4];
                       const mPts = this.getChildRealPoints('ollama', m.name || m.model);
                       const spk = this.generateInlineSparkline(mPts, mCol);
+                      const safeModelId = (m.name || m.model || `mod_${mIdx}`).replace(/[^a-zA-Z0-9_-]/g, '_');
                       return `
                         <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 10px 12px;">
                           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -606,7 +826,7 @@ window.App = {
                           <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 6px;">
                             Params: <strong style="color: #e2e8f0;">${m.parameter_size || 'Unknown'}</strong> • Disk: ${m.size || 'N/A'} ${m.vram_size_gb ? ' • VRAM: ' + m.vram_size_gb + ' GB' : ''}
                           </div>
-                          <div style="margin-bottom: 6px;">${spk}</div>
+                          <div id="sparkline-ollama-${safeModelId}" style="margin-bottom: 6px;">${spk}</div>
                           <div style="font-size: 0.78rem; color: #e2e8f0; margin-bottom: 2px;">
                             <strong>Today:</strong> <span style="color: var(--accent-cyan); font-weight: 700; font-family: var(--font-mono);">${Number(m.tokens_today || 0).toLocaleString()} tok</span>
                           </div>
@@ -624,9 +844,9 @@ window.App = {
                           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #60a5fa; flex-shrink: 0;"></span>
                           <strong style="color: #60a5fa; font-size: 0.82rem;">🌐 Google Account Umbrella</strong>
                         </span>
-                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'acidcow@gmail.com'}</span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.account_name || 'local@workstation.local'}</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-gemini-gemini_account" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('gemini', 'gemini_account'), '#60a5fa')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -644,6 +864,7 @@ window.App = {
                     ${h.tokens.map((t, tIdx) => {
                       const tCol = ["#34d399", "#f472b6", "#fbbf24", "#38bdf8"][tIdx % 4];
                       const tPts = this.getChildRealPoints('gemini', t.id);
+                      const safeTokId = (t.id || `tok_${tIdx}`).replace(/[^a-zA-Z0-9_-]/g, '_');
                       return `
                         <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px 12px;">
                           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -653,7 +874,7 @@ window.App = {
                             </span>
                           </div>
                           <div style="font-size: 0.68rem; color: var(--text-dim); margin-bottom: 6px;">${this.escapeHtml(t.masked_key)} • ${this.escapeHtml(t.description || 'API Token')}</div>
-                          <div style="margin-bottom: 6px;">${this.generateInlineSparkline(tPts, tCol)}</div>
+                          <div id="sparkline-gemini-${safeTokId}" style="margin-bottom: 6px;">${this.generateInlineSparkline(tPts, tCol)}</div>
                           <div style="font-size: 0.75rem; color: #e2e8f0; margin-bottom: 2px;">
                             <strong>Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${t.session_balance_remaining_pct}% rem</span>
                           </div>
@@ -674,13 +895,14 @@ window.App = {
                           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #38bdf8; flex-shrink: 0;"></span>
                           <strong style="color: #38bdf8; font-size: 0.82rem;">👤 Individual Member (You)</strong>
                         </span>
-                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'James Eckhardt'}</span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.user_name || 'Local User'}</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-claude-claude_individual" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_individual'), '#38bdf8')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
-                        <strong>5h Session:</strong> <span style="color: #38bdf8; font-weight: 700;">${(item.session_tokens_available !== undefined ? item.session_tokens_available : Math.round(((ind.session_remaining_pct ?? 100) / 100) * (item.session_tokens_limit || 200000))).toLocaleString()} tok</span> left (${ind.session_remaining_pct ?? 100}% rem, ${(item.session_tokens_used || 0).toLocaleString()} used)
+                        <strong>5h Session:</strong> <span style="color: ${(ind.session_remaining_pct === 0 || item.session_tokens_available === 0) ? '#f87171' : '#38bdf8'}; font-weight: 700;">${(item.session_tokens_available !== undefined ? item.session_tokens_available : Math.round(((ind.session_remaining_pct ?? 100) / 100) * (item.session_tokens_limit || 200000))).toLocaleString()} tok</span> left (${ind.session_remaining_pct ?? 100}% rem, ${(item.session_tokens_used || 0).toLocaleString()} used)
+                        ${(ind.session_remaining_pct === 0 || item.session_tokens_available === 0) ? '<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 0.65rem; margin-left: 6px;">⚠️ Exhausted</span>' : ''}
                       </div>
                       <div style="font-size: 0.72rem; color: #38bdf8; margin-bottom: 4px; font-family: var(--font-mono);">
                         🕒 Resets in: <strong>${item.session_reset_str || ind.session_reset_str || '5h 0m'}</strong> (auto-refills upon expiry)
@@ -701,9 +923,9 @@ window.App = {
                           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #c084fc; flex-shrink: 0;"></span>
                           <strong style="color: #c084fc; font-size: 0.82rem;">👥 Team Workspace Pool</strong>
                         </span>
-                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Synthesis2'}</span>
+                        <span style="font-size: 0.68rem; color: var(--text-dim);">${h.team_name || 'Local Workstation'}</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-claude-claude_team" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_team'), '#c084fc')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -718,7 +940,7 @@ window.App = {
                     </div>
 
                     <!-- 3. Department Division -->
-                    <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
+                    <div style="background: rgba(160, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
                       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <span style="display: flex; align-items: center; gap: 5px;">
                           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #34d399; flex-shrink: 0;"></span>
@@ -726,7 +948,7 @@ window.App = {
                         </span>
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${dept.active_seats || 14} active seats</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-claude-claude_department" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_department'), '#34d399')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -749,7 +971,7 @@ window.App = {
                         </span>
                         <span style="font-size: 0.68rem; color: var(--text-dim);">${ent.plan_type || 'Enterprise'}</span>
                       </div>
-                      <div style="margin-bottom: 6px;">
+                      <div id="sparkline-claude-claude_enterprise" style="margin-bottom: 6px;">
                         ${this.generateInlineSparkline(this.getChildRealPoints('claude', 'claude_enterprise'), '#fbbf24')}
                       </div>
                       <div style="font-size: 0.76rem; color: #e2e8f0; margin-bottom: 3px;">
@@ -765,6 +987,58 @@ window.App = {
                     `}
                   `)}
                 </div>
+
+                ${((item.accounts && item.accounts.length > 0) || (item.instances && item.instances.length > 0) || item.source_breakdown) ? `
+                  <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(255, 255, 255, 0.1); display: flex; flex-direction: column; gap: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                      <span style="font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: #94a3b8;">
+                        Distinct Accounts & Hardware Instances (${(item.accounts || []).length} Accounts • ${(item.instances || []).length} Instances)
+                      </span>
+                      ${item.source_breakdown ? `
+                        <div style="display: flex; gap: 6px; align-items: center; font-size: 0.7rem; font-family: var(--font-mono);">
+                          <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399;" title="Direct upstream API calls">🌐 Direct: ${Number(item.source_breakdown.direct?.tokens || 0).toLocaleString()}</span>
+                          <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;" title="Transparent Proxy (Port 8766)">⚡ Proxy: ${Number(item.source_breakdown.proxy?.tokens || 0).toLocaleString()}</span>
+                          <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;" title="Bridge Emulator (Port 11435)">🌉 Bridge: ${Number(item.source_breakdown.emulator?.tokens || 0).toLocaleString()}</span>
+                          <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;" title="Local Log Scanner">📑 Log: ${Number(item.source_breakdown.log_scanner?.tokens || 0).toLocaleString()}</span>
+                        </div>
+                      ` : ''}
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
+                      ${(item.accounts || []).map(acc => `
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
+                          <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+                            <span style="font-size: 0.8rem;">👤</span>
+                            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                              <div style="font-size: 0.75rem; color: #e2e8f0; font-weight: 600;" title="${this.escapeHtml(acc.account_id)}">${this.escapeHtml(acc.account_id)}</div>
+                              <div style="font-size: 0.65rem; color: var(--text-dim);">${acc.event_count || 0} calls</div>
+                            </div>
+                          </div>
+                          <div style="text-align: right; font-family: var(--font-mono); font-size: 0.74rem;">
+                            <div style="color: #38bdf8; font-weight: 700;">${Number(acc.tokens_today || 0).toLocaleString()} tok</div>
+                            <div style="color: var(--text-dim); font-size: 0.66rem;">$${Number(acc.cost_today_usd || 0).toFixed(3)}</div>
+                          </div>
+                        </div>
+                      `).join('')}
+
+                      ${(item.instances || []).map(inst => `
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
+                          <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+                            <span style="font-size: 0.8rem;">🖥️</span>
+                            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                              <div style="font-size: 0.75rem; color: #a78bfa; font-weight: 600;" title="${this.escapeHtml(inst.instance_id)}">${this.escapeHtml(inst.instance_id)}</div>
+                              <div style="font-size: 0.65rem; color: var(--text-dim);">${inst.event_count || 0} runs</div>
+                            </div>
+                          </div>
+                          <div style="text-align: right; font-family: var(--font-mono); font-size: 0.74rem;">
+                            <div style="color: #34d399; font-weight: 700;">${Number(inst.tokens_today || 0).toLocaleString()} tok</div>
+                            <div style="color: var(--text-dim); font-size: 0.66rem;">$${Number(inst.cost_today_usd || 0).toFixed(3)}</div>
+                          </div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                ` : ''}
               </td>
             </tr>
           `;
@@ -795,6 +1069,17 @@ window.App = {
           return { key: p, label: displayNames[p] || p, color: provColors[p] || "#38bdf8", points: pPts };
         });
 
+        const totalEstateTokens = comp.total_tokens_today || Object.values(comp.providers || {}).reduce((acc, p) => acc + (p.tokens_today || 0), 0) || 1;
+        let sharePctDisplay = "0%";
+        if (comp.providers && totalEstateTokens > 0 && grpTokens > 0) {
+          const rawPct = (grpTokens / totalEstateTokens) * 100;
+          if (rawPct > 0 && rawPct < 1) {
+            sharePctDisplay = "<1%";
+          } else {
+            sharePctDisplay = `${Math.min(100, Math.round(rawPct))}%`;
+          }
+        }
+
         html += `
           <tr style="background: rgba(14, 165, 233, 0.04); border-left: 2px solid #06b6d4;">
             <td>
@@ -816,7 +1101,7 @@ window.App = {
               ${Number(grpTokens).toLocaleString()}
             </td>
             <td style="font-family: var(--font-mono); color: var(--accent-cyan); font-weight: 600;">
-              ${comp.providers ? Math.round((grpTokens / Math.max(1, (comp.summary?.total_tokens_today || 10000))) * 100) : 0}%
+              ${sharePctDisplay}
             </td>
             <td>
               <div style="display: flex; align-items: center; gap: 8px;">
@@ -899,11 +1184,12 @@ window.App = {
     const hubGeminiStatus = document.getElementById("hub-gemini-status");
     if (providers["gemini"]) {
       const gActive = providers["gemini"].status === "ACTIVE";
-      if (geminiDot) geminiDot.className = `dot ${gActive ? 'dot-green' : 'dot-gray'}`;
-      if (geminiStatusText) geminiStatusText.innerText = gActive ? "Active" : "Ready";
+      const isGeminiPro = (providers["gemini"].plan_type || '').includes("Gemini Pro");
+      if (geminiDot) geminiDot.className = `dot ${gActive ? 'dot-green' : (providers["gemini"].status === 'ERROR' ? 'dot-red' : 'dot-gray')}`;
+      if (geminiStatusText) geminiStatusText.innerText = isGeminiPro ? "Gemini Pro (Active)" : (gActive ? "Active" : (providers["gemini"].status || "Ready"));
       if (hubGeminiStatus) {
-        hubGeminiStatus.innerText = providers["gemini"].status || "Ready";
-        hubGeminiStatus.style.color = gActive ? "#34d399" : "#60a5fa";
+        hubGeminiStatus.innerText = isGeminiPro ? "Active (Gemini Pro)" : (providers["gemini"].status || "Ready");
+        hubGeminiStatus.style.color = gActive ? "#34d399" : (providers["gemini"].status === "ERROR" ? "#f87171" : "#60a5fa");
       }
     }
 
@@ -949,11 +1235,15 @@ window.App = {
     const svg = document.getElementById("token-velocity-chart");
     const peakInfo = document.getElementById("chart-peak-info");
     const singleProvNotice = document.getElementById("chart-single-provider-notice");
+    const legendContainer = document.getElementById("chart-legend-container");
     if (!svg) return;
 
     const hiddenPlatforms = (this.appSettings?.estate_visibility?.hidden_platforms || []).map(p => p.toLowerCase());
     const allKnownPlatforms = ["claude", "gemini", "chatgpt", "ollama", "copilot"];
-    const platforms = allKnownPlatforms.filter(p => !hiddenPlatforms.includes(p));
+    const activeBreakdown = timeseriesData?.breakdown || this.chartBreakdown || "locality";
+    const breakdownSeries = Array.isArray(timeseriesData?.breakdown_series) ? timeseriesData.breakdown_series : [];
+
+    let platforms = allKnownPlatforms.filter(p => !hiddenPlatforms.includes(p));
     const platformColors = {
       claude: "#f59e0b",
       gemini: "#3b82f6",
@@ -971,14 +1261,51 @@ window.App = {
       total: "Total Combined"
     };
 
-    allKnownPlatforms.forEach(p => {
-      const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
-      if (pill) {
-        pill.style.display = hiddenPlatforms.includes(p) ? "none" : "inline-flex";
-      }
+    const seriesList = timeseriesData?.series || [];
+    const seriesMap = {};
+    seriesList.forEach(s => {
+      seriesMap[s.id] = s;
+    });
+    breakdownSeries.forEach(s => {
+      seriesMap[s.id] = s;
     });
 
-    const seriesList = timeseriesData?.series || [];
+    if (activeBreakdown !== "consolidated" && breakdownSeries.length > 0) {
+      platforms = [];
+      breakdownSeries.forEach(bs => {
+        const prov = String(bs.provider || "").toLowerCase();
+        if (prov && hiddenPlatforms.includes(prov)) return;
+        platforms.push(bs.id);
+        platformColors[bs.id] = bs.color || "#38bdf8";
+        platformNames[bs.id] = bs.label || bs.name || bs.id;
+      });
+    }
+
+    if (legendContainer) {
+      const renderPillsList = [...platforms, "total"];
+      legendContainer.innerHTML = renderPillsList.map(pKey => {
+        const col = platformColors[pKey] || "#38bdf8";
+        const name = platformNames[pKey] || pKey;
+        const s = seriesMap[pKey];
+        const pTok = s ? (s.total_tokens || 0) : 0;
+        const tokText = pTok > 0 ? (pTok >= 1000 ? `${(pTok / 1000).toFixed(1)}k` : `${pTok} t`) : "0 t (idle)";
+        const isTot = pKey === "total";
+        const badgeStyle = isTot
+          ? "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(6, 182, 212, 0.25); color: #06b6d4;"
+          : (pTok > 0
+            ? "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(255, 255, 255, 0.15); color: #f8fafc;"
+            : "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 600; background: rgba(255, 255, 255, 0.05); color: #64748b;");
+        const borderStyle = isTot ? `1px dashed ${col}` : `1px solid ${col}55`;
+        return `
+          <div class="chart-legend-pill" data-platform="${this.escapeHtml(pKey)}" style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #f8fafc; cursor: pointer; padding: 2px 8px; border-radius: 4px; background: rgba(15, 23, 42, 0.7); border: ${borderStyle};">
+            <span style="display: inline-block; width: 14px; height: 3px; background: ${col}; border-radius: 2px;"></span>
+            <strong>${this.escapeHtml(name)}</strong>
+            <span class="legend-token-badge" style="${badgeStyle}">${tokText}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
     const labels = timeseriesData?.labels || [];
     const keys = timeseriesData?.keys || [];
     const bucketMin = timeseriesData?.bucket_minutes || this.chartGranularity || 5;
@@ -997,11 +1324,6 @@ window.App = {
       return;
     }
 
-    const seriesMap = {};
-    seriesList.forEach(s => {
-      seriesMap[s.id] = s;
-    });
-
     let maxTokens = 50;
     seriesList.forEach(s => {
       const pts = s.points || [];
@@ -1014,30 +1336,6 @@ window.App = {
       const modeSuffix = chartMode === "cumulative" ? "total run" : `/${bucketMin}m`;
       peakInfo.innerText = `Peak: ${maxTokens.toLocaleString()} tokens ${modeSuffix}`;
     }
-
-    // Update legend pill badges with exact tokens
-    platforms.concat(["total"]).forEach(p => {
-      const pill = document.querySelector(`.chart-legend-pill[data-platform="${p}"]`);
-      if (pill) {
-        let b = pill.querySelector(".legend-token-badge");
-        if (!b) {
-          b = document.createElement("span");
-          b.className = "legend-token-badge";
-          pill.appendChild(b);
-        }
-        const s = seriesMap[p];
-        const pTok = s ? (s.total_tokens || 0) : 0;
-        if (pTok > 0) {
-          b.innerText = pTok >= 1000 ? `${(pTok / 1000).toFixed(1)}k` : `${pTok} t`;
-          b.style.cssText = p === "total"
-            ? "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(6, 182, 212, 0.25); color: #06b6d4;"
-            : "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 700; background: rgba(255, 255, 255, 0.15); color: #f8fafc;";
-        } else {
-          b.innerText = "0 t (idle)";
-          b.style.cssText = "font-family: var(--font-mono); font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 600; background: rgba(255, 255, 255, 0.05); color: #64748b;";
-        }
-      }
-    });
 
     // Check single active platform dominance
     const activePlatforms = platforms.filter(p => (seriesMap[p]?.total_tokens || 0) > 0);
@@ -1053,8 +1351,10 @@ window.App = {
       }
     }
 
-    // SVG ViewBox dimensions: 900 x 200
-    const width = 900;
+    // Responsive SVG ViewBox dimensions: measured from real container width
+    const chartContainer = document.getElementById("svg-chart-container");
+    const cWidth = chartContainer ? (chartContainer.clientWidth || chartContainer.getBoundingClientRect().width) : 0;
+    const width = Math.max(cWidth > 40 ? Math.floor(cWidth - 20) : 1000, 360);
     const height = 200;
     const padL = 60;
     const padR = 25;
@@ -1064,13 +1364,16 @@ window.App = {
     const plotH = height - padT - padB;
     const step = numPoints > 1 ? plotW / (numPoints - 1) : plotW;
 
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.removeAttribute("preserveAspectRatio");
+
     // Grid lines (3 levels: 0%, 50%, 100%)
     let gridHtml = "";
     [0, 0.5, 1.0].forEach(ratio => {
       const y = padT + (plotH * (1.0 - ratio));
       const val = Math.round(maxTokens * ratio);
       gridHtml += `
-        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="4,4"/>
+        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.07)" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="4,4"/>
         <text x="${padL - 8}" y="${y + 4}" fill="#64748b" font-size="9" text-anchor="end" font-family="monospace">${val >= 1000 ? (val/1000).toFixed(0)+'k' : val}</text>
       `;
     });
@@ -1081,13 +1384,14 @@ window.App = {
       ? keys.map(k => this.formatLocalTime(k))
       : labels;
 
-    const labelInterval = Math.max(1, Math.ceil(numPoints / 10));
+    const maxLabels = Math.max(5, Math.floor(plotW / 85));
+    const labelInterval = Math.max(1, Math.ceil(numPoints / maxLabels));
     localLabels.forEach((labelStr, idx) => {
       const showLabel = (idx % labelInterval === 0) || (idx === numPoints - 1);
       if (showLabel) {
         const x = padL + (idx * step);
         axisHtml += `
-          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 4}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 4}" stroke="rgba(255,255,255,0.2)" stroke-width="1" vector-effect="non-scaling-stroke"/>
           <text x="${x}" y="${height - 8}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${labelStr}</text>
         `;
       }
@@ -1184,10 +1488,10 @@ window.App = {
     `;
 
     this._setupChartLegendInteractivity();
-    this._setupChartHoverCrosshair(localLabels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin);
+    this._setupChartHoverCrosshair(localLabels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin, width);
   },
 
-  _setupChartHoverCrosshair(labels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin) {
+  _setupChartHoverCrosshair(labels, keys, seriesMap, padL, plotW, step, platforms, platformNames, platformColors, chartMode, bucketMin, width = 1000) {
     const container = document.getElementById("svg-chart-container");
     const svg = document.getElementById("token-velocity-chart");
     const crosshair = document.getElementById("chart-crosshair-line");
@@ -1197,7 +1501,7 @@ window.App = {
     container.onmousemove = (e) => {
       const rect = svg.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
-      const svgX = (mouseX / rect.width) * 900;
+      const svgX = (mouseX / rect.width) * width;
 
       if (svgX < padL - 10 || svgX > padL + plotW + 10) {
         crosshair.setAttribute("opacity", "0");
@@ -1316,14 +1620,33 @@ window.App = {
   },
 
   getChildRealPoints(provKey, childId) {
+    if (window.AIUMCore && window.AIUMCore.TelemetryHierarchy) {
+      const pts = window.AIUMCore.TelemetryHierarchy.extractChildRealPoints(
+        this.cachedHierarchicalTrends || this.trendsCache,
+        provKey,
+        childId
+      );
+      if (pts && pts.length > 0 && pts.some(p => p !== 0)) return pts;
+    }
     const zeroes = [0, 0, 0, 0, 0, 0, 0, 0];
-    const cacheKey = `${provKey}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
-    const cached = (this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey]) ||
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || "interval_delta";
+    const cacheKey = `${provKey}_${this.trendWindow || '24h'}_${bucketMinutes}_${mode}_${this.currentScope || 'individual'}`;
+    const legacyKey = `${provKey}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
+    const cached = (this.cachedHierarchicalTrends && (this.cachedHierarchicalTrends[cacheKey] || this.cachedHierarchicalTrends[legacyKey] || Object.values(this.cachedHierarchicalTrends).find(c => c && c.provider === provKey))) ||
                    (this.trendsCache && this.trendsCache[provKey]);
     if (cached && cached.series && cached.series.length > 0) {
+      const normChild = String(childId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const match = cached.series.find(s => {
-        const sid = s.id || s.key || '';
-        return sid === childId || sid.includes(childId) || (childId && childId.includes(sid));
+        const sid = String(s.id || s.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const sName = String(s.name || s.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (sid && (sid === normChild || sid.includes(normChild) || (sid.length >= 3 && normChild.includes(sid)))) {
+          return true;
+        }
+        if (sName && (sName === normChild || sName.includes(normChild) || (sName.length >= 3 && normChild.includes(sName)))) {
+          return true;
+        }
+        return false;
       });
       if (match && match.points && match.points.length > 0) {
         return match.points;
@@ -1336,8 +1659,11 @@ window.App = {
     const zeroes = [0, 0, 0, 0, 0, 0, 0, 0];
 
     // Check if we have real cached hierarchical trend series from backend
-    const cacheKey = `${key}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
-    const cached = (this.cachedHierarchicalTrends && this.cachedHierarchicalTrends[cacheKey]) ||
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || "interval_delta";
+    const cacheKey = `${key}_${this.trendWindow || '24h'}_${bucketMinutes}_${mode}_${this.currentScope || 'individual'}`;
+    const legacyKey = `${key}_${this.trendWindow || '24h'}_${this.currentScope || 'individual'}`;
+    const cached = (this.cachedHierarchicalTrends && (this.cachedHierarchicalTrends[cacheKey] || this.cachedHierarchicalTrends[legacyKey] || Object.values(this.cachedHierarchicalTrends).find(c => c && c.provider === key))) ||
                    (this.trendsCache && this.trendsCache[key]);
     if (cached && cached.series && cached.series.length > 0) {
       return cached.series.map(s => ({
@@ -1381,8 +1707,8 @@ window.App = {
     if (isAllZero) {
       const yZero = (h - pad).toFixed(1);
       return `
-        <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);" title="No activity in window (0 tokens)">
-          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+        <svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" style="max-width: 140px; background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); display: block;" title="No activity in window (0 tokens)">
+          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="2,2"/>
           <text x="${w / 2}" y="${h / 2 + 3}" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
         </svg>
       `;
@@ -1404,13 +1730,13 @@ window.App = {
       const lastX = (pad + (s.points.length - 1) * step).toFixed(1);
       const lastY = (h - pad - ((lastVal - min) / range) * (h - pad * 2)).toFixed(1);
       return `
-        <polyline fill="none" stroke="${s.color}" stroke-width="2" points="${pts}" stroke-linecap="round" stroke-linejoin="round"/>
+        <polyline fill="none" stroke="${s.color}" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts}" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="${lastX}" cy="${lastY}" r="2" fill="${s.color}" stroke="#ffffff" stroke-width="0.6"/>
       `;
     }).join("");
 
     return `
-      <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.3); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); overflow: visible;">
+      <svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" style="max-width: 140px; background: rgba(0,0,0,0.3); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); overflow: visible; display: block;">
         ${polylines}
       </svg>
     `;
@@ -1421,12 +1747,14 @@ window.App = {
     if (!container) return;
     const windowPeriod = this.trendWindow || '24h';
     const scope = this.currentScope || 'individual';
-    const cacheKey = `${providerKey}_${windowPeriod}_${scope}`;
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || 'interval_delta';
+    const cacheKey = `${providerKey}_${windowPeriod}_${bucketMinutes}_${mode}_${scope}`;
 
     let data = this.cachedHierarchicalTrends[cacheKey];
     if (!data) {
       try {
-        const res = await fetch(`/api/usage/trends/hierarchy?provider=${providerKey}&window=${windowPeriod}&scope=${scope}`);
+        const res = await fetch(`/api/usage/trends/hierarchy?provider=${providerKey}&window=${windowPeriod}&bucket_minutes=${bucketMinutes}&mode=${mode}&scope=${scope}`);
         if (res.ok) {
           data = await res.json();
           this.cachedHierarchicalTrends[cacheKey] = data;
@@ -1441,11 +1769,66 @@ window.App = {
     }
 
     this.renderMultiSeriesTrendChart(containerId, data, providerKey);
+    this.updateChildSparklines(providerKey, data);
+  },
+
+  updateChildSparklines(providerKey, data) {
+    if (!data || !data.series || data.series.length === 0) return;
+
+    if (providerKey === 'ollama') {
+      const sparklineDivs = document.querySelectorAll("[id^='sparkline-ollama-']");
+      sparklineDivs.forEach(div => {
+        const rawId = div.id.replace("sparkline-ollama-", "");
+        const normRaw = rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const match = data.series.find(s => {
+          const sid = String(s.id || s.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const sName = String(s.name || s.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return sid === normRaw || sid.includes(normRaw) || normRaw.includes(sid) ||
+                 sName === normRaw || sName.includes(normRaw) || normRaw.includes(sName);
+        });
+        if (match && match.points && match.points.length > 0) {
+          div.innerHTML = this.generateInlineSparkline(match.points, match.color || "#c084fc");
+        }
+      });
+    } else if (providerKey === 'claude') {
+      ['claude_individual', 'claude_team', 'claude_department', 'claude_enterprise'].forEach(cid => {
+        const el = document.getElementById(`sparkline-claude-${cid}`);
+        if (el) {
+          const match = data.series.find(s => (s.id === cid || s.key === cid));
+          if (match && match.points && match.points.length > 0) {
+            el.innerHTML = this.generateInlineSparkline(match.points, match.color || "#38bdf8");
+          }
+        }
+      });
+    } else if (providerKey === 'gemini') {
+      const acctEl = document.getElementById("sparkline-gemini-gemini_account");
+      if (acctEl) {
+        const match = data.series.find(s => s.id === 'gemini_account' || s.key === 'gemini_account');
+        if (match && match.points && match.points.length > 0) {
+          acctEl.innerHTML = this.generateInlineSparkline(match.points, match.color || "#60a5fa");
+        }
+      }
+      const sparklineDivs = document.querySelectorAll("[id^='sparkline-gemini-']");
+      sparklineDivs.forEach(div => {
+        if (div.id === "sparkline-gemini-gemini_account") return;
+        const rawId = div.id.replace("sparkline-gemini-", "");
+        const normRaw = rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const match = data.series.find(s => {
+          const sid = String(s.id || s.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return sid === normRaw || sid.includes(normRaw) || normRaw.includes(sid);
+        });
+        if (match && match.points && match.points.length > 0) {
+          div.innerHTML = this.generateInlineSparkline(match.points, match.color || "#34d399");
+        }
+      });
+    }
   },
 
   _buildSyntheticHierarchicalTrends(providerKey, windowPeriod) {
     const childSeries = this._getProviderChildSeries(providerKey, { tokens_today: 0 });
-    const n = 12;
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || 'interval_delta';
+    const n = Math.min(288, Math.max(12, Math.floor(1440 / bucketMinutes)));
     const labels = Array.from({ length: n }, (_, i) => `${i * 2}:00`);
     const series = childSeries.map(cs => {
       const sKey = cs.key || cs.id;
@@ -1462,6 +1845,8 @@ window.App = {
     return {
       provider: providerKey,
       window: windowPeriod,
+      bucket_minutes: bucketMinutes,
+      mode: mode,
       scope: this.currentScope,
       labels: labels,
       series: series
@@ -1490,7 +1875,8 @@ window.App = {
     });
     const maxVal = Math.max(...allPoints, 50);
 
-    const width = 860;
+    const cWidth = container.clientWidth || container.getBoundingClientRect().width || 0;
+    const width = Math.max(cWidth > 20 ? Math.floor(cWidth) : 860, 360);
     const height = 180;
     const padL = this.showAxisLabels ? 60 : 35;
     const padR = 25;
@@ -1506,18 +1892,24 @@ window.App = {
       const y = padT + (plotH * (1.0 - ratio));
       const val = Math.round(maxVal * ratio);
       gridHtml += `
-        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4,4"/>
+        <line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4,4" vector-effect="non-scaling-stroke"/>
         <text x="${padL - 6}" y="${y + 3}" fill="#64748b" font-size="9" text-anchor="end" font-family="monospace">${val >= 1000 ? (val/1000).toFixed(0)+'k' : val}</text>
       `;
     });
 
-    // Time axis labels
+    // Time axis labels (dynamically spaced and localized if keys available)
     let axisHtml = "";
-    labels.forEach((lbl, idx) => {
-      if (idx % Math.ceil(n / 6) === 0 || idx === n - 1) {
+    const localLabels = (trendsData.keys && trendsData.keys.length === n)
+      ? trendsData.keys.map(k => this.formatLocalTime(k))
+      : labels;
+    const maxLabels = Math.max(4, Math.floor(plotW / 85));
+    const labelInterval = Math.max(1, Math.ceil(n / maxLabels));
+
+    localLabels.forEach((lbl, idx) => {
+      if (idx % labelInterval === 0 || idx === n - 1) {
         const x = padL + (idx * step);
         axisHtml += `
-          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 3}" stroke="rgba(255,255,255,0.15)"/>
+          <line x1="${x}" y1="${padT + plotH}" x2="${x}" y2="${padT + plotH + 3}" stroke="rgba(255,255,255,0.15)" vector-effect="non-scaling-stroke"/>
           <text x="${x}" y="${padT + plotH + 14}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${lbl}</text>
         `;
       }
@@ -1559,6 +1951,7 @@ window.App = {
               fill="none" 
               stroke="${s.color}" 
               stroke-width="2.5" 
+              vector-effect="non-scaling-stroke"
               opacity="${isHidden ? '0' : '0.9'}" 
               stroke-linecap="round" 
               stroke-linejoin="round" 
@@ -1608,14 +2001,22 @@ window.App = {
           <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
             ${legendPillsHtml}
           </div>
-          <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem; font-family: var(--font-mono);">
-            Window: ${trendsData.window || this.trendWindow}
-          </span>
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 0.68rem; font-family: var(--font-mono);">
+              Window: ${(trendsData.window || this.trendWindow || "24h").toUpperCase()}
+            </span>
+            <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 0.68rem; font-family: var(--font-mono);">
+              Bucket: ${trendsData.bucket_minutes || this.chartGranularity || 5}m
+            </span>
+            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.68rem; font-family: var(--font-mono);">
+              ${(trendsData.mode || this.chartMode) === 'cumulative' ? 'Cumulative Run' : 'Delta Bursts'}
+            </span>
+          </div>
         </div>
 
         <!-- SVG Multi-Series Plot with Glow Filter -->
         <div style="width: 100%; height: 180px; position: relative;">
-          <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="overflow: visible;">
+          <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" style="overflow: visible;">
             <defs>
               <filter id="glow-${providerKey}" x="-30%" y="-30%" width="160%" height="160%">
                 <feGaussianBlur stdDeviation="3.5" result="coloredBlur"/>
@@ -1625,7 +2026,7 @@ window.App = {
                 </feMerge>
               </filter>
             </defs>
-            <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.15)"/>
+            <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.15)" stroke-width="1" vector-effect="non-scaling-stroke"/>
             ${gridHtml}
             ${axisHtml}
             ${axisTitlesHtml}
@@ -1717,19 +2118,42 @@ window.App = {
     } else {
       set.add(seriesKey);
     }
-    const cachedData = this.cachedHierarchicalTrends[`${providerKey}_${this.trendWindow}_${this.currentScope}`]
+    const bucketMinutes = this.chartGranularity || 5;
+    const mode = this.chartMode || "interval_delta";
+    const cacheKey = `${providerKey}_${this.trendWindow}_${bucketMinutes}_${mode}_${this.currentScope}`;
+    const legacyKey = `${providerKey}_${this.trendWindow}_${this.currentScope}`;
+    const cachedData = this.cachedHierarchicalTrends[cacheKey]
+      || this.cachedHierarchicalTrends[legacyKey]
+      || Object.values(this.cachedHierarchicalTrends).find(c => c && c.provider === providerKey)
       || this._buildSyntheticHierarchicalTrends(providerKey, this.trendWindow);
     this.renderMultiSeriesTrendChart(containerId, cachedData, providerKey);
   },
 
   changeTrendWindow(windowPeriod) {
-    this.trendWindow = windowPeriod;
+    this.trendWindow = windowPeriod || "24h";
+    this.chartWindow = this.trendWindow;
     this.cachedHierarchicalTrends = {};
+    this._lastLocalWindowUpdateTs = Date.now();
     const sel = document.getElementById("trend-window-select");
-    if (sel) sel.value = windowPeriod;
+    const cSel = document.getElementById("chart-window-select");
+    const cfgWinSel = document.getElementById("cfg-default-trend-window");
+    if (sel) sel.value = this.trendWindow;
+    if (cSel) cSel.value = this.trendWindow;
+    if (cfgWinSel) cfgWinSel.value = this.trendWindow;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        settings: {
+          active_trend_window: this.trendWindow,
+          default_trend_window: this.trendWindow
+        }
+      })
+    }).catch(() => {});
     if (this.lastCompData && window._lastProviders) {
       this.renderComparison(this.lastCompData, window._lastProviders);
     }
+    this.loadUsageData();
   },
 
   switchHierarchyGroupMode(mode) {
@@ -1823,7 +2247,8 @@ window.App = {
 
     const cols = [
       "session_id", "provider", "model", "client_ip",
-      "input_tokens", "output_tokens", "total_tokens", "estimated_cost",
+      "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
+      "total_tokens", "estimated_cost", "net_cache_savings_usd",
       "first_activity", "last_activity", "duration"
     ];
     cols.forEach(c => {
@@ -1870,7 +2295,7 @@ window.App = {
 
     list.sort((a, b) => {
       let vA, vB;
-      if (["input_tokens", "output_tokens", "total_tokens", "estimated_cost"].includes(col)) {
+      if (["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "total_tokens", "estimated_cost", "net_cache_savings_usd"].includes(col)) {
         vA = Number(a[col] || 0);
         vB = Number(b[col] || 0);
         return asc ? vA - vB : vB - vA;
@@ -1911,7 +2336,7 @@ window.App = {
     if (!sessions || sessions.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 32px 20px;">
+          <td colspan="14" style="text-align: center; color: var(--text-dim); padding: 32px 20px;">
             <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
               <img src="/assets/mascot/johnny5_inspecting.jpg" alt="Johnny 5 Inspecting" style="width: 76px; height: 76px; border-radius: 14px; border: 2px solid rgba(6, 182, 212, 0.4); box-shadow: 0 0 18px rgba(6, 182, 212, 0.3); object-fit: cover;">
               <div style="color: var(--text-main); font-weight: 700; font-size: 0.95rem;">Johnny 5 is scanning for token traffic...</div>
@@ -1938,21 +2363,51 @@ window.App = {
       const clientIp = s.client_ip || "127.0.0.1";
       const clientAlias = s.client_alias || "localhost";
 
+      const isProxied = s.is_proxied === 1 || s.source === "proxy" || s.source === "emulator";
+      const sourceTag = s.source || (isProxied ? "proxy" : "direct");
+      let routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(52, 211, 153, 0.12); color: #34d399;" title="Direct client connection">🌐 Direct</span>`;
+      if (sourceTag === "proxy") {
+        routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(6, 182, 212, 0.2); color: #38bdf8; border: 1px solid rgba(6, 182, 212, 0.4);" title="Routed via Port 8766 Transparent Proxy">⚡ Proxy</span>`;
+      } else if (sourceTag === "emulator") {
+        routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4);" title="Routed via Port 11435 Secondary Bridge">🌉 Bridge</span>`;
+      } else if (sourceTag === "log_scanner") {
+        routeBadge = `<span class="badge" style="font-size: 0.65rem; background: rgba(245, 158, 11, 0.15); color: #fbbf24;" title="Discovered via background CLI scanner">📑 Scanner</span>`;
+      }
+
+      const cacheReadTok = Number(s.cache_read_tokens || 0);
+      const cacheWriteTok = Number(s.cache_creation_tokens || 0);
+      const netSavUsd = Number(s.net_cache_savings_usd || 0);
+      const cacheBadge = s.cache_badge_label ? `<div style="font-size: 0.64rem; color: var(--text-dim);">${this.escapeHtml(s.cache_badge_label)}</div>` : "";
+      const netSavColor = netSavUsd > 0 ? "var(--accent-emerald)" : (netSavUsd < 0 ? "#fbbf24" : "var(--text-dim)");
+      const netSavSign = netSavUsd > 0 ? "+" : (netSavUsd < 0 ? "-" : "");
+
       return `
         <tr>
           <td><code style="font-family: var(--font-mono); color: var(--accent-cyan); font-size: 0.8rem;">${this.escapeHtml(s.session_id)}</code></td>
           <td><span class="badge ${provBadgeClass}">${this.escapeHtml(s.provider)}</span></td>
           <td style="color: var(--text-muted); font-size: 0.82rem;">${this.escapeHtml(s.model || 'default')}</td>
           <td>
-            <div style="display: flex; flex-direction: column; gap: 2px;">
-              <span style="font-family: var(--font-mono); font-size: 0.8rem; color: #e2e8f0;">${this.escapeHtml(clientIp)}</span>
-              <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.12); color: #38bdf8; width: fit-content;">💻 ${this.escapeHtml(clientAlias)}</span>
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span style="font-family: var(--font-mono); font-size: 0.8rem; color: #e2e8f0;">${this.escapeHtml(clientIp)}</span>
+                ${routeBadge}
+              </div>
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.12); color: #38bdf8; width: fit-content;">💻 ${this.escapeHtml(clientAlias)}</span>
+                ${s.instance_id && s.instance_id !== 'local' ? `<span class="badge" style="font-size: 0.62rem; background: rgba(139, 92, 246, 0.15); color: #a78bfa;" title="Hardware Node">🖥️ ${this.escapeHtml(s.instance_id)}</span>` : ''}
+              </div>
             </div>
           </td>
           <td style="font-family: var(--font-mono); text-align: right;">${Number(s.input_tokens).toLocaleString()}</td>
           <td style="font-family: var(--font-mono); text-align: right;">${Number(s.output_tokens).toLocaleString()}</td>
+          <td style="font-family: var(--font-mono); color: #38bdf8; text-align: right;">${cacheReadTok.toLocaleString()}</td>
+          <td style="font-family: var(--font-mono); color: #c084fc; text-align: right;">${cacheWriteTok.toLocaleString()}</td>
           <td style="font-family: var(--font-mono); font-weight: 700; color: #fff; text-align: right;">${Number(s.total_tokens).toLocaleString()}</td>
           <td style="font-family: var(--font-mono); color: var(--accent-emerald); text-align: right;">$${Number(s.estimated_cost).toFixed(4)}</td>
+          <td style="font-family: var(--font-mono); color: ${netSavColor}; text-align: right;">
+            ${netSavSign}$${Math.abs(netSavUsd).toFixed(4)}
+            ${cacheBadge}
+          </td>
           <td style="font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono);">${firstTime}</td>
           <td style="font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono);">${lastTime}</td>
           <td>
@@ -1964,6 +2419,7 @@ window.App = {
   },
 
   renderErrors(errors) {
+    this._rawDiagnosticErrors = Array.isArray(errors) ? errors : [];
     const container = document.getElementById("error-log-container");
     if (!container) return;
 
@@ -1989,14 +2445,25 @@ window.App = {
       return;
     }
 
-    container.innerHTML = errors.map(err => `
-      <div class="error-item">
-        <div class="meta">
-          <span style="color: var(--accent-rose); font-weight: 700;">[${this.escapeHtml(err.category)}]</span>
-          <span>${this.escapeHtml(err.provider).toUpperCase()}</span>
-          <span>${err.timestamp ? err.timestamp.substring(11, 19) : ''}</span>
+    const searchEl = document.getElementById("diag-log-search");
+    const catEl = document.getElementById("diag-log-category-filter");
+    if ((searchEl && searchEl.value.trim()) || (catEl && catEl.value.trim())) {
+      this.filterDiagnosticLogs();
+      return;
+    }
+
+    const deduped = this.deduplicateDiagnosticErrors(errors);
+    container.innerHTML = deduped.map(err => `
+      <div class="error-item" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+        <div>
+          <div class="meta">
+            <span style="color: var(--accent-rose); font-weight: 700;">[${this.escapeHtml(err.category)}]</span>
+            <span>${this.escapeHtml(err.provider).toUpperCase()}</span>
+            <span>${err.timestamp ? err.timestamp.substring(11, 19) : ''}</span>
+          </div>
+          <div class="msg">${this.escapeHtml(err.message)}</div>
         </div>
-        <div class="msg">${this.escapeHtml(err.message)}</div>
+        ${err.count > 1 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 0.72rem; flex-shrink: 0;">×${err.count}</span>` : ""}
       </div>
     `).join("");
   },
@@ -2063,105 +2530,6 @@ window.App = {
   closeConfigureClaudeModal() {
     const modal = document.getElementById("claude-config-modal");
     if (modal) modal.classList.remove("active");
-  },
-
-  // Claude Quota & Limit Calibration
-  openClaudeQuotaModal() {
-    const modal = document.getElementById("claude-quota-modal");
-    if (modal) {
-      const isTeamMode = (this.appSettings && this.appSettings.quota_tracking_mode === "team") ||
-                         (this.lastCompData && this.lastCompData.tracking_mode === "team");
-      const teamSection = document.getElementById("claude-quota-team-section");
-      if (teamSection) {
-        teamSection.style.display = isTeamMode ? "block" : "none";
-      }
-
-      if (this.lastCompData && this.lastCompData.providers && this.lastCompData.providers.claude) {
-        const c = this.lastCompData.providers.claude;
-        const h = c.hierarchy || {};
-        const ind = h.individual || {};
-        const team = h.team || {};
-
-        const scopeSelect = document.getElementById("claude-quota-scope-select");
-        if (scopeSelect) {
-          if (!isTeamMode) {
-            scopeSelect.value = "individual";
-            scopeSelect.disabled = true;
-          } else {
-            scopeSelect.disabled = false;
-            if (h.scope) scopeSelect.value = h.scope;
-          }
-        }
-
-        const indSess = document.getElementById("claude-quota-ind-session-used");
-        if (indSess && ind.session_used_pct !== undefined) indSess.value = ind.session_used_pct;
-
-        const indWeek = document.getElementById("claude-quota-ind-weekly-used");
-        if (indWeek && ind.weekly_used_pct !== undefined) indWeek.value = ind.weekly_used_pct;
-
-        const teamSess = document.getElementById("claude-quota-team-session-used");
-        if (teamSess && team.session_used_pct !== undefined) teamSess.value = team.session_used_pct;
-
-        const teamWeek = document.getElementById("claude-quota-team-weekly-used");
-        if (teamWeek && team.weekly_used_pct !== undefined) teamWeek.value = team.weekly_used_pct;
-
-        const weekReset = document.getElementById("claude-quota-weekly-reset-str");
-        if (weekReset && ind.weekly_reset_str) weekReset.value = ind.weekly_reset_str;
-      }
-      modal.classList.add("active");
-    }
-  },
-  closeClaudeQuotaModal() {
-    const modal = document.getElementById("claude-quota-modal");
-    if (modal) modal.classList.remove("active");
-  },
-  async saveClaudeQuotaCalibration() {
-    const scopeSelect = document.getElementById("claude-quota-scope-select");
-    const planSelect = document.getElementById("claude-quota-plan");
-    const indSessUsedInput = document.getElementById("claude-quota-ind-session-used");
-    const indWeekUsedInput = document.getElementById("claude-quota-ind-weekly-used");
-    const teamSessUsedInput = document.getElementById("claude-quota-team-session-used");
-    const teamWeekUsedInput = document.getElementById("claude-quota-team-weekly-used");
-    const sessMinsInput = document.getElementById("claude-quota-session-reset-mins");
-    const weekResetInput = document.getElementById("claude-quota-weekly-reset-str");
-
-    const scope = scopeSelect ? scopeSelect.value : "individual";
-    const planType = planSelect ? planSelect.value : "Team Enterprise";
-    const indSessUsed = indSessUsedInput ? parseFloat(indSessUsedInput.value) : 60.0;
-    const indWeekUsed = indWeekUsedInput ? parseFloat(indWeekUsedInput.value) : 27.0;
-    const teamSessUsed = teamSessUsedInput ? parseFloat(teamSessUsedInput.value) : 56.0;
-    const teamWeekUsed = teamWeekUsedInput ? parseFloat(teamWeekUsedInput.value) : 26.0;
-    const sessMins = sessMinsInput ? parseFloat(sessMinsInput.value) : 126.0;
-    const weekReset = weekResetInput ? weekResetInput.value.trim() : "Mon 3:00 AM";
-
-    try {
-      const res = await fetch("/api/providers/claude/quota", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scope: scope,
-          plan_type: planType,
-          individual_session_used_pct: indSessUsed,
-          individual_weekly_used_pct: indWeekUsed,
-          team_session_used_pct: teamSessUsed,
-          team_weekly_used_pct: teamWeekUsed,
-          session_reset_minutes: sessMins,
-          weekly_reset_str: weekReset
-        })
-      });
-      if (res.ok) {
-        this.currentScope = scope;
-        this.switchScope(scope);
-        alert(`✓ Claude limits successfully calibrated!\n• Active View: ${scope.toUpperCase()}\n• 👤 Individual Member: ${100 - indSessUsed}% remaining (${indSessUsed}% used) / Weekly: ${100 - indWeekUsed}% rem (${indWeekUsed}% used)\n• 👥 Team Pool: ${100 - teamSessUsed}% remaining (${teamSessUsed}% used) / Weekly: ${100 - teamWeekUsed}% rem (${teamWeekUsed}% used)\n• Resets: ${weekReset}`);
-        this.closeClaudeQuotaModal();
-        await this.loadUsageData();
-      } else {
-        const err = await res.json();
-        alert(`Failed to calibrate Claude limits: ${err.error || res.statusText}`);
-      }
-    } catch (e) {
-      alert(`Error calibrating Claude quota: ${e}`);
-    }
   },
 
   async saveClaudeConfig() {
@@ -2257,7 +2625,7 @@ window.App = {
           badge.style.background = "rgba(16, 185, 129, 0.2)";
           badge.style.color = "#34d399";
           badge.style.borderColor = "rgba(16, 185, 129, 0.3)";
-          badge.innerText = `Connected: ${data.email || 'acidcow@gmail.com'}`;
+          badge.innerText = `Connected: ${data.email || 'local@workstation.local'}`;
         } else {
           badge.className = "badge";
           badge.style.background = "rgba(239, 68, 68, 0.2)";
@@ -2312,10 +2680,10 @@ window.App = {
       const res = await fetch("/api/auth/google/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email || "acidcow@gmail.com", name: "James Eckhardt" })
+        body: JSON.stringify({ email: email || "local@workstation.local", name: "Local User" })
       });
       if (res.ok) {
-        alert(`✓ Successfully connected Google Account: ${email || "acidcow@gmail.com"}!\nAccount-level usage view and child token telemetry are now active.`);
+        alert(`✓ Successfully connected Google Account: ${email || "local@workstation.local"}!\nAccount-level usage view and child token telemetry are now active.`);
         await this.checkGoogleAuthStatus();
         await this.loadUsageData();
       } else {
@@ -2530,6 +2898,7 @@ window.App = {
 
   async syncProvider(provider) {
     try {
+      this.cachedHierarchicalTrends = {};
       await fetch("/api/providers/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2621,11 +2990,18 @@ window.App = {
 
   toggleAppIcon() {
     const nextIcon = this.activeIcon === 'johnny5' ? 'shield' : 'johnny5';
-    this.applyActiveIcon(nextIcon);
+    this.selectAppIcon(nextIcon);
   },
 
   selectAppIcon(iconName) {
+    if (window.AIUMCore && window.AIUMCore.ApiClient) {
+      window.AIUMCore.ApiClient.syncActiveIcon(iconName).catch(() => {});
+    }
     this.applyActiveIcon(iconName);
+  },
+
+  syncActiveIcon(iconName) {
+    return this.selectAppIcon(iconName);
   },
 
   openIconPickerModal() {
@@ -2661,12 +3037,249 @@ window.App = {
     }
   },
 
-  // Historical Reporting & Multi-Dimensional Analytics Engine
+  // Historical Reporting & Multi-Dimensional Analytics Engine (AIUM-607 / AIUM-801 / AIUM-902 / AIUM-903)
   selectedReportGrouping: 'day',
+  reportSortBy: 'period',
+  reportSortDir: 'desc',
+  lastReportRows: [],
+  reportGroupByCols: [],
+  reportIncludeGroupTotals: true,
+  _draggedReportColKey: null,
+  reportColumns: null,
+
+  getDefaultReportColumns() {
+    return [
+      { key: 'period', label: 'Period / Date', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'provider', label: 'Provider', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'account_id', label: 'Account / Tenant', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'group_key', label: 'Pivot Dimension', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'source', label: 'Traffic Route', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'model', label: 'Model', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'locality_label', label: 'Node Locality', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'account_tier_label', label: 'Account Tier', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'compute_node', label: 'Compute Node', visible: false, align: 'left', groupable: true, sortable: true },
+      { key: 'instance_id', label: 'Instance / Node ID', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'client_ip', label: 'Client IP / Alias', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'team_name', label: 'Team', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'user_name', label: 'User / Seat', visible: true, align: 'left', groupable: true, sortable: true },
+      { key: 'project_id', label: 'Project', visible: false, align: 'left', groupable: true, sortable: true },
+      { key: 'event_count', label: 'Events', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'input_tokens', label: 'Input', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'output_tokens', label: 'Output', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'cache_creation_tokens', label: 'Cache Create', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'cache_read_tokens', label: 'Cache Read', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'total_tokens', label: 'Total Tokens', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'net_cost_usd', label: 'Est. Cost', visible: true, align: 'right', groupable: false, sortable: true, numeric: true },
+      { key: 'cost_per_1k', label: 'Cost / 1k', visible: true, align: 'right', groupable: false, sortable: false, numeric: true },
+      { key: 'share', label: 'Share', visible: true, align: 'center', groupable: false, sortable: false }
+    ];
+  },
+
+  ensureReportColumnsInitialized() {
+    if (!Array.isArray(this.reportColumns) || this.reportColumns.length === 0) {
+      this.reportColumns = this.getDefaultReportColumns();
+    }
+    return this.reportColumns;
+  },
+
+  toggleReportGridCustomizer() {
+    const panel = document.getElementById("reports-grid-customizer");
+    if (!panel) return;
+    const isHidden = panel.style.display === "none";
+    panel.style.display = isHidden ? "block" : "none";
+    this.renderReportCustomizerControls();
+  },
+
+  toggleReportColumnVisibility(colKey) {
+    const cols = this.ensureReportColumnsInitialized();
+    const target = cols.find(c => c.key === colKey);
+    if (target) {
+      const visibleCount = cols.filter(c => c.visible).length;
+      if (target.visible && visibleCount <= 1) return; // keep at least 1 column visible
+      target.visible = !target.visible;
+    }
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  setAllReportColumnsVisibility(visible) {
+    const cols = this.ensureReportColumnsInitialized();
+    cols.forEach((c, idx) => {
+      c.visible = visible ? true : (idx === 0 || c.key === 'total_tokens' || c.key === 'net_cost_usd');
+    });
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  resetReportColumnsDefault() {
+    this.reportColumns = this.getDefaultReportColumns();
+    this.reportGroupByCols = [];
+    this.reportIncludeGroupTotals = true;
+    const chk = document.getElementById("reports-group-totals-chk");
+    if (chk) chk.checked = true;
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  toggleReportGroupByCol(colKey) {
+    if (!Array.isArray(this.reportGroupByCols)) this.reportGroupByCols = [];
+    const idx = this.reportGroupByCols.indexOf(colKey);
+    if (idx >= 0) {
+      this.reportGroupByCols.splice(idx, 1);
+    } else {
+      this.reportGroupByCols.push(colKey);
+    }
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  clearReportGroupingCols() {
+    this.reportGroupByCols = [];
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  toggleReportGroupTotals(checked) {
+    this.reportIncludeGroupTotals = !!checked;
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  reorderReportColumn(sourceColKey, targetColKey) {
+    if (!sourceColKey || !targetColKey || sourceColKey === targetColKey) return;
+    const cols = this.ensureReportColumnsInitialized();
+    const fromIdx = cols.findIndex(c => c.key === sourceColKey);
+    const toIdx = cols.findIndex(c => c.key === targetColKey);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const [moved] = cols.splice(fromIdx, 1);
+    cols.splice(toIdx, 0, moved);
+    this.renderReportCustomizerControls();
+    this.renderHistoricalReportRows(this.lastReportRows || []);
+  },
+
+  onReportColDragStart(event, colKey) {
+    this._draggedReportColKey = colKey;
+    if (event && event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      try {
+        event.dataTransfer.setData("text/plain", colKey);
+      } catch (_e) {}
+    }
+    if (event && event.currentTarget) {
+      event.currentTarget.style.opacity = "0.55";
+    }
+  },
+
+  onReportColDragOver(event) {
+    if (event) {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      if (event.currentTarget) {
+        event.currentTarget.style.outline = "2px dashed #38bdf8";
+        event.currentTarget.style.outlineOffset = "-2px";
+      }
+    }
+  },
+
+  onReportColDragLeave(event) {
+    if (event && event.currentTarget) {
+      event.currentTarget.style.outline = "";
+      event.currentTarget.style.outlineOffset = "";
+    }
+  },
+
+  onReportColDrop(event, targetColKey) {
+    if (event) {
+      event.preventDefault();
+      if (event.currentTarget) {
+        event.currentTarget.style.outline = "";
+        event.currentTarget.style.outlineOffset = "";
+      }
+    }
+    const sourceKey = this._draggedReportColKey || (event && event.dataTransfer ? event.dataTransfer.getData("text/plain") : null);
+    this._draggedReportColKey = null;
+    if (sourceKey && targetColKey && sourceKey !== targetColKey) {
+      this.reorderReportColumn(sourceKey, targetColKey);
+    }
+  },
+
+  onReportColDragEnd(event) {
+    this._draggedReportColKey = null;
+    if (event && event.currentTarget) {
+      event.currentTarget.style.opacity = "1";
+      event.currentTarget.style.outline = "";
+    }
+  },
+
+  renderReportCustomizerControls() {
+    const cols = this.ensureReportColumnsInitialized();
+    const groupByContainer = document.getElementById("reports-groupby-chips");
+    const seqContainer = document.getElementById("reports-column-sequence-chips");
+    const chkTotals = document.getElementById("reports-group-totals-chk");
+    if (chkTotals) chkTotals.checked = !!this.reportIncludeGroupTotals;
+
+    if (groupByContainer) {
+      const groupableCols = cols.filter(c => c.groupable);
+      groupByContainer.innerHTML = groupableCols.map(c => {
+        const orderIdx = (this.reportGroupByCols || []).indexOf(c.key);
+        const isSelected = orderIdx >= 0;
+        const badge = isSelected ? `<span style="background:#38bdf8; color:#0f172a; border-radius:50%; padding:0 5px; font-size:0.65rem; font-weight:800; margin-right:4px;">${orderIdx + 1}</span>` : '';
+        return `
+          <button type="button"
+                  onclick="App.toggleReportGroupByCol('${c.key}')"
+                  style="padding: 4px 10px; font-size: 0.72rem; border-radius: 999px; cursor: pointer; transition: all 0.15s; border: 1px solid ${isSelected ? '#38bdf8' : 'rgba(255,255,255,0.14)'}; background: ${isSelected ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.65)'}; color: ${isSelected ? '#e0f2fe' : 'var(--text-muted)'}; font-weight: ${isSelected ? '700' : '500'};">
+            ${badge}${this.escapeHtml(c.label)}
+          </button>
+        `;
+      }).join("");
+    }
+
+    if (seqContainer) {
+      seqContainer.innerHTML = cols.map((c, idx) => {
+        return `
+          <div draggable="true"
+               ondragstart="App.onReportColDragStart(event, '${c.key}')"
+               ondragover="App.onReportColDragOver(event)"
+               ondragleave="App.onReportColDragLeave(event)"
+               ondrop="App.onReportColDrop(event, '${c.key}')"
+               ondragend="App.onReportColDragEnd(event)"
+               title="Drag to reorder column position (#${idx + 1})"
+               style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; cursor: grab; user-select: none; border: 1px solid ${c.visible ? 'rgba(56, 189, 248, 0.35)' : 'rgba(255,255,255,0.08)'}; background: ${c.visible ? 'rgba(30, 41, 59, 0.9)' : 'rgba(15, 23, 42, 0.45)'}; color: ${c.visible ? '#f8fafc' : 'var(--text-dim)'}; font-size: 0.73rem;">
+            <span style="color: var(--text-dim); font-size: 0.7rem; cursor: grab;">⠿</span>
+            <input type="checkbox" ${c.visible ? 'checked' : ''} onchange="App.toggleReportColumnVisibility('${c.key}')" style="cursor: pointer; accent-color: #38bdf8;">
+            <span>${this.escapeHtml(c.label)}</span>
+          </div>
+        `;
+      }).join("");
+    }
+  },
+
+  renderReportTableHeaders() {
+    const headRow = document.getElementById("reports-table-head-row");
+    if (!headRow) return;
+    const cols = this.ensureReportColumnsInitialized().filter(c => c.visible);
+    headRow.innerHTML = cols.map(c => {
+      const isSorted = this.reportSortBy === c.key;
+      const sortArrow = isSorted ? (this.reportSortDir === 'asc' ? ' ▲' : ' ▼') : (c.sortable ? ' ⇅' : '');
+      const clickAttr = c.sortable ? `onclick="App.sortReportsTable('${c.key}')"` : '';
+      return `
+        <th draggable="true"
+            ondragstart="App.onReportColDragStart(event, '${c.key}')"
+            ondragover="App.onReportColDragOver(event)"
+            ondragleave="App.onReportColDragLeave(event)"
+            ondrop="App.onReportColDrop(event, '${c.key}')"
+            ondragend="App.onReportColDragEnd(event)"
+            ${clickAttr}
+            title="Drag header left/right to reorder column${c.sortable ? ' • Click to sort' : ''}"
+            style="text-align: ${c.align || 'left'}; cursor: ${c.sortable ? 'pointer' : 'grab'}; user-select: none; white-space: nowrap; position: relative;">
+          <span style="opacity: 0.45; font-size: 0.68rem; margin-right: 3px; cursor: grab;">⠿</span>${this.escapeHtml(c.label)}<span style="font-size: 0.68rem; color: ${isSorted ? '#38bdf8' : 'var(--text-dim)'};">${sortArrow}</span>
+        </th>
+      `;
+    }).join("");
+  },
 
   setReportGrouping(group) {
     this.selectedReportGrouping = group;
-    ['hour', 'day', 'week', 'month'].forEach(g => {
+    ['hour', 'day', 'week', 'month', 'year'].forEach(g => {
       const btn = document.getElementById(`slice-btn-${g}`);
       if (btn) {
         btn.className = (g === group) ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
@@ -2676,44 +3289,78 @@ window.App = {
   },
 
   handleDateRangeChange() {
+    const rangeSelect = document.getElementById("report-date-range-select");
+    const startInput = document.getElementById("report-filter-start-date");
+    const endInput = document.getElementById("report-filter-end-date");
+    if (rangeSelect && rangeSelect.value !== "custom") {
+      if (startInput) startInput.value = "";
+      if (endInput) endInput.value = "";
+    }
     this.loadHistoricalReport();
   },
 
-  async loadHistoricalReport() {
-    const tbody = document.getElementById("reports-table-body");
-    if (!tbody) return;
+  sortReportsTable(columnKey) {
+    if (this.reportSortBy === columnKey) {
+      this.reportSortDir = this.reportSortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+      this.reportSortBy = columnKey;
+      this.reportSortDir = 'desc';
+    }
+    if (Array.isArray(this.lastReportRows) && this.lastReportRows.length > 0) {
+      this.renderHistoricalReportRows(this.lastReportRows);
+    } else {
+      this.loadHistoricalReport();
+    }
+  },
 
+  _collectReportFilterParams() {
     const group = this.selectedReportGrouping || 'day';
     const rangeSelect = document.getElementById("report-date-range-select");
     const rangeVal = rangeSelect ? rangeSelect.value : '7d';
 
-    const provSelect = document.getElementById("report-filter-provider");
-    const prov = provSelect ? provSelect.value : '';
+    const prov = document.getElementById("report-filter-provider")?.value || '';
+    const acct = document.getElementById("report-filter-account")?.value?.trim() || '';
+    const dim = document.getElementById("report-filter-dimension")?.value || '';
+    const sourceVal = document.getElementById("report-filter-source")?.value?.trim() || '';
+    const modelVal = document.getElementById("report-filter-model")?.value?.trim() || '';
+    const instanceVal = document.getElementById("report-filter-instance")?.value?.trim() || '';
+    const clientIpVal = document.getElementById("report-filter-client-ip")?.value?.trim() || '';
+    const team = document.getElementById("report-filter-team")?.value?.trim() || '';
+    const user = document.getElementById("report-filter-user")?.value?.trim() || '';
 
-    const dimSelect = document.getElementById("report-filter-dimension");
-    const dim = dimSelect ? dimSelect.value : '';
+    const customStart = document.getElementById("report-filter-start-date")?.value?.trim() || '';
+    const customEnd = document.getElementById("report-filter-end-date")?.value?.trim() || '';
 
-    const teamInput = document.getElementById("report-filter-team");
-    const team = teamInput ? teamInput.value.trim() : '';
-
-    const userInput = document.getElementById("report-filter-user");
-    const user = userInput ? userInput.value.trim() : '';
-
-    let startDate = null;
-    let endDate = null;
+    let startDate = customStart || null;
+    let endDate = customEnd || null;
     const now = new Date();
-    if (rangeVal === 'today') {
-      startDate = now.toISOString().substring(0, 10);
-    } else if (rangeVal === '7d') {
-      const d7 = new Date(now.getTime() - 7 * 86400000);
-      startDate = d7.toISOString().substring(0, 10);
-    } else if (rangeVal === '30d') {
-      const d30 = new Date(now.getTime() - 30 * 86400000);
-      startDate = d30.toISOString().substring(0, 10);
+    const rangeHoursMap = {
+      '1h': 1,
+      '3h': 3,
+      '6h': 6,
+      '12h': 12,
+      '24h': 24,
+      '48h': 48,
+      '3d': 72,
+      '5d': 120,
+      '7d': 168,
+      '10d': 240,
+      '15d': 360,
+      '30d': 720,
+      '90d': 2160,
+      '3m': 2160,
+      '6m': 4320,
+      '12m': 8760
+    };
+    if (!startDate && rangeVal !== 'custom') {
+      if (rangeVal === 'today') {
+        startDate = now.toISOString().substring(0, 10);
+      } else if (rangeHoursMap[rangeVal]) {
+        const hrs = rangeHoursMap[rangeVal];
+        const cutoff = new Date(now.getTime() - hrs * 3600000);
+        startDate = hrs < 24 ? cutoff.toISOString() : cutoff.toISOString().substring(0, 10);
+      }
     }
-
-    const acctSelect = document.getElementById("report-filter-account");
-    const acct = acctSelect ? acctSelect.value.trim() : '';
 
     const params = new URLSearchParams({ group_by: group });
     if (startDate) params.set("start_date", startDate);
@@ -2721,8 +3368,25 @@ window.App = {
     if (prov) params.set("provider", prov);
     if (acct) params.set("account_id", acct);
     if (dim) params.set("dimension", dim);
+    if (sourceVal) params.set("source", sourceVal);
+    if (modelVal) params.set("model", modelVal);
+    if (instanceVal) params.set("instance_id", instanceVal);
+    if (clientIpVal) params.set("client_ip", clientIpVal);
     if (team) params.set("team_name", team);
     if (user) params.set("user_name", user);
+    if (this.reportSortBy) params.set("sort_by", this.reportSortBy);
+    if (this.reportSortDir) params.set("sort_dir", this.reportSortDir);
+    return params;
+  },
+
+  async loadHistoricalReport() {
+    const tbody = document.getElementById("reports-table-body");
+    if (!tbody) return;
+
+    this.renderReportCustomizerControls();
+    this.renderReportTableHeaders();
+
+    const params = this._collectReportFilterParams();
 
     try {
       const res = await fetch(`/api/reports/history?${params.toString()}`);
@@ -2732,6 +3396,7 @@ window.App = {
       const summary = data.summary || {};
       const totTokEl = document.getElementById("rep-tot-tokens");
       const totCostEl = document.getElementById("rep-tot-cost");
+      const totSavingsEl = document.getElementById("rep-tot-savings");
       const totEvtEl = document.getElementById("rep-tot-events");
       const totDimEl = document.getElementById("rep-tot-records") || document.getElementById("rep-tot-dims");
       const totCacheEl = document.getElementById("rep-tot-cache");
@@ -2743,97 +3408,400 @@ window.App = {
       if (totCacheSubEl) {
         totCacheSubEl.innerText = `Create: ${Number(summary.cache_creation_tokens || 0).toLocaleString()} | Read: ${Number(summary.cache_read_tokens || 0).toLocaleString()}`;
       }
-      if (totCostEl) totCostEl.innerText = `$${Number(summary.total_estimated_cost || 0).toFixed(4)}`;
+      if (totCostEl) {
+        totCostEl.innerText = `$${Number(summary.total_estimated_cost || 0).toFixed(4)}`;
+      }
+      if (totSavingsEl) {
+        const totSav = Math.abs(Number(summary.total_estimated_savings_usd || 0));
+        totSavingsEl.innerText = `(-$${totSav.toFixed(4)})`;
+      }
       if (totEvtEl) totEvtEl.innerText = Number(summary.total_events || 0).toLocaleString();
-      if (totDimEl) totDimEl.innerText = `${Number(summary.distinct_dimensions || (data.rows ? data.rows.length : 0))} slices`;
+      if (totDimEl) {
+        const sliceCount = Number(summary.distinct_dimensions !== undefined ? summary.distinct_dimensions : (data.rows ? data.rows.length : 0));
+        totDimEl.innerText = sliceCount === 1 ? '1 slice' : `${sliceCount.toLocaleString()} slices`;
+      }
 
+      this.lastReportRows = data.rows || [];
+      this.renderHistoricalReportRows(this.lastReportRows);
+      this.loadPivotMatrix();
+    } catch (e) {
+      console.error("Error loading historical report:", e);
+    }
+  },
+
+  _isLocalModelReportRow(row) {
+    if (!row) return false;
+    if (row.is_local_model === true) return true;
+    const prov = String(row.provider || '').toLowerCase();
+    const src = String(row.source || '').toLowerCase();
+    return prov === 'ollama' || prov === 'local' || src.includes('ollama');
+  },
+
+  formatReportEstCostCell(row, isSubtotal = false) {
+    const isLocal = this._isLocalModelReportRow(row);
+    const netVal = row.net_cost_usd !== undefined ? Number(row.net_cost_usd) : (isLocal ? -Math.abs(Number(row.estimated_savings_usd || ((row.total_tokens || 0) / 1000000.0) * 6.0)) : Number(row.estimated_cost || 0));
+    if (isLocal || netVal < 0) {
+      const absSavings = Math.abs(netVal || Number(row.estimated_savings_usd || 0));
+      return `<span title="Local Model Estimated Cloud Savings (at $6.00/1M frontier benchmark)" style="color: #c084fc; background: rgba(192, 132, 252, 0.14); border: 1px solid rgba(192, 132, 252, 0.35); padding: 2px 6px; border-radius: 4px; font-weight: 700; font-family: var(--font-mono); white-space: nowrap;">(-$${absSavings.toFixed(4)})</span>`;
+    }
+    const cloudCost = Number(row.estimated_cost !== undefined ? row.estimated_cost : netVal);
+    if (isSubtotal && Number(row.estimated_savings_usd || 0) > 0) {
+      return `
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+          <span style="color: #34d399; font-weight: 700; font-family: var(--font-mono);">$${cloudCost.toFixed(4)}</span>
+          <span style="color: #c084fc; font-size: 0.68rem; font-family: var(--font-mono);" title="Includes Local Model Savings">(-$${Number(row.estimated_savings_usd).toFixed(4)} saved)</span>
+        </div>
+      `;
+    }
+    return `<span style="color: #34d399; font-weight: 700; font-family: var(--font-mono);">$${cloudCost.toFixed(4)}</span>`;
+  },
+
+  _renderSingleReportCell(col, r, maxTokens, isSubtotal = false) {
+    const key = col.key;
+    const isLocal = this._isLocalModelReportRow(r);
+    if (key === 'period') {
+      return `<td style="font-family: var(--font-mono); font-weight: 600; color: #fff; white-space: nowrap;">${this.escapeHtml(r.period || '—')}</td>`;
+    }
+    if (key === 'provider') {
+      const pName = String(r.provider || '—').toUpperCase();
+      const badgeColor = isLocal ? '#c084fc' : '#38bdf8';
+      return `<td><span style="font-weight: 700; font-size: 0.75rem; color: ${badgeColor};">${this.escapeHtml(pName)}</span></td>`;
+    }
+    if (key === 'account_id') {
+      return `<td style="font-size: 0.78rem; color: #e2e8f0;">${this.escapeHtml(r.account_id || 'default')}</td>`;
+    }
+    if (key === 'group_key') {
+      return `<td><strong style="color: #60a5fa; font-size: 0.8rem;">${this.escapeHtml(r.group_key || r.provider || 'All')}</strong></td>`;
+    }
+    if (key === 'source') {
+      return `<td><span style="font-size: 0.72rem; color: #94a3b8; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono);">${this.escapeHtml(r.source || 'direct')}</span></td>`;
+    }
+    if (key === 'model') {
+      return `<td style="font-family: var(--font-mono); font-size: 0.76rem; color: #f1f5f9;">${this.escapeHtml(r.model || 'default')}</td>`;
+    }
+    if (key === 'locality_label') {
+      const loc = r.locality || (isLocal ? 'local' : 'cloud');
+      const locLbl = r.locality_label || (loc === 'remote_lan' ? 'Remote LAN Node' : (loc === 'local' ? 'Local Node (This PC)' : 'Cloud API'));
+      const locColor = loc === 'remote_lan' ? '#22d3ee' : (loc === 'local' ? '#c084fc' : '#94a3b8');
+      return `<td><span style="font-size: 0.72rem; color: ${locColor}; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 600;">${this.escapeHtml(locLbl)}</span></td>`;
+    }
+    if (key === 'account_tier_label') {
+      const tier = r.account_tier || '';
+      const tierLbl = r.account_tier_label || r.team_name || 'Standard';
+      const tierColor = tier === 'personal_pro' ? '#fbbf24' : (tier === 'team_org' ? '#f43f5e' : '#a78bfa');
+      return `<td><span style="font-size: 0.72rem; color: ${tierColor}; font-weight: 600;">${this.escapeHtml(tierLbl)}</span></td>`;
+    }
+    if (key === 'compute_node') {
+      return `<td style="font-family: var(--font-mono); font-size: 0.74rem; color: #cbd5e1;">${this.escapeHtml(r.compute_node || r.instance_id || 'local')}</td>`;
+    }
+    if (key === 'instance_id') {
+      return `<td style="font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted);">${this.escapeHtml(r.instance_id || 'local')}</td>`;
+    }
+    if (key === 'client_ip') {
+      const label = r.client_alias && r.client_alias !== r.client_ip
+        ? `${r.client_alias} (${r.client_ip || '127.0.0.1'})`
+        : (r.client_ip || r.client_alias || '127.0.0.1');
+      return `<td style="font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted);">${this.escapeHtml(label)}</td>`;
+    }
+    if (key === 'team_name') {
+      return `<td style="font-size: 0.76rem; color: var(--text-muted);">${this.escapeHtml(r.team_name || 'default')}</td>`;
+    }
+    if (key === 'user_name') {
+      return `<td style="font-size: 0.76rem; color: var(--text-muted);">${this.escapeHtml(r.user_name || 'local-user')}</td>`;
+    }
+    if (key === 'project_id') {
+      return `<td style="font-size: 0.75rem; color: var(--text-dim);">${this.escapeHtml(r.project_id || 'default')}</td>`;
+    }
+    if (key === 'event_count') {
+      return `<td style="font-family: var(--font-mono); color: var(--text-muted); text-align: right;">${Number(r.event_count || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'input_tokens') {
+      return `<td style="font-family: var(--font-mono); text-align: right;">${Number(r.input_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'output_tokens') {
+      return `<td style="font-family: var(--font-mono); text-align: right;">${Number(r.output_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'cache_creation_tokens') {
+      return `<td style="font-family: var(--font-mono); text-align: right; color: #c084fc;">${Number(r.cache_creation_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'cache_read_tokens') {
+      return `<td style="font-family: var(--font-mono); text-align: right; color: #a78bfa;">${Number(r.cache_read_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'total_tokens') {
+      return `<td style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8; text-align: right;">${Number(r.total_tokens || 0).toLocaleString()}</td>`;
+    }
+    if (key === 'net_cost_usd') {
+      return `<td style="text-align: right;">${this.formatReportEstCostCell(r, isSubtotal)}</td>`;
+    }
+    if (key === 'cost_per_1k') {
+      const totTok = Number(r.total_tokens || 0);
+      const netVal = r.net_cost_usd !== undefined ? Number(r.net_cost_usd) : Number(r.estimated_cost || 0);
+      if (totTok <= 0) {
+        return `<td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem; text-align: right;">$0.0000</td>`;
+      }
+      if (isLocal || netVal < 0) {
+        const savPer1k = ((Math.abs(netVal || Number(r.estimated_savings_usd || 0)) / totTok) * 1000).toFixed(4);
+        return `<td style="font-family: var(--font-mono); color: #c084fc; font-size: 0.75rem; text-align: right;">(-$${savPer1k})</td>`;
+      }
+      const c1k = ((Number(r.estimated_cost || 0) / totTok) * 1000).toFixed(4);
+      return `<td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem; text-align: right;">$${c1k}</td>`;
+    }
+    if (key === 'share') {
+      const pct = Math.min(100, Math.max(3, Math.round(((r.total_tokens || 0) / Math.max(1, maxTokens)) * 100)));
+      return `
+        <td style="text-align: center;">
+          <div style="background: rgba(255,255,255,0.05); border-radius: 4px; height: 10px; width: 80px; margin: 0 auto; overflow: hidden;">
+            <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, ${isLocal ? '#a855f7, #ec4899' : '#3b82f6, #06b6d4'}); border-radius: 4px;"></div>
+          </div>
+        </td>
+      `;
+    }
+    return `<td>${this.escapeHtml(String(r[key] ?? '—'))}</td>`;
+  },
+
+  _aggregateReportGroup(groupRows, groupDescriptor) {
+    const agg = {
+      period: `Σ Group Total (${groupRows.length})`,
+      provider: groupDescriptor.provider || '—',
+      account_id: groupDescriptor.account_id || '—',
+      group_key: groupDescriptor.label || 'Group Subtotal',
+      source: groupDescriptor.source || '—',
+      model: groupDescriptor.model || '—',
+      locality_label: groupDescriptor.locality_label || '—',
+      account_tier_label: groupDescriptor.account_tier_label || '—',
+      compute_node: groupDescriptor.compute_node || '—',
+      instance_id: groupDescriptor.instance_id || '—',
+      client_ip: groupDescriptor.client_ip || '—',
+      team_name: groupDescriptor.team_name || '—',
+      user_name: groupDescriptor.user_name || '—',
+      project_id: groupDescriptor.project_id || '—',
+      event_count: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+      total_tokens: 0,
+      estimated_cost: 0,
+      estimated_savings_usd: 0,
+      net_cost_usd: 0,
+      is_local_model: groupRows.length > 0 && groupRows.every(r => this._isLocalModelReportRow(r))
+    };
+    groupRows.forEach(r => {
+      agg.event_count += Number(r.event_count || 0);
+      agg.input_tokens += Number(r.input_tokens || 0);
+      agg.output_tokens += Number(r.output_tokens || 0);
+      agg.cache_creation_tokens += Number(r.cache_creation_tokens || 0);
+      agg.cache_read_tokens += Number(r.cache_read_tokens || 0);
+      agg.total_tokens += Number(r.total_tokens || 0);
+      agg.estimated_cost += Number(r.estimated_cost || 0);
+      const isLoc = this._isLocalModelReportRow(r);
+      const sav = Number(r.estimated_savings_usd || (isLoc ? ((r.total_tokens || 0) / 1000000.0) * 6.0 : 0));
+      agg.estimated_savings_usd += sav;
+      const net = r.net_cost_usd !== undefined ? Number(r.net_cost_usd) : (isLoc ? -sav : Number(r.estimated_cost || 0));
+      agg.net_cost_usd += net;
+    });
+    return agg;
+  },
+
+  renderHistoricalReportRows(rows) {
+    const tbody = document.getElementById("reports-table-body");
+    if (!tbody) return;
+
+    this.renderReportTableHeaders();
+    const visibleCols = this.ensureReportColumnsInitialized().filter(c => c.visible);
+    const colSpan = Math.max(1, visibleCols.length);
+
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="${colSpan}" style="text-align: center; color: var(--text-dim); padding: 24px;">
+            No usage activity found for the selected time slice and filters.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const sorted = [...rows];
+    const key = this.reportSortBy || 'period';
+    const dir = this.reportSortDir === 'asc' ? 1 : -1;
+    sorted.sort((a, b) => {
+      const va = a[key] ?? '';
+      const vb = b[key] ?? '';
+      if (typeof va === 'number' && typeof vb === 'number') {
+        return (va - vb) * dir;
+      }
+      return String(va).localeCompare(String(vb)) * dir;
+    });
+
+    const maxTokens = Math.max(...sorted.map(r => r.total_tokens || 0), 1);
+    const groupCols = Array.isArray(this.reportGroupByCols) ? this.reportGroupByCols : [];
+    const htmlRows = [];
+
+    if (groupCols.length > 0) {
+      const groupsMap = new Map();
+      sorted.forEach(r => {
+        const keyParts = groupCols.map(gk => `${gk}:${r[gk] ?? 'default'}`);
+        const compositeKey = keyParts.join('||');
+        if (!groupsMap.has(compositeKey)) {
+          const descriptor = {};
+          const labelParts = [];
+          const allCols = this.ensureReportColumnsInitialized();
+          groupCols.forEach(gk => {
+            const val = r[gk] || 'default';
+            descriptor[gk] = val;
+            const colMeta = allCols.find(c => c.key === gk);
+            labelParts.push(`${colMeta ? colMeta.label : gk}: ${val}`);
+          });
+          descriptor.label = labelParts.join(' • ');
+          groupsMap.set(compositeKey, { descriptor, items: [] });
+        }
+        groupsMap.get(compositeKey).items.push(r);
+      });
+
+      groupsMap.forEach(groupEntry => {
+        const { descriptor, items } = groupEntry;
+        // Group Header Banner Row
+        htmlRows.push(`
+          <tr class="report-group-header-row" style="background: rgba(56, 189, 248, 0.08); border-top: 1px solid rgba(56, 189, 248, 0.25);">
+            <td colspan="${colSpan}" style="padding: 7px 12px; font-size: 0.76rem; font-weight: 700; color: #38bdf8;">
+              📂 Group: ${this.escapeHtml(descriptor.label)} <span style="color: var(--text-dim); font-weight: 500; margin-left: 6px;">(${items.length} line item${items.length === 1 ? '' : 's'})</span>
+            </td>
+          </tr>
+        `);
+
+        // Individual Line Items in Group
+        items.forEach(r => {
+          const cells = visibleCols.map(c => this._renderSingleReportCell(c, r, maxTokens, false)).join("");
+          htmlRows.push(`<tr>${cells}</tr>`);
+        });
+
+        // Group Aggregate Subtotal Line-Item at End of Group
+        if (this.reportIncludeGroupTotals) {
+          const subtotalRow = this._aggregateReportGroup(items, descriptor);
+          const subtotalCells = visibleCols.map((c, idx) => {
+            if (idx === 0) {
+              return `<td style="font-family: var(--font-mono); font-weight: 800; color: #38bdf8; white-space: nowrap;">Σ Subtotal (${this.escapeHtml(descriptor.label)})</td>`;
+            }
+            if (!c.numeric && c.key !== 'share' && !groupCols.includes(c.key)) {
+              return `<td style="color: var(--text-dim); font-size: 0.72rem; font-style: italic;">(${items.length} items)</td>`;
+            }
+            return this._renderSingleReportCell(c, subtotalRow, maxTokens, true);
+          }).join("");
+          htmlRows.push(`
+            <tr class="report-group-subtotal-row" style="background: rgba(15, 23, 42, 0.92); border-top: 1px dashed rgba(56, 189, 248, 0.45); border-bottom: 2px solid rgba(56, 189, 248, 0.3); font-weight: 700;">
+              ${subtotalCells}
+            </tr>
+          `);
+        }
+      });
+    } else {
+      sorted.forEach(r => {
+        const cells = visibleCols.map(c => this._renderSingleReportCell(c, r, maxTokens, false)).join("");
+        htmlRows.push(`<tr>${cells}</tr>`);
+      });
+    }
+
+    // Grand Total Footer Line-Item
+    if (sorted.length > 1) {
+      const grandTotal = this._aggregateReportGroup(sorted, { label: 'Grand Total' });
+      const grandTotalCells = visibleCols.map((c, idx) => {
+        if (idx === 0) {
+          return `<td style="font-family: var(--font-mono); font-weight: 800; color: #f8fafc; white-space: nowrap;">∑ GRAND TOTAL (${sorted.length} rows)</td>`;
+        }
+        if (!c.numeric && c.key !== 'share') {
+          return `<td style="color: var(--text-dim); font-size: 0.72rem;">All Filtered</td>`;
+        }
+        return this._renderSingleReportCell(c, grandTotal, Math.max(grandTotal.total_tokens, 1), true);
+      }).join("");
+      htmlRows.push(`
+        <tr class="report-grand-total-row" style="background: rgba(30, 41, 59, 0.95); border-top: 2px solid rgba(255, 255, 255, 0.25); font-weight: 800;">
+          ${grandTotalCells}
+        </tr>
+      `);
+    }
+
+    tbody.innerHTML = htmlRows.join("");
+  },
+
+  async loadPivotMatrix() {
+    const tbody = document.getElementById("pivot-matrix-table-body");
+    if (!tbody) return;
+
+    const dims = document.getElementById("pivot-dimensions-select")?.value || "platform,model,source";
+    const win = document.getElementById("pivot-window-select")?.value || "24h";
+    const prov = document.getElementById("report-filter-provider")?.value || "";
+    const src = document.getElementById("report-filter-source")?.value || "";
+    const mdl = document.getElementById("report-filter-model")?.value?.trim() || "";
+    const inst = document.getElementById("report-filter-instance")?.value?.trim() || "";
+    const cip = document.getElementById("report-filter-client-ip")?.value?.trim() || "";
+
+    const params = new URLSearchParams({ dimensions: dims, window: win });
+    if (prov) params.set("filter_platform", prov);
+    if (src) params.set("filter_source", src);
+    if (mdl) params.set("filter_model", mdl);
+    if (inst) params.set("filter_instance", inst);
+    if (cip) params.set("filter_client", cip);
+
+    try {
+      const res = await fetch(`/api/usage/pivot?${params.toString()}`);
+      if (!res.ok) return;
+      const data = await res.json();
       const rows = data.rows || [];
-      if (rows.length === 0) {
+      if (!rows.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 24px;">
-              No usage activity found for the selected time slice and filters.
+            <td colspan="7" style="text-align: center; color: var(--text-dim); padding: 18px;">
+              No pivot telemetry recorded for the selected window.
             </td>
           </tr>
         `;
         return;
       }
 
-      const maxTokens = Math.max(...rows.map(r => r.total_tokens || 0), 1);
-
       tbody.innerHTML = rows.map(r => {
-        const pct = Math.min(100, Math.max(3, Math.round((r.total_tokens / maxTokens) * 100)));
-        const costPer1k = r.total_tokens > 0 ? ((r.estimated_cost / r.total_tokens) * 1000).toFixed(4) : "0.0000";
+        const keyParts = [];
+        if (r.group) keyParts.push(`🏷️ ${r.group}`);
+        if (r.provider) keyParts.push(r.provider.toUpperCase());
+        if (r.account_id) keyParts.push(r.account_id);
+        if (r.client_alias || r.client_ip) keyParts.push(`${r.client_alias || r.client_ip}`);
+        if (r.instance_id) keyParts.push(`Node: ${r.instance_id}`);
+        if (r.project_id) keyParts.push(`Proj: ${r.project_id}`);
+        if (r.model) keyParts.push(r.model);
+        if (r.source) keyParts.push(`[${r.source}]`);
+        const compositeLabel = keyParts.join("  •  ") || "All";
+
         return `
           <tr>
-            <td style="font-family: var(--font-mono); font-weight: 600; color: #fff;">${this.escapeHtml(r.period)}</td>
-            <td><strong style="color: #60a5fa; font-size: 0.8rem;">${this.escapeHtml(r.group_key || r.provider || 'All')}</strong></td>
-            <td style="font-family: var(--font-mono); color: var(--text-muted); text-align: right;">${Number(r.event_count || 0).toLocaleString()}</td>
+            <td style="font-weight: 600; color: #e2e8f0; font-size: 0.8rem;">${this.escapeHtml(compositeLabel)}</td>
+            <td style="font-family: var(--font-mono); text-align: right; color: var(--text-muted);">${Number(r.request_count || 0).toLocaleString()}</td>
             <td style="font-family: var(--font-mono); text-align: right;">${Number(r.input_tokens || 0).toLocaleString()}</td>
             <td style="font-family: var(--font-mono); text-align: right;">${Number(r.output_tokens || 0).toLocaleString()}</td>
-            <td style="font-family: var(--font-mono); text-align: right; color: #c084fc;">${Number(r.cache_creation_tokens || 0).toLocaleString()}</td>
-            <td style="font-family: var(--font-mono); text-align: right; color: #a78bfa;">${Number(r.cache_read_tokens || 0).toLocaleString()}</td>
             <td style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8; text-align: right;">${Number(r.total_tokens || 0).toLocaleString()}</td>
             <td style="font-family: var(--font-mono); font-weight: 700; color: #34d399; text-align: right;">$${Number(r.estimated_cost || 0).toFixed(4)}</td>
-            <td style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.75rem; text-align: right;">$${costPer1k}</td>
-            <td style="text-align: center;">
-              <div style="background: rgba(255,255,255,0.05); border-radius: 4px; height: 10px; width: 80px; margin: 0 auto; overflow: hidden;">
-                <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, #3b82f6, #06b6d4); border-radius: 4px;"></div>
-              </div>
-            </td>
+            <td style="font-family: var(--font-mono); text-align: right; color: #c084fc;">${Number(r.percentage_share || 0).toFixed(1)}%</td>
           </tr>
         `;
       }).join("");
-
     } catch (e) {
-      console.error("Error loading historical report:", e);
+      console.warn("Error loading pivot matrix:", e);
     }
   },
 
   exportReportsCsv() {
-    const group = this.selectedReportGrouping || 'day';
-    const rangeSelect = document.getElementById("report-date-range-select");
-    const rangeVal = rangeSelect ? rangeSelect.value : '7d';
-
-    const provSelect = document.getElementById("report-filter-provider");
-    const prov = provSelect ? provSelect.value : '';
-
-    const dimSelect = document.getElementById("report-filter-dimension");
-    const dim = dimSelect ? dimSelect.value : '';
-
-    const teamInput = document.getElementById("report-filter-team");
-    const team = teamInput ? teamInput.value.trim() : '';
-
-    const userInput = document.getElementById("report-filter-user");
-    const user = userInput ? userInput.value.trim() : '';
-
-    let startDate = '';
-    const now = new Date();
-    if (rangeVal === 'today') {
-      startDate = now.toISOString().substring(0, 10);
-    } else if (rangeVal === '7d') {
-      const d7 = new Date(now.getTime() - 7 * 86400000);
-      startDate = d7.toISOString().substring(0, 10);
-    } else if (rangeVal === '30d') {
-      const d30 = new Date(now.getTime() - 30 * 86400000);
-      startDate = d30.toISOString().substring(0, 10);
-    }
-
-    const acctSelect = document.getElementById("report-filter-account");
-    const acct = acctSelect ? acctSelect.value.trim() : '';
-
-    const params = new URLSearchParams({ group_by: group, format: 'csv' });
-    if (startDate) params.set("start_date", startDate);
-    if (prov) params.set("provider", prov);
-    if (acct) params.set("account_id", acct);
-    if (dim) params.set("dimension", dim);
-    if (team) params.set("team_name", team);
-    if (user) params.set("user_name", user);
-
+    const params = this._collectReportFilterParams();
+    params.set("format", "csv");
     window.location.href = `/api/reports/history?${params.toString()}`;
   },
 
+  generateSparkline(points, color = "#06b6d4") {
+    return this.generateInlineSparkline(points, color);
+  },
+
   generateInlineSparkline(points, color = "#06b6d4") {
+    if (window.AIUMCore && window.AIUMCore.ChartRenderer) {
+      return window.AIUMCore.ChartRenderer.generateSparklineSvg(points, color);
+    }
     if (!points || points.length < 2) return "";
     const min = Math.min(...points);
     const max = Math.max(...points);
@@ -2845,8 +3813,8 @@ window.App = {
     if (isAllZero || (min === 0 && max === 0)) {
       const yZero = (h - pad).toFixed(1);
       return `
-        <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);" title="No activity in window (0 tokens)">
-          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" stroke-dasharray="2,2"/>
+        <svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" style="max-width: 140px; background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); display: block;" title="No activity in window (0 tokens)">
+          <line x1="${pad}" y1="${yZero}" x2="${w - pad}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="2,2"/>
           <text x="${w / 2}" y="${h / 2 + 3}" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">0 t (idle)</text>
         </svg>
       `;
@@ -2863,8 +3831,8 @@ window.App = {
     const lastY = (h - pad - ((points[points.length - 1] - min) / range) * (h - pad * 2)).toFixed(1);
 
     return `
-      <svg width="${w}" height="${h}" style="background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
-        <polyline fill="none" stroke="${color}" stroke-width="2" points="${coords}" stroke-linecap="round" stroke-linejoin="round"/>
+      <svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" style="max-width: 140px; background: rgba(0,0,0,0.25); border-radius: 4px; border: 1px solid rgba(255,255,255,0.06); display: block;">
+        <polyline fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" points="${coords}" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="${lastX}" cy="${lastY}" r="2.5" fill="${color}" stroke="#ffffff" stroke-width="1"/>
       </svg>
     `;
@@ -2872,25 +3840,23 @@ window.App = {
 
   switchDashboardViewMode(mode) {
     this.dashboardViewMode = mode;
+    this._lastLocalWindowUpdateTs = Date.now();
     const btnBal = document.getElementById("view-mode-btn-balances");
     const btnTrd = document.getElementById("view-mode-btn-trends");
     const trendWinCtrl = document.getElementById("trend-window-control");
+    const viewModeSelect = document.getElementById("cfg-default-view-mode");
     if (btnBal) btnBal.className = mode === 'balances' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
     if (btnTrd) btnTrd.className = mode === 'trends' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
     if (trendWinCtrl) trendWinCtrl.style.display = mode === 'trends' ? 'flex' : 'none';
+    if (viewModeSelect) viewModeSelect.value = mode;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { widget_view_mode: mode } })
+    }).catch(() => {});
     if (this.lastCompData && window._lastProviders) {
       this.renderComparison(this.lastCompData, window._lastProviders);
     }
-  },
-
-  switchTab(target) {
-    document.querySelectorAll(".nav-tab").forEach(t => {
-      t.classList.toggle("active", t.getAttribute("data-tab") === target);
-    });
-    document.querySelectorAll(".tab-content").forEach(c => {
-      c.classList.toggle("active", c.id === `tab-${target}`);
-    });
-    this.activeTab = target;
   },
 
   async loadSettings() {
@@ -2910,6 +3876,7 @@ window.App = {
       const topRefreshCadence = document.getElementById("ui-refresh-cadence-select");
       const ollamaSync = document.getElementById("cfg-ollama-sync");
       const viewModeSelect = document.getElementById("cfg-default-view-mode");
+      const defTrendWinSelect = document.getElementById("cfg-default-trend-window");
 
       if (autoResize && st.widget_auto_resize !== undefined) autoResize.checked = !!st.widget_auto_resize;
       if (fadeUnpinned && st.widget_fade_unpinned !== undefined) fadeUnpinned.checked = !!st.widget_fade_unpinned;
@@ -2918,7 +3885,16 @@ window.App = {
         showAxisLabels.checked = !!st.show_axis_labels;
         this.showAxisLabels = !!st.show_axis_labels;
       }
-      if (themeSelect && st.widget_theme) themeSelect.value = st.widget_theme;
+      if (themeSelect && st.widget_theme) {
+        themeSelect.value = st.widget_theme;
+        this.applyTheme(st.widget_theme);
+        this.highlightThemeSwatch(st.widget_theme);
+      }
+      const densitySelect = document.getElementById("cfg-layout-density");
+      const activeDensity = st.layout_density || "balanced";
+      if (densitySelect) densitySelect.value = activeDensity;
+      this.applyLayoutDensity(activeDensity);
+
       if (pollCadence && st.poll_cadence_seconds) pollCadence.value = st.poll_cadence_seconds;
       if (st.ui_refresh_interval_seconds) {
         const intervalSec = Math.max(30, Math.min(300, parseInt(st.ui_refresh_interval_seconds, 10) || 30));
@@ -2929,6 +3905,16 @@ window.App = {
       }
       if (ollamaSync && st.ollama_sync_interval) ollamaSync.value = st.ollama_sync_interval;
       if (viewModeSelect && st.widget_view_mode) viewModeSelect.value = st.widget_view_mode;
+      const syncedWin = st.active_trend_window || st.default_trend_window;
+      if (syncedWin) {
+        this.chartWindow = syncedWin;
+        this.trendWindow = syncedWin;
+        if (defTrendWinSelect) defTrendWinSelect.value = syncedWin;
+        const cWinSel = document.getElementById("chart-window-select");
+        const tWinSel = document.getElementById("trend-window-select");
+        if (cWinSel) cWinSel.value = syncedWin;
+        if (tWinSel) tWinSel.value = syncedWin;
+      }
 
       const fontRadios = document.querySelectorAll("input[name='cfg-font-scale']");
       if (st.widget_font_size && fontRadios.length) {
@@ -2980,8 +3966,167 @@ window.App = {
       if (bridgeOllamaUrl) bridgeOllamaUrl.innerText = `http://127.0.0.1:${ollamaPort}`;
       if (bridgeOpenAiUrl) bridgeOpenAiUrl.innerText = `http://127.0.0.1:${ollamaPort}/v1`;
       if (bridgeProxyUrl) bridgeProxyUrl.innerText = `http://127.0.0.1:${proxyPort}`;
+
+      // Load Windows Auto-Start & Background Service status (AIUM-901)
+      this.loadWindowsServiceStatus(false);
     } catch (e) {
       console.warn("Error loading settings:", e);
+    }
+  },
+
+  async loadWindowsServiceStatus(includeLogs = false) {
+    try {
+      const res = await fetch(`/api/system/startup?logs=${includeLogs ? "true" : "false"}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      this.renderWindowsServiceStatus(data);
+    } catch (e) {
+      console.warn("Error loading Windows service status:", e);
+    }
+  },
+
+  renderWindowsServiceStatus(data) {
+    if (!data) return;
+    const startup = data.startup || data;
+    const enabledChk = document.getElementById("cfg-win-autostart-enabled");
+    const widgetChk = document.getElementById("cfg-win-autostart-widget");
+    const watchdogChk = document.getElementById("cfg-win-autostart-watchdog");
+    const methodSel = document.getElementById("cfg-win-autostart-method");
+
+    if (enabledChk) enabledChk.checked = !!startup.enabled;
+    if (widgetChk) widgetChk.checked = !!startup.launch_widget;
+    if (watchdogChk && startup.auto_restart_on_crash !== undefined) {
+      watchdogChk.checked = !!startup.auto_restart_on_crash;
+    }
+    if (methodSel && startup.preferred_method) {
+      methodSel.value = startup.preferred_method;
+    }
+
+    const startupBadge = document.getElementById("win-startup-badge");
+    if (startupBadge) {
+      if (startup.enabled) {
+        const methodLabel = startup.method === "task_scheduler" ? "Task Scheduler" : (startup.method === "both" ? "Dual" : "Registry Run");
+        startupBadge.innerText = `🟢 Auto-Start Active (${methodLabel})`;
+        startupBadge.style.background = "rgba(16, 185, 129, 0.15)";
+        startupBadge.style.color = "#34d399";
+        startupBadge.style.borderColor = "rgba(16, 185, 129, 0.35)";
+      } else {
+        startupBadge.innerText = "⚪ Auto-Start Disabled";
+        startupBadge.style.background = "rgba(148, 163, 184, 0.15)";
+        startupBadge.style.color = "#94a3b8";
+        startupBadge.style.borderColor = "rgba(148, 163, 184, 0.25)";
+      }
+    }
+
+    const runningBadge = document.getElementById("win-service-running-badge");
+    if (runningBadge) {
+      if (data.running) {
+        const modeTxt = data.mode === "daemon" ? "Daemon" : "Active";
+        runningBadge.innerText = `⚡ ${modeTxt} (PID ${data.pid || "--"})`;
+        runningBadge.style.background = "rgba(56, 189, 248, 0.15)";
+        runningBadge.style.color = "#38bdf8";
+      } else {
+        runningBadge.innerText = "⏹ Stopped";
+        runningBadge.style.background = "rgba(239, 68, 68, 0.15)";
+        runningBadge.style.color = "#f87171";
+      }
+    }
+
+    const pidEl = document.getElementById("win-svc-pid");
+    if (pidEl) pidEl.innerText = data.pid ? `${data.pid}` : "--";
+
+    const uptimeEl = document.getElementById("win-svc-uptime");
+    if (uptimeEl) {
+      const sec = parseInt(data.uptime_seconds || 0, 10);
+      if (sec > 3600) {
+        uptimeEl.innerText = `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+      } else if (sec > 60) {
+        uptimeEl.innerText = `${Math.floor(sec / 60)}m ${sec % 60}s`;
+      } else {
+        uptimeEl.innerText = `${sec}s`;
+      }
+    }
+
+    const logSizeEl = document.getElementById("win-svc-log-size");
+    if (logSizeEl) {
+      const kb = ((data.log_size_bytes || 0) / 1024).toFixed(1);
+      logSizeEl.innerText = `${kb} KB`;
+    }
+
+    const cmdEl = document.getElementById("win-svc-cmd");
+    if (cmdEl && startup.command) {
+      cmdEl.innerText = startup.command;
+    }
+
+    const logOut = document.getElementById("win-service-log-output");
+    if (logOut && Array.isArray(data.recent_logs)) {
+      logOut.innerText = data.recent_logs.length ? data.recent_logs.join("\n") : "No daemon log entries recorded yet.";
+    }
+  },
+
+  async applyWindowsStartupConfig() {
+    const enabledChk = document.getElementById("cfg-win-autostart-enabled");
+    const widgetChk = document.getElementById("cfg-win-autostart-widget");
+    const watchdogChk = document.getElementById("cfg-win-autostart-watchdog");
+    const methodSel = document.getElementById("cfg-win-autostart-method");
+
+    const payload = {
+      enabled: enabledChk ? enabledChk.checked : false,
+      launch_widget: widgetChk ? widgetChk.checked : false,
+      auto_restart_on_crash: watchdogChk ? watchdogChk.checked : true,
+      method: methodSel ? methodSel.value : "registry"
+    };
+
+    try {
+      const res = await fetch("/api/system/startup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        await this.loadWindowsServiceStatus(false);
+        if (typeof this.showToast === "function") {
+          this.showToast(payload.enabled ? "Windows Auto-Start enabled." : "Windows Auto-Start disabled.", "success");
+        }
+      }
+    } catch (e) {
+      console.warn("Failed applying Windows startup config:", e);
+    }
+  },
+
+  async controlWindowsService(action) {
+    try {
+      const widgetChk = document.getElementById("cfg-win-autostart-widget");
+      const res = await fetch("/api/system/service", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: action,
+          deferred: true,
+          launch_widget: widgetChk ? widgetChk.checked : false
+        })
+      });
+      if (res.ok) {
+        if (action === "clear_logs") {
+          await this.loadWindowsServiceStatus(true);
+        } else if (action === "restart") {
+          setTimeout(() => this.loadWindowsServiceStatus(true), 2200);
+        } else {
+          await this.loadWindowsServiceStatus(true);
+        }
+      }
+    } catch (e) {
+      console.warn("Error controlling Windows service:", e);
+    }
+  },
+
+  toggleServiceLogViewer() {
+    const panel = document.getElementById("win-service-log-panel");
+    if (!panel) return;
+    const isHidden = panel.style.display === "none";
+    panel.style.display = isHidden ? "block" : "none";
+    if (isHidden) {
+      this.loadWindowsServiceStatus(true);
     }
   },
 
@@ -2995,6 +4140,7 @@ window.App = {
     const refreshCadence = document.getElementById("cfg-ui-refresh-cadence");
     const ollamaSync = document.getElementById("cfg-ollama-sync");
     const viewModeSelect = document.getElementById("cfg-default-view-mode");
+    const defTrendWinSelect = document.getElementById("cfg-default-trend-window");
 
     const checkedFont = document.querySelector("input[name='cfg-font-scale']:checked");
     const pinned = [];
@@ -3016,17 +4162,28 @@ window.App = {
     const defSessInput = document.getElementById("cfg-default-session-limit");
     const defDailyInput = document.getElementById("cfg-default-daily-limit");
 
+    const densitySelect = document.getElementById("cfg-layout-density");
+    const selectedTheme = themeSelect ? themeSelect.value : "linear-obsidian";
+    const selectedDensity = densitySelect ? densitySelect.value : "balanced";
+
+    this.applyTheme(selectedTheme);
+    this.highlightThemeSwatch(selectedTheme);
+    this.applyLayoutDensity(selectedDensity);
+
     const payload = {
       widget_auto_resize: autoResize ? autoResize.checked : true,
       widget_fade_unpinned: fadeUnpinned ? fadeUnpinned.checked : false,
       widget_hide_parent_chart_on_expand: hideParentExpand ? hideParentExpand.checked : false,
       show_axis_labels: showAxisLabels ? showAxisLabels.checked : true,
-      widget_theme: themeSelect ? themeSelect.value : "obsidian_neon",
+      widget_theme: selectedTheme,
+      layout_density: selectedDensity,
       widget_font_size: checkedFont ? checkedFont.value : "standard",
       poll_cadence_seconds: pollCadence ? parseInt(pollCadence.value, 10) || 4 : 4,
       ui_refresh_interval_seconds: refreshCadence ? Math.max(30, Math.min(300, parseInt(refreshCadence.value, 10) || 30)) : 30,
       ollama_sync_interval: ollamaSync ? parseInt(ollamaSync.value, 10) || 15 : 15,
       widget_view_mode: viewModeSelect ? viewModeSelect.value : "balances",
+      default_trend_window: defTrendWinSelect ? defTrendWinSelect.value : (this.chartWindow || "24h"),
+      active_trend_window: defTrendWinSelect ? defTrendWinSelect.value : (this.chartWindow || "24h"),
       pinned_items: pinned,
       quota_tracking_mode: quotaTrackingMode,
       ollama_emulator_port: parseInt(ollamaPortInput ? ollamaPortInput.value : "8989", 10) || 8989,
@@ -3223,6 +4380,7 @@ window.App = {
   },
 
   switchTab(target) {
+    this.activeTab = target;
     document.querySelectorAll(".nav-tab").forEach(t => {
       if (t.getAttribute("data-tab") === target) {
         t.classList.add("active");
@@ -3276,10 +4434,25 @@ window.App = {
 
         const r24El = document.getElementById("cap-rolling24-val");
         if (r24El) r24El.innerHTML = `${Number(m.rolling_24h_tokens || 0).toLocaleString()} <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted);">tok</span>`;
+
+        // Populate 5h/7d Rolling Quota Pacing Forecaster & Context-Window Bloat Anomalies (AIUM-1010)
+        const pacingMap = tData.quota_pacing || {};
+        const claudePacing = pacingMap.claude || Object.values(pacingMap)[0] || null;
+        if (claudePacing) {
+          this.renderCapacityQuotaPacing(claudePacing);
+        }
+        const anomalies = tData.context_anomalies || [];
+        this.renderContextBloatAnomalies(anomalies);
       }
 
       if (fRes.ok) {
         const fData = await fRes.json();
+        if (fData.quota_pacing && fData.quota_pacing.claude) {
+          this.renderCapacityQuotaPacing(fData.quota_pacing.claude);
+        }
+        if (Array.isArray(fData.context_anomalies) && fData.context_anomalies.length > 0) {
+          this.renderContextBloatAnomalies(fData.context_anomalies);
+        }
         const provs = fData.providers || {};
         const tbody = document.getElementById("cap-forecast-tbody");
         if (tbody) {
@@ -3728,6 +4901,7 @@ window.App = {
   },
 
   renderBenchmarkResults(evaluations) {
+    this._lastBenchmarkEvaluations = Array.isArray(evaluations) ? evaluations : [];
     const tbody = document.getElementById("benchmark-results-body");
     if (!tbody) return;
 
@@ -3743,9 +4917,9 @@ window.App = {
     }
 
     tbody.innerHTML = evaluations.map(e => `
-      <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+      <tr onclick="window.App.openBenchmarkTranscriptModal('${this.escapeHtml(e.id)}')" title="Click to inspect full evaluation prompt, output transcript, and AST verification" style="border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer;">
         <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.76rem; color: #a5b4fc;">
-          ${this.escapeHtml(e.id)}
+          🔍 ${this.escapeHtml(e.id)}
         </td>
         <td style="padding: 10px 14px; font-weight: 600; color: #f8fafc;">
           ${this.escapeHtml(e.model_name)}
@@ -3767,6 +4941,60 @@ window.App = {
         </td>
       </tr>
     `).join("");
+  },
+
+  openBenchmarkTranscriptModal(evalId) {
+    const modal = document.getElementById("benchmark-transcript-modal");
+    if (!modal) return;
+    const list = this._lastBenchmarkEvaluations || [];
+    const item = list.find(e => String(e.id) === String(evalId)) || list[0];
+    if (!item) return;
+
+    const details = item.details || {};
+    const execMode = String(item.execution_mode || details.execution_mode || "simulated_fallback").toLowerCase();
+    const isLive = execMode.includes("live");
+
+    const badgeEl = document.getElementById("modal-bench-mode-badge");
+    if (badgeEl) {
+      badgeEl.innerText = isLive ? "LIVE_INFERENCE" : "SIMULATED_FALLBACK";
+      badgeEl.style.background = isLive ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)";
+      badgeEl.style.color = isLive ? "#34d399" : "#fbbf24";
+    }
+
+    const modelEl = document.getElementById("modal-bench-model");
+    if (modelEl) modelEl.innerText = item.model_name || "--";
+
+    const provEl = document.getElementById("modal-bench-provider");
+    if (provEl) provEl.innerText = (item.provider || "--").toUpperCase();
+
+    const ttftEl = document.getElementById("modal-bench-ttft");
+    if (ttftEl) ttftEl.innerText = `${item.ttft_ms || 0} ms`;
+
+    const tpsEl = document.getElementById("modal-bench-tps");
+    if (tpsEl) tpsEl.innerText = `${item.tokens_per_second || 0} tok/s`;
+
+    const scoreEl = document.getElementById("modal-bench-score");
+    if (scoreEl) scoreEl.innerText = `${item.score_pct || 0}% (${item.overall_rating || "N/A"})`;
+
+    const suiteDetails = Array.isArray(details.suite_breakdown) ? details.suite_breakdown : [];
+    const firstSuite = suiteDetails[0] || {};
+
+    const promptEl = document.getElementById("modal-bench-prompt");
+    if (promptEl) {
+      promptEl.innerText = item.prompt_transcript || details.prompt_transcript || firstSuite.prompt || `Suite: ${item.suite_name || "full"} evaluation against ${item.model_name}`;
+    }
+
+    const outputEl = document.getElementById("modal-bench-output");
+    if (outputEl) {
+      outputEl.innerText = item.output_transcript || details.output_transcript || firstSuite.output_preview || JSON.stringify(details, null, 2);
+    }
+
+    const astEl = document.getElementById("modal-bench-ast");
+    if (astEl) {
+      astEl.innerText = item.ast_diagnostics || details.ast_diagnostics || firstSuite.verification_note || `Pass: ${item.pass_count || 0}, Fail: ${item.fail_count || 0} | Rating: ${item.overall_rating || "A"}`;
+    }
+
+    modal.style.display = "flex";
   },
 
   rerunBenchmark(provider, modelName) {
@@ -5019,7 +6247,31 @@ window.App = {
     }
   },
 
+  formatTokens(n) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatTokens(n);
+    }
+    return Number(n || 0).toLocaleString();
+  },
+
+  formatCurrency(usd, decimals = 2) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatCurrency(usd, decimals);
+    }
+    return `$${Number(usd || 0).toFixed(decimals)}`;
+  },
+
+  formatCountdown(resetEpochOrIso, fallbackStr = "") {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatCountdown(resetEpochOrIso, fallbackStr);
+    }
+    return fallbackStr;
+  },
+
   escapeHtml(str) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.escapeHtml(str);
+    }
     if (!str) return "";
     return String(str)
       .replace(/&/g, "&amp;")
@@ -5030,10 +6282,16 @@ window.App = {
   },
 
   formatLocalDateTime(isoStr) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatLocalDateTime(isoStr);
+    }
     if (!isoStr) return "-";
     try {
       let s = String(isoStr).trim();
       if (!s) return "-";
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(s)) {
+        s += ":00";
+      }
       if (!s.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(s)) {
         s += "Z";
       }
@@ -5052,10 +6310,16 @@ window.App = {
   },
 
   formatLocalTime(isoStr) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatLocalTime(isoStr);
+    }
     if (!isoStr) return "-";
     try {
       let s = String(isoStr).trim();
       if (!s) return "-";
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(s)) {
+        s += ":00";
+      }
       if (!s.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(s)) {
         s += "Z";
       }
@@ -5070,6 +6334,9 @@ window.App = {
   },
 
   formatDuration(startIso, endIso) {
+    if (window.AIUMCore && window.AIUMCore.Formatters) {
+      return window.AIUMCore.Formatters.formatDuration(startIso, endIso);
+    }
     if (!startIso || !endIso) return "-";
     try {
       let s1 = String(startIso).trim();
@@ -5092,6 +6359,240 @@ window.App = {
     } catch (e) {
       return "-";
     }
+  },
+
+  deduplicateDiagnosticErrors(errors) {
+    if (!Array.isArray(errors)) return [];
+    const grouped = new Map();
+    for (const err of errors) {
+      if (!err) continue;
+      const cat = String(err.category || "general");
+      const prov = String(err.provider || "system");
+      const msg = String(err.message || "");
+      const key = `${cat}::${prov}::${msg}`;
+      const ts = String(err.timestamp || "");
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          ...err,
+          category: cat,
+          provider: prov,
+          message: msg,
+          count: 1,
+          latest_timestamp: ts
+        });
+      } else {
+        const entry = grouped.get(key);
+        entry.count += 1;
+        if (ts > entry.latest_timestamp) {
+          entry.latest_timestamp = ts;
+          entry.timestamp = ts;
+        }
+      }
+    }
+    return Array.from(grouped.values());
+  },
+
+  filterDiagnosticLogs() {
+    if (!Array.isArray(this._rawDiagnosticErrors)) return;
+    const searchEl = document.getElementById("diag-log-search");
+    const catEl = document.getElementById("diag-log-category-filter");
+    const query = (searchEl?.value || "").trim().toLowerCase();
+    const catFilter = (catEl?.value || "").trim().toLowerCase();
+    const deduped = this.deduplicateDiagnosticErrors(this._rawDiagnosticErrors);
+    const filtered = deduped.filter(item => {
+      if (catFilter && String(item.category || "").toLowerCase() !== catFilter) return false;
+      if (query) {
+        const hay = `${item.category || ""} ${item.provider || ""} ${item.message || ""}`.toLowerCase();
+        if (!hay.includes(query)) return false;
+      }
+      return true;
+    });
+    const logContainer = document.getElementById("error-log-container");
+    if (!logContainer) return;
+    if (filtered.length === 0) {
+      logContainer.innerHTML = `<div style="color: var(--text-dim); text-align: center; padding: 20px;">No matching diagnostic log entries.</div>`;
+      return;
+    }
+    logContainer.innerHTML = filtered.map(err => `
+      <div class="log-entry" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+        <div>
+          <span class="log-time">[${this.formatLocalDateTime(err.latest_timestamp || err.timestamp)}]</span>
+          <span class="log-cat">[${this.escapeHtml(err.category)} / ${this.escapeHtml(err.provider)}]</span>
+          <span>${this.escapeHtml(err.message)}</span>
+        </div>
+        ${err.count > 1 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 0.7rem;">×${err.count}</span>` : ""}
+      </div>
+    `).join("");
+  },
+
+  applyReportDatePreset(preset) {
+    const rangeSelect = document.getElementById("report-date-range-select");
+    const startInput = document.getElementById("report-filter-start-date") || document.getElementById("report-start-date");
+    const endInput = document.getElementById("report-filter-end-date") || document.getElementById("report-end-date");
+    const now = new Date();
+    const toIsoDate = (d) => d.toISOString().slice(0, 10);
+
+    if (preset === "mtd") {
+      const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      if (rangeSelect) rangeSelect.value = "custom";
+      if (startInput) startInput.value = toIsoDate(mtdStart);
+      if (endInput) endInput.value = toIsoDate(now);
+    } else if (["today", "24h", "7d", "30d", "all"].includes(preset)) {
+      if (rangeSelect) rangeSelect.value = preset;
+      if (startInput) startInput.value = "";
+      if (endInput) endInput.value = "";
+    }
+    if (typeof this.loadHistoricalReport === "function") {
+      this.loadHistoricalReport();
+    }
+  },
+
+  applyTheme(themeId) {
+    const supportedThemes = [
+      "linear-obsidian",
+      "geist-monochrome",
+      "cyberpunk-hud",
+      "catppuccin-mocha",
+      "tokyo-night",
+      "executive-paper"
+    ];
+    const resolved = supportedThemes.includes(themeId) ? themeId : (themeId || "linear-obsidian");
+    document.documentElement.setAttribute("data-theme", resolved);
+    if (document.body) {
+      document.body.setAttribute("data-theme", resolved);
+    }
+    try {
+      localStorage.setItem("aium_active_theme", resolved);
+    } catch (e) {}
+    return resolved;
+  },
+
+  selectThemeSwatch(themeId) {
+    const sel = document.getElementById("cfg-widget-theme");
+    if (sel) sel.value = themeId;
+    this.applyTheme(themeId);
+    this.highlightThemeSwatch(themeId);
+  },
+
+  highlightThemeSwatch(themeId) {
+    document.querySelectorAll(".theme-swatch-card").forEach(btn => {
+      const id = btn.getAttribute("data-theme-id");
+      if (id === themeId) {
+        btn.style.outline = "2px solid var(--accent-cyan, #38bdf8)";
+        btn.style.boxShadow = "0 0 12px rgba(56, 189, 248, 0.35)";
+      } else {
+        btn.style.outline = "none";
+        btn.style.boxShadow = "none";
+      }
+    });
+  },
+
+  applyLayoutDensity(densityId) {
+    const resolved = ["compact", "balanced", "ultrawide"].includes(densityId) ? densityId : "balanced";
+    document.documentElement.setAttribute("data-density", resolved);
+    try {
+      localStorage.setItem("aium_layout_density", resolved);
+    } catch (e) {}
+    return resolved;
+  },
+
+  renderCapacityQuotaPacing(pacing) {
+    if (!pacing) return;
+    const status = String(pacing.pacing_status || "SAFE_TILL_RESET");
+    const burnRate = Number(pacing.burn_rate_pct_per_hour || 0).toFixed(1);
+    const exhSec = Number(pacing.time_to_exhaustion_seconds || 0);
+    const rstSec = Number(pacing.time_to_reset_seconds || 0);
+    const sessRem = Number(pacing.session_remaining_pct ?? 100);
+    const weekRem = Number(pacing.weekly_remaining_pct ?? 100);
+
+    const fmtSec = (sec) => {
+      if (!sec || sec <= 0 || sec > 86400 * 7) return "> 24h";
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    };
+
+    const badgeEl = document.getElementById("cap-pacing-badge");
+    if (badgeEl) {
+      badgeEl.innerText = status;
+      if (status === "EXHAUSTION_BEFORE_RESET") {
+        badgeEl.style.background = "rgba(244, 63, 94, 0.2)";
+        badgeEl.style.color = "#f43f5e";
+        badgeEl.style.borderColor = "rgba(244, 63, 94, 0.4)";
+      } else if (status === "ELEVATED_PACE") {
+        badgeEl.style.background = "rgba(245, 158, 11, 0.2)";
+        badgeEl.style.color = "#fbbf24";
+        badgeEl.style.borderColor = "rgba(245, 158, 11, 0.4)";
+      } else {
+        badgeEl.style.background = "rgba(16, 185, 129, 0.2)";
+        badgeEl.style.color = "#34d399";
+        badgeEl.style.borderColor = "rgba(16, 185, 129, 0.4)";
+      }
+    }
+
+    const burnEl = document.getElementById("cap-pacing-burn-rate");
+    if (burnEl) burnEl.innerText = `${burnRate}%/h`;
+
+    const exhEl = document.getElementById("cap-pacing-exhaustion");
+    if (exhEl) exhEl.innerText = fmtSec(exhSec);
+
+    const rstEl = document.getElementById("cap-pacing-reset");
+    if (rstEl) rstEl.innerText = fmtSec(rstSec);
+
+    const sessEl = document.getElementById("cap-pacing-session-rem");
+    if (sessEl) sessEl.innerText = `${sessRem}%`;
+
+    const weekEl = document.getElementById("cap-pacing-weekly-rem");
+    if (weekEl) weekEl.innerText = `${weekRem}%`;
+
+    const recEl = document.getElementById("cap-pacing-recommendation");
+    if (recEl && pacing.recommendation) {
+      recEl.innerText = pacing.recommendation;
+    }
+  },
+
+  renderContextBloatAnomalies(anomalies) {
+    const tbody = document.getElementById("cap-bloat-anomalies-tbody");
+    if (!tbody) return;
+    if (!Array.isArray(anomalies) || anomalies.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="5" style="padding: 16px; text-align: center; color: var(--text-dim);">
+            ✓ No quadratic context bloat (>35:1 input/output) or rapid-fire loops detected in active sessions.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = anomalies.map(a => {
+      const ratioStr = a.io_ratio !== undefined ? `${Number(a.io_ratio).toFixed(1)}:1` : "--";
+      const wasteTok = Number(a.estimated_wasted_tokens || 0).toLocaleString();
+      const wasteUsd = Number(a.estimated_wasted_usd || 0).toFixed(4);
+      const sev = String(a.severity || "WARNING").toUpperCase();
+      const sevCol = sev === "CRITICAL" ? "#f43f5e" : "#fbbf24";
+      return `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+          <td style="padding: 8px 6px; font-family: var(--font-mono); color: var(--accent-cyan);">
+            ${this.escapeHtml(a.session_id || "unknown")}
+          </td>
+          <td style="padding: 8px 6px;">
+            <span class="badge" style="background: ${sevCol}20; color: ${sevCol}; border: 1px solid ${sevCol}40; font-size: 0.65rem;">
+              ${this.escapeHtml(a.anomaly_type || "CONTEXT_BLOAT")}
+            </span>
+          </td>
+          <td style="padding: 8px 6px; text-align: right; font-family: var(--font-mono); color: #f8fafc;">
+            ${ratioStr}
+          </td>
+          <td style="padding: 8px 6px; text-align: right; font-family: var(--font-mono); color: #fbbf24;">
+            ${wasteTok} tok ($${wasteUsd})
+          </td>
+          <td style="padding: 8px 6px; color: var(--text-muted); font-size: 0.72rem;">
+            ${this.escapeHtml(a.remediation || "Run /compact or start fresh session")}
+          </td>
+        </tr>
+      `;
+    }).join("");
   }
 };
 

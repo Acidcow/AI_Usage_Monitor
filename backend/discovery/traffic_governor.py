@@ -330,7 +330,11 @@ class TrafficGovernor:
                         input_tokens=in_tok,
                         output_tokens=out_tok,
                         session_id=f"remote_{node_id}_{int(time.time())}",
-                        estimated_cost=0.0
+                        estimated_cost=0.0,
+                        source="proxy",
+                        instance_id=node_id,
+                        is_proxied=1,
+                        client_ip=client_ip
                     )
                     if client_ip and hasattr(self.db, "record_client_tokens"):
                         self.db.record_client_tokens(client_ip, in_tok + out_tok)
@@ -624,7 +628,11 @@ class TrafficGovernor:
                             input_tokens=in_tok,
                             output_tokens=out_tok,
                             session_id=f"remote_{cand_id}_{int(time.time())}",
-                            estimated_cost=0.0
+                            estimated_cost=0.0,
+                            source="proxy",
+                            instance_id=cand_id,
+                            is_proxied=1,
+                            client_ip=client_ip
                         )
                         if client_ip and hasattr(self.db, "record_client_tokens"):
                             self.db.record_client_tokens(client_ip, in_tok + out_tok)
@@ -766,7 +774,11 @@ class TrafficGovernor:
                                                 input_tokens=tot_in,
                                                 output_tokens=tot_out,
                                                 session_id=f"stream_{cand_id}_{int(time.time())}",
-                                                estimated_cost=0.0
+                                                estimated_cost=0.0,
+                                                source="proxy",
+                                                instance_id=cand_id,
+                                                is_proxied=1,
+                                                client_ip=client_ip
                                             )
                                             if client_ip and hasattr(self.db, "record_client_tokens"):
                                                 self.db.record_client_tokens(client_ip, tot_in + tot_out)

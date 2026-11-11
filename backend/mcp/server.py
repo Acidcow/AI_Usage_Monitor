@@ -12,12 +12,13 @@ class MCPServer:
 
     PROTOCOL_VERSION = "2024-11-05"
     SERVER_NAME = "ai-usage-monitor-proxy"
-    SERVER_VERSION = "0.1.0"
+    SERVER_VERSION = "0.2.0"
 
-    def __init__(self, scanner=None, registry=None, governor=None):
+    def __init__(self, scanner=None, registry=None, governor=None, database=None):
         self.scanner = scanner
         self.registry = registry
         self.governor = governor
+        self.database = database
 
     def get_tool_definitions(self) -> list:
         return [
@@ -83,24 +84,59 @@ class MCPServer:
                         "node_id": {"type": "string", "description": "Optional node ID to filter stats"}
                     }
                 }
+            },
+            {
+                "name": "get_usage_summary",
+                "description": "Retrieves aggregated token usage (input, output, cache), total cost USD, and session counts for today and the current month across AI providers.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "provider": {"type": "string", "description": "Optional provider filter (claude, gemini, copilot, ollama, etc.)"}
+                    }
+                }
+            },
+            {
+                "name": "get_provider_quotas",
+                "description": "Retrieves real-time quota status, session remaining percentage, weekly remaining percentage, and reset timestamps across all configured AI providers.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "provider": {"type": "string", "description": "Optional provider name filter (e.g. claude, gemini, copilot)"}
+                    }
+                }
+            },
+            {
+                "name": "get_proxy_endpoints",
+                "description": "Returns active local ports, base URLs, and environment variables for funneling traffic through AI Usage Monitor's reverse proxy and MCP bridges.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
 
-    def handle_json_rpc(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Processes a single JSON-RPC 2.0 MCP request dict and returns response dict."""
+    def handle_json_rpc(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Processes a single JSON-RPC 2.0 MCP request dict and returns response dict (or None for notifications)."""
         req_id = request.get("id")
         method = request.get("method", "")
         params = request.get("params", {}) or {}
 
+        # In JSON-RPC 2.0, a notification is a request object without an 'id' member.
+        # The server MUST NOT reply to a notification.
+        is_notification = ("id" not in request or req_id is None)
+
         # 1. initialize
         if method == "initialize":
+            client_proto = params.get("protocolVersion") or self.PROTOCOL_VERSION
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "protocolVersion": self.PROTOCOL_VERSION,
+                    "protocolVersion": client_proto,
                     "capabilities": {
-                        "tools": {"listChanged": False}
+                        "tools": {"listChanged": False},
+                        "resources": {"subscribe": False, "listChanged": False},
+                        "prompts": {"listChanged": False}
                     },
                     "serverInfo": {
                         "name": self.SERVER_NAME,
@@ -109,14 +145,15 @@ class MCPServer:
                 }
             }
 
-        # 2. notifications/initialized & ping
-        if method in ["notifications/initialized", "initialized"]:
-            return {"jsonrpc": "2.0", "id": req_id, "result": {}}
+        # 2. Notifications: MUST NOT receive any response in JSON-RPC 2.0 / MCP
+        if is_notification:
+            return None
 
+        # 3. ping
         if method == "ping":
             return {"jsonrpc": "2.0", "id": req_id, "result": {}}
 
-        # 3. tools/list
+        # 4. tools/list
         if method == "tools/list":
             return {
                 "jsonrpc": "2.0",
@@ -126,7 +163,35 @@ class MCPServer:
                 }
             }
 
-        # 4. tools/call
+        # 5. resources/list, resources/templates/list, prompts/list (graceful empty results)
+        if method == "resources/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "resources": []
+                }
+            }
+
+        if method == "resources/templates/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "resourceTemplates": []
+                }
+            }
+
+        if method == "prompts/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "prompts": []
+                }
+            }
+
+        # 6. tools/call
         if method == "tools/call":
             tool_name = params.get("name")
             args = params.get("arguments", {}) or {}
@@ -214,6 +279,38 @@ class MCPServer:
                 return {}
             return self.governor.get_telemetry(node_id=args.get("node_id"))
 
+        if name == "get_usage_summary":
+            db = self.database
+            if not db:
+                from backend.storage.database import UsageDatabase
+                db = UsageDatabase()
+            return db.get_usage_summary(provider=args.get("provider"))
+
+        if name == "get_provider_quotas":
+            db = self.database
+            if not db:
+                from backend.storage.database import UsageDatabase
+                db = UsageDatabase()
+            provider = args.get("provider")
+            if provider:
+                snap = db.get_latest_provider_snapshot(provider)
+                return snap or {}
+            return db.get_provider_snapshots()
+
+        if name == "get_proxy_endpoints":
+            return {
+                "transparent_reverse_proxy": "http://127.0.0.1:8766",
+                "ollama_and_openai_bridge": "http://127.0.0.1:8989",
+                "mcp_json_rpc_http": "http://127.0.0.1:8765/api/mcp/rpc",
+                "env_variables": {
+                    "HTTP_PROXY": "http://127.0.0.1:8766",
+                    "HTTPS_PROXY": "http://127.0.0.1:8766",
+                    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8766",
+                    "OLLAMA_BASE_URL": "http://127.0.0.1:8989",
+                    "OPENAI_BASE_URL": "http://127.0.0.1:8989/v1"
+                }
+            }
+
         raise ValueError(f"Unknown tool '{name}'")
 
     def run_stdio(self):
@@ -225,8 +322,9 @@ class MCPServer:
             try:
                 req = json.loads(line_str)
                 resp = self.handle_json_rpc(req)
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+                if resp is not None:
+                    sys.stdout.write(json.dumps(resp) + "\n")
+                    sys.stdout.flush()
             except Exception as e:
                 err_resp = {
                     "jsonrpc": "2.0",
@@ -246,5 +344,5 @@ if __name__ == "__main__":
     scanner = LANScanner()
     registry = NodeRegistry(db)
     governor = TrafficGovernor(registry, db)
-    server = MCPServer(scanner=scanner, registry=registry, governor=governor)
+    server = MCPServer(scanner=scanner, registry=registry, governor=governor, database=db)
     server.run_stdio()

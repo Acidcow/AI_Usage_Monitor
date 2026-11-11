@@ -76,6 +76,89 @@
     </div>
   </div>
 
+  <!-- Quota Pacing & Context-Window Bloat Guardrails Panel (AIUM-1010) -->
+  <div id="capacity-pacing-bloat-panel" style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 10px; padding: 18px; margin-bottom: 24px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 1.1rem;">🛡️</span>
+        <h4 style="font-size: 0.95rem; font-weight: 700; color: #fff; margin: 0;">Rolling Quota Pacing Forecaster & Context Bloat Guardrails</h4>
+      </div>
+      <div id="cap-pacing-badge" class="badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; font-weight: 600;">
+        🟢 Sustainable Pace
+      </div>
+    </div>
+
+    <!-- Pacing Details Grid -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 14px;">
+      <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 10px 12px;">
+        <div style="font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Rolling Burn Velocity</div>
+        <div style="font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; color: var(--accent-cyan); margin-top: 3px;" id="cap-pacing-burn-rate">0.0 <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 400;">tok/min</span></div>
+        <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 1px;">30m / 5h rolling burn</div>
+      </div>
+
+      <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 10px 12px;">
+        <div style="font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Est. Time to Exhaustion</div>
+        <div style="font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; color: #fbbf24; margin-top: 3px;" id="cap-pacing-exhaustion">Runway: Idle</div>
+        <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 1px;">Session runway at active velocity</div>
+      </div>
+
+      <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 10px 12px;">
+        <div style="font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">5-Hour Window Reset</div>
+        <div style="font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; color: #38bdf8; margin-top: 3px;" id="cap-pacing-reset">5h rolling window</div>
+        <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 1px;">Matches Dashboard countdown</div>
+      </div>
+
+      <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 10px 12px;">
+        <div style="font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Cross-Tab Session Remaining</div>
+        <div style="font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; color: #34d399; margin-top: 3px;" id="cap-pacing-session-rem">100.0%</div>
+        <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 1px;">Aligned with Dashboard session</div>
+      </div>
+
+      <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 10px 12px;">
+        <div style="font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Weekly Pool Remaining</div>
+        <div style="font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; color: #a78bfa; margin-top: 3px;" id="cap-pacing-weekly-rem">100.0%</div>
+        <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 1px;">7-day rolling quota pool</div>
+      </div>
+    </div>
+
+    <!-- Pacing Recommendation Banner -->
+    <div id="cap-pacing-recommendation" style="background: rgba(6, 182, 212, 0.08); border-left: 3px solid var(--accent-cyan); padding: 8px 12px; font-size: 0.78rem; color: var(--text-main); margin-bottom: 16px; border-radius: 0 4px 4px 0;">
+      Current consumption rate is sustainable through next reset.
+    </div>
+
+    <!-- Context Bloat & Runaway Loop Table -->
+    <div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="font-size: 0.8rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px;">
+          <span>🔍</span> Multi-Turn Context Bloat & Runaway Loop Warnings
+        </div>
+        <span style="font-size: 0.7rem; color: var(--text-dim);">Heuristic detection: &gt;40% input growth or &ge;8 turns in 120s</span>
+      </div>
+
+      <div class="table-container" style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.76rem; text-align: left;">
+          <thead>
+            <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.08); color: var(--text-dim);">
+              <th style="padding: 8px 6px;">Session ID</th>
+              <th style="padding: 8px 6px;">Provider / Model</th>
+              <th style="padding: 8px 6px;">Anomaly Type</th>
+              <th style="padding: 8px 6px;">Turns / Peak Input</th>
+              <th style="padding: 8px 6px;">Avg Growth Rate</th>
+              <th style="padding: 8px 6px;">Recommended Action</th>
+            </tr>
+          </thead>
+          <tbody id="cap-bloat-anomalies-tbody">
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 14px;">
+                ✅ No context-window bloat or runaway loops detected across active sessions.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- Proactive Estate Recommendations -->
   <div>
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
