@@ -66,26 +66,54 @@
     <!-- Top Status Pills (Canonical Component Container) -->
     <div id="container-header-status"></div>
 
-    <!-- IRIS Sentinel Operational Telemetry Briefing Strip -->
-    <div class="mascot-banner" id="johnny5-mascot-banner">
-      <div class="mascot-banner-avatar">
-        <img src="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png" alt="IRIS Sentinel" class="mascot-img-pointing" id="mascot-main-img" onclick="window.App.cycleMascotQuote()" style="cursor: pointer;" title="Click to cycle operational telemetry brief">
+    <!-- IRIS Full-Character Interactive Sentinel Stage (Main UI Hero Companion) -->
+    <div class="mascot-banner iris-full-stage-banner" id="johnny5-mascot-banner" onmouseenter="window.App.onMascotHover(true)" onmouseleave="window.App.onMascotHover(false)">
+      <!-- Full-Body / Scene Character Showcase Stage -->
+      <div class="iris-character-stage" onclick="window.App.cycleMascotPose()" title="Hover to animate • Click to cycle IRIS full-body pose &amp; outfit">
+        <img src="/assets/iris_mascot/01_poses/pose_neutral_standing.png" alt="IRIS Full Character Stage" class="iris-full-stage-img iris-pixel-img" id="mascot-full-stage-img">
+        <span class="iris-stage-caption" id="iris-stage-pose-label">Base: Sports Bra, Boy-Shorts &amp; Cyber Arm</span>
       </div>
+
+      <!-- Animated / Contextual Expression Portrait & Telemetry Briefing -->
       <div class="mascot-banner-content">
         <div class="mascot-speech-bubble">
           <div class="mascot-quote-header">
-            <span class="mascot-name">IRIS SENTINEL</span>
-            <span class="mascot-status-tag" id="mascot-status-tag">SYSTEM NOMINAL</span>
+            <img src="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png" alt="IRIS Expression" class="mascot-img-pointing iris-pixel-img" id="mascot-main-img" onclick="window.App.cycleMascotQuote()" onmouseenter="this.src='/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif'" onmouseleave="window.App.restoreMascotAvatar()" style="cursor: pointer; width: 48px; height: 48px;" title="Hover for animated smile &amp; wink • Click for next brief">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span class="mascot-name">IRIS SENTINEL</span>
+                <span class="mascot-status-tag" id="mascot-status-tag">SYSTEM NOMINAL</span>
+                <span class="mascot-status-tag" id="iris-anim-state-pill" style="background: rgba(59, 130, 246, 0.14); color: #60a5fa; border-color: rgba(59, 130, 246, 0.3);">HOVER GIF READY</span>
+              </div>
+              <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">
+                Royal-Blue Sentinel • Deus-Ex Cybernetic Left Arm • Interactive Telemetry Companion
+              </div>
+            </div>
             <span class="mascot-tip-pill" onclick="window.App.cycleMascotQuote()" title="Cycle operational brief">Next Brief ↻</span>
           </div>
-          <p class="mascot-quote-text" id="mascot-quote-text">
+          <p class="mascot-quote-text" id="mascot-quote-text" style="margin-top: 8px;">
             SQLite WAL telemetry pipeline and Windows DPAPI vault are operating normally. Cross-source deduplication is active across proxy and CLI log streams.
           </p>
+
+          <!-- Interactive Full-Character Pose & Outfit Selector Strip -->
+          <div class="iris-pose-selector-bar" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px;">
+            <span style="font-size: 0.68rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em;">Stage Pose / Outfit:</span>
+            <button type="button" class="btn btn-secondary btn-sm iris-pose-btn active" data-pose="/assets/iris_mascot/01_poses/pose_neutral_standing.png" data-gif="/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif" onclick="window.App.setMascotStagePose('/assets/iris_mascot/01_poses/pose_neutral_standing.png', 'Base: Sports Bra, Boy-Shorts &amp; Cyber Arm', '/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif', this)" style="font-size: 0.68rem; padding: 2px 8px;">Base Stance</button>
+            <button type="button" class="btn btn-secondary btn-sm iris-pose-btn" data-pose="/assets/iris_mascot/01_poses/pose_analytical_console.png" data-gif="/assets/iris_mascot/05_animations/anim_loading_scan.gif" onclick="window.App.setMascotStagePose('/assets/iris_mascot/01_poses/pose_analytical_console.png', 'Analytical Holo-Console', '/assets/iris_mascot/05_animations/anim_loading_scan.gif', this)" style="font-size: 0.68rem; padding: 2px 8px;">Holo Console</button>
+            <button type="button" class="btn btn-secondary btn-sm iris-pose-btn" data-pose="/assets/iris_mascot/01_poses/pose_diagnostic_repair.png" data-gif="/assets/iris_mascot/05_animations/anim_busy_processing.gif" onclick="window.App.setMascotStagePose('/assets/iris_mascot/01_poses/pose_diagnostic_repair.png', 'Node Calibration &amp; Repair', '/assets/iris_mascot/05_animations/anim_busy_processing.gif', this)" style="font-size: 0.68rem; padding: 2px 8px;">Node Calibration</button>
+            <button type="button" class="btn btn-secondary btn-sm iris-pose-btn" data-pose="/assets/iris_mascot/01_poses/pose_alert_defensive.png" data-gif="/assets/iris_mascot/05_animations/anim_alert_pulse.gif" onclick="window.App.setMascotStagePose('/assets/iris_mascot/01_poses/pose_alert_defensive.png', '429 Shield Defense', '/assets/iris_mascot/05_animations/anim_alert_pulse.gif', this)" style="font-size: 0.68rem; padding: 2px 8px;">Shield Defense</button>
+            <button type="button" class="btn btn-secondary btn-sm iris-pose-btn" data-pose="/assets/iris_mascot/02_outfits/outfit_field_tactical.png" data-gif="/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif" onclick="window.App.setMascotStagePose('/assets/iris_mascot/02_outfits/outfit_field_tactical.png', 'Outfit: Deus-Ex Tactical Rig', '/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif', this)" style="font-size: 0.68rem; padding: 2px 8px;">Tactical Rig</button>
+            <button type="button" class="btn btn-secondary btn-sm iris-pose-btn" data-pose="/assets/iris_mascot/02_outfits/outfit_eva_astronaut_rig.png" data-gif="/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif" onclick="window.App.setMascotStagePose('/assets/iris_mascot/02_outfits/outfit_eva_astronaut_rig.png', 'Outfit: LucasArts EVA Rig', '/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif', this)" style="font-size: 0.68rem; padding: 2px 8px;">EVA Rig</button>
+          </div>
         </div>
       </div>
-      <div class="mascot-banner-actions">
-        <button class="btn btn-secondary btn-sm" onclick="window.App.openIconPickerModal()" title="Open IRIS Character Reference &amp; Expression Matrix">
-          Reference Pack
+
+      <div class="mascot-banner-actions" style="flex-direction: column; align-items: stretch; gap: 6px;">
+        <button class="btn btn-secondary btn-sm" onclick="window.App.openIconPickerModal()" title="Open IRIS Character Reference, Animated GIFs &amp; Taskbar Icon Picker">
+          Character &amp; Icons
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="window.App.previewBusyAnimation()" title="Preview loading/busy animated GIF state">
+          Preview Busy GIF
         </button>
       </div>
     </div>
@@ -132,7 +160,10 @@
   <div class="modal-overlay" id="claude-config-modal">
     <div class="modal-box">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <h3 style="font-size: 1.15rem; font-weight: 700;">Configure Claude (Anthropic)</h3>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <img src="/assets/iris_mascot/04_avatars/avatar_guidance_config.png" alt="IRIS Config" class="iris-pixel-img" style="width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border-subtle);" onmouseenter="this.src='/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif'" onmouseleave="this.src='/assets/iris_mascot/04_avatars/avatar_guidance_config.png'">
+          <h3 style="font-size: 1.15rem; font-weight: 700;">Configure Claude (Anthropic)</h3>
+        </div>
         <button onclick="window.App.closeConfigureClaudeModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
 
@@ -449,55 +480,88 @@
     </div>
   </div>
 
-  <!-- IRIS Character Reference Repository, Outfits, Poses & 3-Degree Expression Matrix Modal -->
+  <!-- IRIS Character Reference Repository, Animated GIFs & Taskbar/Tray Icon Picker Modal -->
   <div class="modal-overlay" id="icon-picker-modal">
-    <div class="modal-box" style="max-width: 860px; max-height: 90vh; overflow-y: auto;">
+    <div class="modal-box" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <div>
-          <h3 style="font-size: 1.05rem; font-weight: 700;">IRIS Character Reference &amp; Contextual Avatar Repository</h3>
-          <div style="font-size: 0.75rem; color: var(--text-muted);">LucasArts &ldquo;The Dig&rdquo; High-Resolution Pixel-Art Asset Pack • Canonical Digital Skin-Suit Anchor</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <img src="/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif" alt="IRIS Animated" class="iris-pixel-img" style="width: 42px; height: 42px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+          <div>
+            <h3 style="font-size: 1.05rem; font-weight: 700;">IRIS Character Reference Repository, Animated GIFs &amp; Application Icons</h3>
+            <div style="font-size: 0.75rem; color: var(--text-muted);">100% Original LucasArts &ldquo;The Dig&rdquo; &amp; &ldquo;Deus Ex&rdquo; Pixel-Art Pack • Royal-Blue Hair • Cybernetic Left Arm</div>
+          </div>
         </div>
         <button onclick="window.App.closeIconPickerModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer;">&times;</button>
       </div>
 
-      <!-- Primary App Avatar Selection -->
-      <div class="icon-picker-grid" style="grid-template-columns: repeat(3, 1fr);">
-        <div class="icon-choice-card selected" id="card-choice-johnny5" onclick="window.App.selectAppIcon('johnny5')">
+      <!-- Selectable Application Icon for Windows Task Manager, System Tray & Browser -->
+      <div style="margin-bottom: 6px; font-size: 0.8rem; font-weight: 600; color: var(--text-main);">
+        Select Application Icon (Updates Windows Task Manager, System Tray, Mini Widget &amp; Favicon):
+      </div>
+      <div class="icon-picker-grid" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="icon-choice-card selected" id="card-choice-johnny5" onclick="window.App.selectAppIcon('iris_head')">
           <span class="icon-selected-badge" id="badge-choice-johnny5">ACTIVE</span>
-          <img src="/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png" alt="IRIS Sentinel Nominal" class="icon-choice-preview">
-          <div class="icon-choice-title">IRIS Sentinel (Nominal)</div>
-          <div class="icon-choice-desc">Canonical pixel-art bust portrait in digital telemetry skin-suit.</div>
+          <img src="/assets/icons/app_icon_iris_head.png" alt="IRIS Portrait Head" class="icon-choice-preview iris-pixel-img" onmouseenter="this.src='/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif'" onmouseleave="this.src='/assets/icons/app_icon_iris_head.png'">
+          <div class="icon-choice-title">IRIS Portrait Head</div>
+          <div class="icon-choice-desc">Royal-blue hair, sapphire eyes, and mischievous dimpled smile (.ico + .png).</div>
         </div>
 
-        <div class="icon-choice-card" id="card-choice-scanning" onclick="window.App.selectAppIcon('scanning')">
+        <div class="icon-choice-card" id="card-choice-scanning" onclick="window.App.selectAppIcon('iris_eye')">
           <span class="icon-selected-badge" id="badge-choice-scanning" style="display: none;">ACTIVE</span>
-          <img src="/assets/iris_mascot/04_avatars/avatar_scanning_idle.png" alt="IRIS Telemetry Visor" class="icon-choice-preview">
-          <div class="icon-choice-title">IRIS Optic Visor</div>
-          <div class="icon-choice-desc">Active telemetry monocle visor for packet and token stream scanning.</div>
+          <img src="/assets/icons/app_icon_iris_eye.png" alt="IRIS Cyber-Optic Eye" class="icon-choice-preview iris-pixel-img">
+          <div class="icon-choice-title">Cyber-Optic Eye</div>
+          <div class="icon-choice-desc">Macro sapphire-cyan iris with a golden Deus-Ex hexagonal targeting reticle.</div>
         </div>
 
-        <div class="icon-choice-card" id="card-choice-shield" onclick="window.App.selectAppIcon('shield')">
+        <div class="icon-choice-card" id="card-choice-shield" onclick="window.App.selectAppIcon('iris_cyber_arm')">
           <span class="icon-selected-badge" id="badge-choice-shield" style="display: none;">ACTIVE</span>
-          <img src="/assets/iris_mascot/04_avatars/avatar_guidance_config.png" alt="IRIS Chief Scientist" class="icon-choice-preview">
-          <div class="icon-choice-title">IRIS Chief Scientist</div>
-          <div class="icon-choice-desc">R&amp;D lab coat overlay with holographic DPAPI security key.</div>
+          <img src="/assets/icons/app_icon_iris_cyber_arm.png" alt="Deus-Ex Cybernetic Arm Crest" class="icon-choice-preview iris-pixel-img">
+          <div class="icon-choice-title">Cybernetic Arm Crest</div>
+          <div class="icon-choice-desc">Deus-Ex carbon-titanium biomechanical arm projecting a telemetry hologram.</div>
+        </div>
+
+        <div class="icon-choice-card" id="card-choice-holo" onclick="window.App.selectAppIcon('iris_holo')">
+          <span class="icon-selected-badge" id="badge-choice-holo" style="display: none;">ACTIVE</span>
+          <img src="/assets/icons/app_icon_iris_holo.png" alt="IRIS Tactical Holo-Visor" class="icon-choice-preview iris-pixel-img">
+          <div class="icon-choice-title">Tactical Holo-Visor</div>
+          <div class="icon-choice-desc">IRIS wearing translucent cyan holographic AR telemetry optics.</div>
         </div>
       </div>
 
-      <!-- 00: Master Canonical Reference Turnaround Sheet -->
+      <!-- 00: Master Canonical Reference Turnaround Sheet (100% Original) -->
       <div style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <strong style="font-size: 0.82rem; color: var(--text-main);">00. Master Canonical Reference Sheet (Digital Skin-Suit Turnaround)</strong>
+          <strong style="font-size: 0.82rem; color: var(--text-main);">00. Master Canonical Turnaround Sheet (Royal-Blue Hair, Sports Bra, Boy-Shorts &amp; Deus-Ex Cyber Arm)</strong>
           <code style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">/assets/iris_mascot/00_base_reference/</code>
         </div>
-        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+        <div class="mascot-gallery-item">
+          <img src="/assets/iris_mascot/00_base_reference/iris_base_skinsuit_turnaround.png" alt="Master Turnaround" class="iris-pixel-img" style="width: 100%; max-height: 290px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-subtle); background: #0b0e17;">
+          <div class="mascot-gallery-label" style="margin-top: 4px;">100% Original Canonical Pixel-Art Turnaround (Wireframe, Front Base Layer with Dimpled Smile &amp; Cybernetic Left Arm, Rear Profile)</div>
+        </div>
+      </div>
+
+      <!-- 05: Multi-Frame Animated GIFs (Hover, Loading, Busy & Alert States) -->
+      <div style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="font-size: 0.82rem; color: var(--text-main);">05. Interactive Animated Pixel-Art GIFs (Hover, Sync/Loading, Busy &amp; Rate-Limit Alerts)</strong>
+          <code style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">/assets/iris_mascot/05_animations/*.gif</code>
+        </div>
+        <div class="mascot-gallery-grid" style="grid-template-columns: repeat(4, 1fr);">
           <div class="mascot-gallery-item">
-            <img src="/assets/iris_mascot/00_base_reference/iris_base_skinsuit_turnaround.png" alt="Master Turnaround" class="iris-pixel-img" style="width: 100%; border-radius: 6px; border: 1px solid var(--border-subtle);">
-            <div class="mascot-gallery-label" style="margin-top: 4px;">Canonical Pixel-Art Turnaround (Wireframe, Front, Rear Profile)</div>
+            <img src="/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif" alt="Idle Smile & Wink GIF" class="mascot-gallery-img iris-pixel-img">
+            <div class="mascot-gallery-label">Hover: Dimpled Smile &amp; Wink</div>
           </div>
           <div class="mascot-gallery-item">
-            <img src="/assets/iris_mascot/00_base_reference/user_reference_concept.jpg" alt="Source Concept" style="width: 100%; border-radius: 6px; border: 1px solid var(--border-subtle);">
-            <div class="mascot-gallery-label" style="margin-top: 4px;">Source Character Concept Sheet</div>
+            <img src="/assets/iris_mascot/05_animations/anim_loading_scan.gif" alt="Loading Scan GIF" class="mascot-gallery-img iris-pixel-img">
+            <div class="mascot-gallery-label">Loading: Holo-Scanner Sweep</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/05_animations/anim_busy_processing.gif" alt="Busy Calibration GIF" class="mascot-gallery-img iris-pixel-img">
+            <div class="mascot-gallery-label">Busy: Node Calibration Sparks</div>
+          </div>
+          <div class="mascot-gallery-item">
+            <img src="/assets/iris_mascot/05_animations/anim_alert_pulse.gif" alt="Alert Shield Pulse GIF" class="mascot-gallery-img iris-pixel-img">
+            <div class="mascot-gallery-label">Alert: 429 Hex Shield Pulse</div>
           </div>
         </div>
       </div>

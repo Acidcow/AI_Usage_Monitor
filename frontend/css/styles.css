@@ -737,6 +737,63 @@ table.data-table tr:hover td {
   gap: 8px;
 }
 
+/* Full-Character Main UI Stage */
+.iris-full-stage-banner {
+  padding: 14px 18px;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.iris-character-stage {
+  width: 156px;
+  min-height: 188px;
+  flex-shrink: 0;
+  background: #0b0e17;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.iris-character-stage:hover {
+  border-color: var(--accent-primary);
+}
+
+.iris-full-stage-img {
+  width: 100%;
+  height: 162px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;
+}
+
+.iris-stage-caption {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-align: center;
+  line-height: 1.2;
+  margin-top: 4px;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.iris-pose-btn.active {
+  border-color: var(--accent-primary) !important;
+  color: var(--accent-primary) !important;
+  background: rgba(59, 130, 246, 0.1) !important;
+}
+
 /* Diagnostics Nominal Card */
 .mascot-success-card {
   display: flex;

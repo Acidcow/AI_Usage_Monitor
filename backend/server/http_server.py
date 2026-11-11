@@ -828,6 +828,15 @@ class AppHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                             srv.database.set_setting(k, v)
                     else:
                         srv.database.set_setting(k, v)
+                        if k in ("active_icon", "active_app_icon") and isinstance(v, str):
+                            try:
+                                from backend.tray.icon_factory import apply_process_and_window_icon
+                                apply_process_and_window_icon(v)
+                                tray_mgr = getattr(srv, "tray_manager", None)
+                                if tray_mgr and hasattr(tray_mgr, "set_icon_type"):
+                                    tray_mgr.set_icon_type(v)
+                            except Exception:
+                                pass
                 return self._send_json(200, {"success": True, "settings": srv.database.get_all_settings()})
             return self._send_json(400, {"error": "Settings must be a key-value dictionary"})
 

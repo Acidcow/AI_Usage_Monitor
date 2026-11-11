@@ -1,89 +1,145 @@
 {
-  "schema_version": "3.0.0",
+  "schema_version": "3.1.0",
   "character_id": "iris_sentinel_v3",
   "character_name": "IRIS (Intelligent Resource & Inference Sentinel)",
-  "art_style": "1995 LucasArts 'The Dig' High-Resolution Sci-Fi Pixel Art",
+  "art_style": "1995 LucasArts 'The Dig' & 'Deus Ex' High-Resolution Sci-Fi Pixel Art",
   "visual_signature": {
-    "hair": "Chin-length obsidian-black bob with subtle slate highlights and dual silver telemetry hairpins",
-    "eyes": "High-contrast emerald-cyan pixel clusters",
-    "base_attire": "Matte-charcoal form-fitting digital telemetry skin-suit with subtle cyan conduit seams and choker collar",
+    "demeanor": "Mature, demure yet sassy and alluring with a signature mischievous, dimpled smile",
+    "hair": "Sleek shoulder-grazing royal-blue / midnight-sapphire bob with vibrant cobalt highlights and silver telemetry hairpins",
+    "eyes": "High-contrast sapphire-cyan pixel clusters with golden cyber-optic micro-reticle reflections",
+    "cybernetic_arm": "Deus-Ex style biomechanical left arm crafted from matte black carbon-fiber plates, brushed titanium joints, and glowing gold/cyan neural conduits",
+    "base_attire": "Athletic charcoal-slate sports bra and matching boy-shorts with royal-blue and gold piping",
     "rendering_css": "image-rendering: pixelated; image-rendering: crisp-edges;"
   },
   "repository_root": "/assets/iris_mascot",
   "base_references": [
     {
       "id": "base_skinsuit_turnaround",
-      "label": "Master Canonical Turnaround (Digital Skin-Suit)",
+      "label": "Master Canonical Turnaround (Sports Bra, Boy-Shorts & Deus-Ex Cyber Arm)",
       "path": "/assets/iris_mascot/00_base_reference/iris_base_skinsuit_turnaround.png",
-      "role": "Primary canonical proportion, anatomy, and pixel-palette anchor for all derived poses, outfits, and expressions"
-    },
-    {
-      "id": "user_reference_concept",
-      "label": "Original Concept Reference Sheet",
-      "path": "/assets/iris_mascot/00_base_reference/user_reference_concept.jpg",
-      "role": "Source character design sheet (line-art, front tactical, rear profile)"
+      "role": "100% original primary canonical proportion, royal-blue hair, Deus-Ex cybernetic left arm, and pixel-palette anchor"
     }
   ],
   "poses": [
     {
       "id": "pose_neutral_standing",
-      "label": "Neutral Sentinel Stance",
+      "label": "Sassy Sentinel Stance (Base Layer)",
       "path": "/assets/iris_mascot/01_poses/pose_neutral_standing.png",
-      "context": "Default nominal monitoring posture"
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif",
+      "context": "Default nominal monitoring posture in sports bra, boy-shorts, and Deus-Ex cybernetic arm"
     },
     {
       "id": "pose_analytical_console",
       "label": "Analytical Telemetry Console",
       "path": "/assets/iris_mascot/01_poses/pose_analytical_console.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_loading_scan.gif",
       "context": "Inspecting token velocity curves, prompt cache efficiency, and model evaluations"
     },
     {
       "id": "pose_alert_defensive",
       "label": "Tactical Alert & Circuit Breaker",
       "path": "/assets/iris_mascot/01_poses/pose_alert_defensive.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_alert_pulse.gif",
       "context": "Quota exhaustion defense, HTTP 429 rate-limit shielding, and budget spillover"
     },
     {
       "id": "pose_diagnostic_repair",
       "label": "Node Calibration & Diagnostics",
       "path": "/assets/iris_mascot/01_poses/pose_diagnostic_repair.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_busy_processing.gif",
       "context": "Hardware node discovery, proxy bridge troubleshooting, and DPAPI vault calibration"
     }
   ],
   "outfits": [
     {
       "id": "outfit_digital_skinsuit",
-      "label": "Digital Telemetry Skin-Suit (Base Layer)",
+      "label": "Athletic Base (Sports Bra & Boy-Shorts)",
       "path": "/assets/iris_mascot/02_outfits/outfit_digital_skinsuit.png",
-      "description": "Form-fitting matte-charcoal telemetry skin-suit with subtle cyan fiber-optic conduit seams."
+      "description": "Fitted charcoal-slate sports bra and boy-shorts with royal-blue trim, showcasing her Deus-Ex cybernetic left arm."
     },
     {
       "id": "outfit_field_tactical",
-      "label": "Field Tactical Utility Rig",
+      "label": "Deus-Ex Field Tactical Rig",
       "path": "/assets/iris_mascot/02_outfits/outfit_field_tactical.png",
-      "description": "Cropped tactical vest, multi-cartridge leather utility belt, fingerless wrist-comm gloves, and cargo trousers."
+      "description": "Cropped tactical utility rig, multi-cartridge leather belt, fingerless wrist-comm gloves, and exposed cybernetic arm."
     },
     {
       "id": "outfit_lab_chief_coat",
-      "label": "Chief Telemetry Scientist Coat",
+      "label": "Chief Telemetry Scientist Suit",
       "path": "/assets/iris_mascot/02_outfits/outfit_lab_chief_coat.png",
-      "description": "Tailored silver-alabaster research trench coat over the digital skin-suit with pocket diagnostic instruments."
+      "description": "Sleek full-length telemetry specialist suit with cyan fiber-optic conduit seams."
     },
     {
       "id": "outfit_eva_astronaut_rig",
       "label": "Deep-Space EVA Rig ('The Dig' Homage)",
       "path": "/assets/iris_mascot/02_outfits/outfit_eva_astronaut_rig.png",
-      "description": "Weathered titanium-and-amber EVA chest rig and collar ring inspired by classic LucasArts 'The Dig'."
+      "description": "Close-cropped tactical EVA harness and cybernetic arm configuration inspired by classic LucasArts 'The Dig'."
+    }
+  ],
+  "animations": {
+    "idle_wink": {
+      "id": "anim_idle_wink_smile",
+      "label": "Mischievous Dimpled Smile & Wink (Hover / Idle)",
+      "path": "/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif",
+      "trigger": "mouseover / hover"
+    },
+    "loading_scan": {
+      "id": "anim_loading_scan",
+      "label": "Holographic Telemetry Scan (Loading / Syncing)",
+      "path": "/assets/iris_mascot/05_animations/anim_loading_scan.gif",
+      "trigger": "loading / syncing"
+    },
+    "busy_processing": {
+      "id": "anim_busy_processing",
+      "label": "Node Calibration & Laser Sparks (Busy / Benchmarking)",
+      "path": "/assets/iris_mascot/05_animations/anim_busy_processing.gif",
+      "trigger": "busy / benchmark / lan_scan"
+    },
+    "alert_pulse": {
+      "id": "anim_alert_pulse",
+      "label": "Hexagonal Energy Shield Pulse (Rate-Limit / Alert)",
+      "path": "/assets/iris_mascot/05_animations/anim_alert_pulse.gif",
+      "trigger": "warning / critical / http_429"
+    }
+  },
+  "app_icons": [
+    {
+      "id": "iris_head",
+      "alias": "johnny5",
+      "label": "IRIS Portrait (Royal-Blue Hair & Dimpled Smile)",
+      "ico_path": "/assets/icons/app_icon_iris_head.ico",
+      "png_path": "/assets/icons/app_icon_iris_head.png"
+    },
+    {
+      "id": "iris_eye",
+      "alias": "scanning",
+      "label": "IRIS Cyber-Optic Eye (Sapphire & Gold Reticle)",
+      "ico_path": "/assets/icons/app_icon_iris_eye.ico",
+      "png_path": "/assets/icons/app_icon_iris_eye.png"
+    },
+    {
+      "id": "iris_cyber_arm",
+      "alias": "shield",
+      "label": "Deus-Ex Cybernetic Arm Crest",
+      "ico_path": "/assets/icons/app_icon_iris_cyber_arm.ico",
+      "png_path": "/assets/icons/app_icon_iris_cyber_arm.png"
+    },
+    {
+      "id": "iris_holo",
+      "alias": "holo",
+      "label": "IRIS Tactical Holo-Visor",
+      "ico_path": "/assets/icons/app_icon_iris_holo.ico",
+      "png_path": "/assets/icons/app_icon_iris_holo.png"
     }
   ],
   "expression_matrix": {
     "nominal": {
-      "category": "Nominal / Healthy State",
+      "category": "Nominal / Sassy & Optimal State",
       "sheet_path": "/assets/iris_mascot/03_expressions/expressions_nominal_3degrees.png",
       "degrees": [
-        { "degree": 1, "id": "nominal_deg1_serene", "label": "Degree 1: Serene & Standby", "trigger": "Idle / Zero traffic" },
-        { "degree": 2, "id": "nominal_deg2_focused", "label": "Degree 2: Focused Tracking", "trigger": "Normal token streaming" },
-        { "degree": 3, "id": "nominal_deg3_optimal", "label": "Degree 3: Optimal Efficiency", "trigger": "Cache hit ratio >= 75% (Grade A+)" }
+        { "degree": 1, "id": "nominal_deg1_serene", "label": "Degree 1: Demure & Serene", "trigger": "Idle / Zero traffic" },
+        { "degree": 2, "id": "nominal_deg2_focused", "label": "Degree 2: Sassy Focused Glint", "trigger": "Normal token streaming" },
+        { "degree": 3, "id": "nominal_deg3_optimal", "label": "Degree 3: Mischievous Dimpled Grin", "trigger": "Cache hit ratio >= 75% (Grade A+)" }
       ]
     },
     "guidance": {
@@ -117,38 +173,44 @@
   "contextual_avatars": {
     "nominal": {
       "id": "avatar_nominal_healthy",
-      "label": "All Systems Nominal",
+      "label": "All Systems Nominal (Dimpled Smile)",
       "path": "/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif",
       "contexts": ["dashboard_healthy", "zero_errors", "tray_nominal"]
     },
     "scanning": {
       "id": "avatar_scanning_idle",
       "label": "Telemetry Scanner Active",
       "path": "/assets/iris_mascot/04_avatars/avatar_scanning_idle.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_loading_scan.gif",
       "contexts": ["empty_sessions", "lan_discovery", "log_scanner"]
     },
     "guidance": {
       "id": "avatar_guidance_config",
       "label": "Configuration & Security Advisor",
       "path": "/assets/iris_mascot/04_avatars/avatar_guidance_config.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif",
       "contexts": ["settings", "dpapi_vault", "onboarding", "providers"]
     },
     "stats": {
       "id": "avatar_stats_insights",
       "label": "Telemetry & Benchmark Analyst",
       "path": "/assets/iris_mascot/04_avatars/avatar_stats_insights.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_busy_processing.gif",
       "contexts": ["capacity", "benchmarks", "reports", "cache_efficiency"]
     },
     "warning": {
       "id": "avatar_warning_pacing",
       "label": "Pacing & Context-Bloat Caution",
       "path": "/assets/iris_mascot/04_avatars/avatar_warning_pacing.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_alert_pulse.gif",
       "contexts": ["elevated_pace", "context_bloat", "quota_low"]
     },
     "critical": {
       "id": "avatar_critical_error",
       "label": "Rate-Limit & Circuit-Breaker Alert",
       "path": "/assets/iris_mascot/04_avatars/avatar_critical_error.png",
+      "hover_gif": "/assets/iris_mascot/05_animations/anim_alert_pulse.gif",
       "contexts": ["error_429", "circuit_breaker", "diagnostics_fault"]
     }
   }

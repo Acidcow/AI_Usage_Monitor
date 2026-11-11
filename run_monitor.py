@@ -263,6 +263,13 @@ def run_service_runtime(args, service_manager: WindowsServiceManager):
             service_manager.release_pid_lock(pid=os.getpid())
             os._exit(0)
 
+        saved_icon = database.get_setting("active_icon", "iris_head") or "iris_head"
+        try:
+            from backend.tray.icon_factory import apply_process_and_window_icon
+            apply_process_and_window_icon(saved_icon)
+        except Exception:
+            pass
+
         tray = WindowsTrayManager(
             app_name="AI Usage Monitor",
             on_open_dashboard=open_dash,
@@ -271,8 +278,10 @@ def run_service_runtime(args, service_manager: WindowsServiceManager):
             on_open_settings=open_settings,
             on_toggle_startup=toggle_win_startup,
             is_startup_enabled=service_manager.is_startup_enabled,
-            on_exit=exit_from_tray
+            on_exit=exit_from_tray,
+            icon_type=saved_icon
         )
+        server.tray_manager = tray
         tray.start()
         print("[OK] Native Windows System Tray icon active.")
 

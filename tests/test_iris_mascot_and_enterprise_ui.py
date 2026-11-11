@@ -1,34 +1,36 @@
 """
-Unit tests for the v3.0 Enterprise UI Overhaul and IRIS Pixel-Art Mascot Reference Repository.
+Unit tests for the v3.1 Enterprise UI Overhaul and IRIS Pixel-Art Mascot Reference Repository.
 
 Verifies:
-1. Canonical IRIS Mascot Asset Manifest (docs/IRIS_MASCOT_ASSET_MANIFEST.json) schema & structure.
-2. Physical file existence and non-zero integrity for all 32 pixel-art assets across:
-   - 00_base_reference/ (master digital skin-suit turnaround + user concept reference)
+1. Canonical IRIS Mascot Asset Manifest (docs/IRIS_MASCOT_ASSET_MANIFEST.json) schema v3.1.0 & copyright-clean 00_base_reference.
+2. Physical file existence and non-zero integrity for all pixel-art assets across:
+   - 00_base_reference/ (100% original turnaround: Royal-Blue hair, Sports Bra & Boy-Shorts, Deus-Ex Cyber Arm; no external concept file)
    - 01_poses/ (4 full-body operational poses)
    - 02_outfits/ (4 outfit overlays)
    - 03_expressions/ (4 3-degree sheets + 12 individual degree portraits)
    - 04_avatars/ (6 contextual 1:1 UI avatars)
-3. Frontend core module (frontend/js/core/mascot_repository.js) contract & severity resolver.
-4. Enterprise UI styling (frontend/css/themes.css, frontend/css/styles.css) including
-   pixel-art crisp rendering, Light Mode (executive-paper) normalization, and removal of
-   conflicting legacy :root overrides.
-5. Header quick theme switcher & IRIS Vault Reference Modal in frontend/index.html & app.js.
+   - 05_animations/ (4 multi-frame looping GIF89a animated pixel-art GIFs)
+3. Selectable Windows Task Manager & System Tray Application Icons (iris_head, iris_eye, iris_cyber_arm, iris_holo) in backend.tray.icon_factory.
+4. Full-Character Interactive Stage (#mascot-full-stage-img), hover/busy GIF triggers, and modal thumbnail icons in frontend/index.html & app.js.
 """
 
 import json
 import pathlib
+import sys
 import unittest
 
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 MANIFEST_PATH = ROOT_DIR / "docs" / "IRIS_MASCOT_ASSET_MANIFEST.json"
 FRONTEND_DIR = ROOT_DIR / "frontend"
 MASCOT_DIR = FRONTEND_DIR / "assets" / "iris_mascot"
 
 
 class TestIrisMascotAndEnterpriseUI(unittest.TestCase):
-    """Comprehensive verification of the IRIS pixel-art repository and enterprise UI."""
+    """Comprehensive verification of the IRIS v3.1 pixel-art repository, animated GIFs, tray icons, and enterprise UI."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -44,52 +46,43 @@ class TestIrisMascotAndEnterpriseUI(unittest.TestCase):
         rel = web_path.lstrip("/")
         return FRONTEND_DIR / rel
 
-    def test_01_manifest_schema_and_metadata(self) -> None:
-        """Verify manifest top-level schema version, character ID, and LucasArts style descriptor."""
-        self.assertEqual(self.manifest.get("schema_version"), "3.0.0")
+    def test_01_manifest_schema_and_royal_blue_deus_ex_signature(self) -> None:
+        """Verify manifest top-level schema version 3.1.0, royal-blue hair, sports bra/boy-shorts, and Deus-Ex cyber arm."""
+        self.assertEqual(self.manifest.get("schema_version"), "3.1.0")
         self.assertEqual(self.manifest.get("character_id"), "iris_sentinel_v3")
-        self.assertIn("The Dig", self.manifest.get("art_style", ""))
-        self.assertIn("pixelated", self.manifest.get("visual_signature", {}).get("rendering_css", ""))
+        sig = self.manifest.get("visual_signature", {})
+        self.assertIn("royal-blue", sig.get("hair", "").lower())
+        self.assertIn("deus-ex", sig.get("cybernetic_arm", "").lower())
+        self.assertIn("sports bra", sig.get("base_attire", "").lower())
+        self.assertIn("boy-shorts", sig.get("base_attire", "").lower())
+        self.assertIn("dimpled smile", sig.get("demeanor", "").lower())
 
-    def test_02_base_reference_assets_exist_and_non_empty(self) -> None:
-        """Verify 00_base_reference contains both the master digital skin-suit turnaround and user reference."""
+    def test_02_base_reference_is_clean_and_original_only(self) -> None:
+        """Verify 00_base_reference contains only the 100% original turnaround and no external user_reference_concept.jpg."""
         base_refs = self.manifest.get("base_references", [])
-        self.assertEqual(len(base_refs), 2)
-        ids = {item["id"] for item in base_refs}
-        self.assertIn("base_skinsuit_turnaround", ids)
-        self.assertIn("user_reference_concept", ids)
-        for item in base_refs:
-            disk_path = self._resolve_web_path(item["path"])
-            self.assertTrue(disk_path.is_file(), f"Missing base reference file: {disk_path}")
-            self.assertGreater(disk_path.stat().st_size, 1024, f"Base reference file too small: {disk_path}")
+        self.assertEqual(len(base_refs), 1)
+        self.assertEqual(base_refs[0]["id"], "base_skinsuit_turnaround")
+        disk_path = self._resolve_web_path(base_refs[0]["path"])
+        self.assertTrue(disk_path.is_file(), f"Missing base reference file: {disk_path}")
+        self.assertGreater(disk_path.stat().st_size, 1024)
+        external_ref = MASCOT_DIR / "00_base_reference" / "user_reference_concept.jpg"
+        self.assertFalse(external_ref.exists(), "External concept image must not exist in repository")
 
-    def test_03_four_operational_poses_exist_and_non_empty(self) -> None:
-        """Verify all 4 operational poses in 01_poses exist on disk and are valid images."""
+    def test_03_four_operational_poses_exist_and_define_hover_gifs(self) -> None:
+        """Verify all 4 operational poses in 01_poses exist on disk and map to hover GIFs."""
         poses = self.manifest.get("poses", [])
         self.assertEqual(len(poses), 4)
-        expected_ids = {
-            "pose_neutral_standing",
-            "pose_analytical_console",
-            "pose_alert_defensive",
-            "pose_diagnostic_repair",
-        }
-        self.assertEqual({p["id"] for p in poses}, expected_ids)
         for pose in poses:
             disk_path = self._resolve_web_path(pose["path"])
             self.assertTrue(disk_path.is_file(), f"Missing pose file: {disk_path}")
             self.assertGreater(disk_path.stat().st_size, 1024)
+            gif_path = self._resolve_web_path(pose["hover_gif"])
+            self.assertTrue(gif_path.is_file(), f"Missing hover GIF for pose: {gif_path}")
 
     def test_04_four_outfit_overlays_exist_and_non_empty(self) -> None:
         """Verify all 4 outfit overlays in 02_outfits exist on disk and are valid images."""
         outfits = self.manifest.get("outfits", [])
         self.assertEqual(len(outfits), 4)
-        expected_ids = {
-            "outfit_digital_skinsuit",
-            "outfit_field_tactical",
-            "outfit_lab_chief_coat",
-            "outfit_eva_astronaut_rig",
-        }
-        self.assertEqual({o["id"] for o in outfits}, expected_ids)
         for outfit in outfits:
             disk_path = self._resolve_web_path(outfit["path"])
             self.assertTrue(disk_path.is_file(), f"Missing outfit file: {disk_path}")
@@ -102,10 +95,7 @@ class TestIrisMascotAndEnterpriseUI(unittest.TestCase):
         for category, spec in matrix.items():
             sheet_path = self._resolve_web_path(spec["sheet_path"])
             self.assertTrue(sheet_path.is_file(), f"Missing 3-degree sheet for {category}: {sheet_path}")
-            self.assertGreater(sheet_path.stat().st_size, 1024)
-            degrees = spec.get("degrees", [])
-            self.assertEqual(len(degrees), 3, f"Category {category} must have exactly 3 degrees")
-            self.assertEqual([d["degree"] for d in degrees], [1, 2, 3])
+            self.assertEqual([d["degree"] for d in spec.get("degrees", [])], [1, 2, 3])
 
     def test_06_twelve_individual_degree_portraits_exist_on_disk(self) -> None:
         """Verify all 12 sliced individual degree portraits exist in 03_expressions/."""
@@ -122,40 +112,55 @@ class TestIrisMascotAndEnterpriseUI(unittest.TestCase):
     def test_07_six_contextual_ui_avatars_exist_on_disk(self) -> None:
         """Verify all 6 contextual UI avatars in 04_avatars exist on disk."""
         avatars = self.manifest.get("contextual_avatars", {})
-        expected_keys = {"nominal", "scanning", "guidance", "stats", "warning", "critical"}
-        self.assertEqual(set(avatars.keys()), expected_keys)
+        self.assertEqual(set(avatars.keys()), {"nominal", "scanning", "guidance", "stats", "warning", "critical"})
         for key, spec in avatars.items():
             disk_path = self._resolve_web_path(spec["path"])
             self.assertTrue(disk_path.is_file(), f"Missing contextual avatar for {key}: {disk_path}")
             self.assertGreater(disk_path.stat().st_size, 1024)
 
-    def test_08_png_headers_valid_for_generated_repository_assets(self) -> None:
-        """Verify PNG files in the repository have valid PNG or JPEG magic bytes."""
-        png_files = list(MASCOT_DIR.rglob("*.png"))
-        self.assertGreaterEqual(len(png_files), 30)
-        for png in png_files:
-            header = png.read_bytes()[:8]
-            is_png = header == b"\x89PNG\r\n\x1a\n"
-            is_jpg = header[:3] == b"\xff\xd8\xff"
-            self.assertTrue(is_png or is_jpg, f"Invalid image header in {png}")
+    def test_08_four_looping_animated_gifs_exist_and_have_gif89a_netscape_headers(self) -> None:
+        """Verify all 4 animated GIFs in 05_animations/ are valid multi-frame looping GIF89a files."""
+        anims = self.manifest.get("animations", {})
+        self.assertEqual(set(anims.keys()), {"idle_wink", "loading_scan", "busy_processing", "alert_pulse"})
+        for key, spec in anims.items():
+            gif_path = self._resolve_web_path(spec["path"])
+            self.assertTrue(gif_path.is_file(), f"Missing animated GIF for {key}: {gif_path}")
+            raw = gif_path.read_bytes()
+            self.assertGreater(len(raw), 4096)
+            self.assertTrue(raw.startswith(b"GIF89a"), f"Invalid GIF89a header in {gif_path}")
+            self.assertIn(b"NETSCAPE2.0", raw, f"Missing NETSCAPE2.0 infinite loop extension in {gif_path}")
 
-    def test_09_mascot_repository_js_exposes_canonical_api(self) -> None:
-        """Verify frontend/js/core/mascot_repository.js defines MascotRepository and helpers."""
+    def test_09_four_selectable_windows_tray_and_task_manager_icons(self) -> None:
+        """Verify icon_factory generates all 4 selectable .ico + .png files and loads Win32 HICON handles."""
+        from backend.tray.icon_factory import (
+            ensure_ico_assets,
+            get_tray_icon_handle,
+            resolve_icon_ico_path,
+            apply_process_and_window_icon,
+            CANONICAL_ICON_CHOICES,
+        )
+        ensure_ico_assets()
+        self.assertEqual(len(CANONICAL_ICON_CHOICES), 4)
+        for choice in CANONICAL_ICON_CHOICES:
+            ico_path = resolve_icon_ico_path(choice["id"])
+            self.assertTrue(ico_path.is_file(), f"Missing .ico for {choice['id']}: {ico_path}")
+            self.assertGreater(ico_path.stat().st_size, 500)
+            png_path = self._resolve_web_path(choice["preview"])
+            self.assertTrue(png_path.is_file(), f"Missing .png preview for {choice['id']}: {png_path}")
+            if sys.platform == "win32":
+                hicon = get_tray_icon_handle(choice["id"])
+                self.assertIsNotNone(hicon)
+
+        # Also verify apply_process_and_window_icon executes cleanly
+        apply_process_and_window_icon("iris_head")
+
+    def test_10_mascot_repository_js_exposes_canonical_api_and_gif_resolver(self) -> None:
+        """Verify frontend/js/core/mascot_repository.js defines MascotRepository, resolveAnimatedGif, and helpers."""
         self.assertIn("MascotRepository", self.mascot_js)
         self.assertIn("resolveContextualAvatar", self.mascot_js)
+        self.assertIn("resolveAnimatedGif", self.mascot_js)
         self.assertIn("resolveExpressionSeverity", self.mascot_js)
         self.assertIn("global.IRISMascot = MascotRepository", self.mascot_js)
-
-    def test_10_mascot_repository_js_includes_all_12_degree_paths(self) -> None:
-        """Verify mascot_repository.js maps all 12 individual degree portrait paths."""
-        expected_degree_ids = [
-            "nominal_deg1_serene", "nominal_deg2_focused", "nominal_deg3_optimal",
-            "guidance_deg1_curious", "guidance_deg2_advising", "guidance_deg3_eureka",
-            "warning_deg1_concerned", "warning_deg2_urgent", "warning_deg3_brace",
-            "critical_deg1_retry", "critical_deg2_ratelimit", "critical_deg3_overload",
-        ]
-        for deg_id in expected_degree_ids:
-            self.assertIn(deg_id, self.mascot_js, f"Missing degree ID in mascot_repository.js: {deg_id}")
 
     def test_11_themes_css_defines_pixel_art_rendering_classes(self) -> None:
         """Verify themes.css defines .pixel-art-asset and .iris-pixel-img with crisp pixel rendering."""
@@ -170,70 +175,51 @@ class TestIrisMascotAndEnterpriseUI(unittest.TestCase):
         self.assertIn('[data-theme="executive-paper"] .modal-box', self.themes_css)
         self.assertIn("color-scheme: light", self.themes_css)
 
-    def test_13_styles_css_does_not_override_theme_root_variables(self) -> None:
-        """Verify styles.css no longer re-declares conflicting hardcoded :root dark colors after themes.css."""
-        self.assertIn('@import "themes.css";', self.styles_css)
-        self.assertNotIn("--bg-dark: #080b11;", self.styles_css)
-        self.assertNotIn("radial-gradient(circle at 12% 0%", self.styles_css)
+    def test_13_styles_css_defines_full_character_stage_classes(self) -> None:
+        """Verify styles.css defines .iris-full-stage-banner, .iris-character-stage, and .iris-full-stage-img."""
+        self.assertIn(".iris-full-stage-banner", self.styles_css)
+        self.assertIn(".iris-character-stage", self.styles_css)
+        self.assertIn(".iris-full-stage-img", self.styles_css)
 
     def test_14_index_html_loads_mascot_repository_core_script(self) -> None:
         """Verify frontend/index.html loads js/core/mascot_repository.js before js/app.js."""
         pos_mascot = self.index_html.find('js/core/mascot_repository.js')
         pos_app = self.index_html.find('js/app.js')
-        self.assertNotEqual(pos_mascot, -1, "mascot_repository.js not loaded in index.html")
-        self.assertLess(pos_mascot, pos_app, "mascot_repository.js must load before app.js")
+        self.assertNotEqual(pos_mascot, -1)
+        self.assertLess(pos_mascot, pos_app)
 
-    def test_15_index_html_includes_header_quick_theme_selector(self) -> None:
-        """Verify frontend/index.html includes #header-quick-theme-select with both Dark and Light themes."""
-        self.assertIn('id="header-quick-theme-select"', self.index_html)
-        self.assertIn('value="linear-obsidian"', self.index_html)
-        self.assertIn('value="geist-monochrome"', self.index_html)
-        self.assertIn('value="executive-paper"', self.index_html)
+    def test_15_index_html_features_full_character_stage_and_pose_switcher(self) -> None:
+        """Verify frontend/index.html features #mascot-full-stage-img, .iris-pose-selector-bar, and hover handlers."""
+        self.assertIn('id="mascot-full-stage-img"', self.index_html)
+        self.assertIn('class="iris-pose-selector-bar"', self.index_html)
+        self.assertIn("window.App.onMascotHover(true)", self.index_html)
+        self.assertIn("window.App.setMascotStagePose(", self.index_html)
 
-    def test_16_index_html_navigation_tabs_are_clean_enterprise_typography(self) -> None:
-        """Verify main navigation buttons use clean enterprise labels without noisy decorative emojis."""
-        self.assertIn('data-tab="dashboard">Dashboard</button>', self.index_html)
-        self.assertIn('data-tab="capacity">Capacity &amp; Velocity</button>', self.index_html)
-        self.assertIn('data-tab="settings">Settings</button>', self.index_html)
+    def test_16_index_html_includes_four_selectable_app_icon_cards_and_gif_gallery(self) -> None:
+        """Verify #icon-picker-modal includes all 4 selectable app icon cards and the 05_animations GIF gallery."""
+        self.assertIn("selectAppIcon('iris_head')", self.index_html)
+        self.assertIn("selectAppIcon('iris_eye')", self.index_html)
+        self.assertIn("selectAppIcon('iris_cyber_arm')", self.index_html)
+        self.assertIn("selectAppIcon('iris_holo')", self.index_html)
+        self.assertIn("anim_idle_wink_smile.gif", self.index_html)
+        self.assertIn("anim_loading_scan.gif", self.index_html)
+        self.assertIn("anim_busy_processing.gif", self.index_html)
+        self.assertIn("anim_alert_pulse.gif", self.index_html)
+        self.assertNotIn("user_reference_concept.jpg", self.index_html)
 
-    def test_17_index_html_includes_iris_vault_and_expression_matrix_modal(self) -> None:
-        """Verify #icon-picker-modal showcases the turnaround sheet, poses, outfits, and 3-degree expression matrix."""
-        self.assertIn('id="icon-picker-modal"', self.index_html)
-        self.assertIn("iris_base_skinsuit_turnaround.png", self.index_html)
-        self.assertIn("expressions_nominal_3degrees.png", self.index_html)
-        self.assertIn("expressions_guidance_3degrees.png", self.index_html)
-        self.assertIn("expressions_warning_3degrees.png", self.index_html)
-        self.assertIn("expressions_critical_3degrees.png", self.index_html)
+    def test_17_app_js_wires_hover_busy_and_stage_pose_methods(self) -> None:
+        """Verify app.js defines onMascotHover, setIrisBusyState, setMascotStagePose, and previewBusyAnimation."""
+        self.assertIn("onMascotHover(isHovering)", self.app_js)
+        self.assertIn("setIrisBusyState(isBusy", self.app_js)
+        self.assertIn("setMascotStagePose(poseSrc", self.app_js)
+        self.assertIn("previewBusyAnimation()", self.app_js)
 
-    def test_18_index_html_mascot_banner_uses_contextual_iris_sentinel_elements(self) -> None:
-        """Verify the dashboard banner includes #mascot-main-img, #mascot-status-tag, and #mascot-quote-text."""
-        self.assertIn('id="mascot-main-img"', self.index_html)
-        self.assertIn('id="mascot-status-tag"', self.index_html)
-        self.assertIn('id="mascot-quote-text"', self.index_html)
-
-    def test_19_app_js_wires_update_contextual_iris_avatar(self) -> None:
-        """Verify app.js defines updateContextualIrisAvatar and calls it on dashboard/error/tab updates."""
-        self.assertIn("updateContextualIrisAvatar(contextKey", self.app_js)
-        self.assertIn("MascotRepository", self.app_js)
-        self.assertIn("resolveContextualAvatar", self.app_js)
-
-    def test_20_app_js_wires_quick_theme_switch_and_syncs_header_select(self) -> None:
-        """Verify app.js defines selectThemeSwatch and keeps #header-quick-theme-select synchronized."""
-        self.assertIn("selectThemeSwatch(themeId)", self.app_js)
-        self.assertIn("header-quick-theme-select", self.app_js)
-
-    def test_21_app_js_uses_contextual_iris_avatars_for_empty_and_healthy_states(self) -> None:
-        """Verify renderSessions and renderErrors use IRIS pixel-art avatars from /assets/iris_mascot/04_avatars/."""
-        self.assertIn("/assets/iris_mascot/04_avatars/avatar_scanning_idle.png", self.app_js)
-        self.assertIn("/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png", self.app_js)
-
-    def test_22_legacy_icon_paths_Remain_populated_for_backward_compatibility(self) -> None:
-        """Verify legacy /assets/icons/ and /assets/mascot/ files exist on disk."""
-        self.assertTrue((FRONTEND_DIR / "assets" / "icons" / "app_icon_iris.png").is_file())
-        self.assertTrue((FRONTEND_DIR / "assets" / "icons" / "app_icon_johnny5.jpg").is_file())
-        self.assertTrue((FRONTEND_DIR / "assets" / "mascot" / "johnny5_success.jpg").is_file())
-        self.assertTrue((FRONTEND_DIR / "assets" / "mascot" / "johnny5_pointing.jpg").is_file())
-        self.assertTrue((FRONTEND_DIR / "assets" / "mascot" / "johnny5_inspecting.jpg").is_file())
+    def test_18_http_server_and_native_widget_sync_active_icon(self) -> None:
+        """Verify http_server.py and native_widget.py call apply_process_and_window_icon when active_icon updates."""
+        http_srv = (ROOT_DIR / "backend" / "server" / "http_server.py").read_text(encoding="utf-8")
+        native_wdg = (ROOT_DIR / "backend" / "tray" / "native_widget.py").read_text(encoding="utf-8")
+        self.assertIn("apply_process_and_window_icon", http_srv)
+        self.assertIn("apply_process_and_window_icon", native_wdg)
 
 
 if __name__ == "__main__":

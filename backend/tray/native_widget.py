@@ -313,6 +313,14 @@ class NativeTaskbarWidget:
                 self.poll_interval_ms = int(max(5000, min(60000, sec * 1000)))
             except Exception:
                 pass
+        if "active_icon" in st and isinstance(st["active_icon"], str):
+            if st["active_icon"] != getattr(self, "active_icon", "iris_head"):
+                self.active_icon = st["active_icon"]
+                try:
+                    from backend.tray.icon_factory import apply_process_and_window_icon
+                    apply_process_and_window_icon(self.active_icon, tk_root=self.root)
+                except Exception:
+                    pass
 
     def _save_settings_async(self, payload: dict):
         def _post():
@@ -332,7 +340,12 @@ class NativeTaskbarWidget:
         import tkinter as tk
 
         self.root = tk.Tk()
-        self.root.title("AI Usage Monitor Taskbar Widget")
+        self.root.title("IRIS Taskbar Sentinel Widget")
+        try:
+            from backend.tray.icon_factory import apply_process_and_window_icon
+            apply_process_and_window_icon(getattr(self, "active_icon", "iris_head"), tk_root=self.root)
+        except Exception:
+            pass
         self.root.overrideredirect(True) # Chromeless
         self.root.attributes("-topmost", True) # Pinned on top
         try:

@@ -2898,6 +2898,7 @@ window.App = {
 
   async syncProvider(provider) {
     try {
+      this.setIrisBusyState(true, "loading", `SYNCING ${(provider || "ALL").toUpperCase()}...`);
       this.cachedHierarchicalTrends = {};
       await fetch("/api/providers/sync", {
         method: "POST",
@@ -2907,6 +2908,8 @@ window.App = {
       await this.loadUsageData();
     } catch (e) {
       console.error("Sync failed:", e);
+    } finally {
+      this.setIrisBusyState(false);
     }
   },
 
@@ -2950,34 +2953,48 @@ window.App = {
   },
 
   // =========================================================================
-  // Icon and Mascot Management
+  // Icon, Full-Character Stage, and Animated GIF Management (v3.1)
   // =========================================================================
+  activeStagePoseSrc: '/assets/iris_mascot/01_poses/pose_neutral_standing.png',
+  activeStagePoseLabel: 'Base: Sports Bra, Boy-Shorts & Cyber Arm',
+  activeStageHoverGif: '/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif',
+  activeContextualAvatarSrc: '/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png',
+  isMascotBusy: false,
+
   applyActiveIcon(iconName) {
-    this.activeIcon = iconName;
+    this.activeIcon = iconName || 'iris_head';
     try {
-      localStorage.setItem("aium_active_icon", iconName);
+      localStorage.setItem("aium_active_icon", this.activeIcon);
     } catch (_) {}
 
     const logoImg = document.getElementById("brand-logo-img");
     const favicon = document.getElementById("app-favicon");
     const mascotMain = document.getElementById("mascot-main-img");
-    let iconSrc = '/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png';
-    if (iconName === 'shield') {
-      iconSrc = '/assets/iris_mascot/04_avatars/avatar_guidance_config.png';
-    } else if (iconName === 'scanning') {
-      iconSrc = '/assets/iris_mascot/04_avatars/avatar_scanning_idle.png';
+
+    let iconSrc = '/assets/icons/app_icon_iris_head.png';
+    let cardId = 'johnny5';
+    if (iconName === 'shield' || iconName === 'iris_cyber_arm') {
+      iconSrc = '/assets/icons/app_icon_iris_cyber_arm.png';
+      cardId = 'shield';
+    } else if (iconName === 'scanning' || iconName === 'iris_eye') {
+      iconSrc = '/assets/icons/app_icon_iris_eye.png';
+      cardId = 'scanning';
+    } else if (iconName === 'holo' || iconName === 'iris_holo') {
+      iconSrc = '/assets/icons/app_icon_iris_holo.png';
+      cardId = 'holo';
     }
 
     if (logoImg) logoImg.src = iconSrc;
     if (favicon) favicon.href = iconSrc;
-    if (mascotMain) mascotMain.src = iconSrc;
+    if (mascotMain && !this.isMascotBusy) {
+      mascotMain.src = this.activeContextualAvatarSrc || '/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png';
+    }
 
-    // Update modal cards
-    const choices = ['johnny5', 'scanning', 'shield'];
+    const choices = ['johnny5', 'scanning', 'shield', 'holo'];
     choices.forEach(c => {
       const card = document.getElementById(`card-choice-${c}`);
       const badge = document.getElementById(`badge-choice-${c}`);
-      const isSelected = (c === iconName) || (c === 'johnny5' && !choices.includes(iconName));
+      const isSelected = (c === cardId);
       if (card) {
         if (isSelected) card.classList.add("selected");
         else card.classList.remove("selected");
@@ -2988,18 +3005,113 @@ window.App = {
     });
   },
 
+  setMascotStagePose(poseSrc, poseLabel, hoverGifSrc, btnEl) {
+    this.activeStagePoseSrc = poseSrc || '/assets/iris_mascot/01_poses/pose_neutral_standing.png';
+    this.activeStagePoseLabel = poseLabel || 'Base: Sports Bra, Boy-Shorts & Cyber Arm';
+    this.activeStageHoverGif = hoverGifSrc || '/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif';
+
+    const stageImg = document.getElementById("mascot-full-stage-img");
+    const stageLbl = document.getElementById("iris-stage-pose-label");
+    if (stageImg) stageImg.src = this.activeStagePoseSrc;
+    if (stageLbl) stageLbl.innerText = this.activeStagePoseLabel;
+
+    document.querySelectorAll(".iris-pose-btn").forEach(btn => {
+      if (btnEl && btn === btnEl) btn.classList.add("active");
+      else if (!btnEl && btn.getAttribute("data-pose") === this.activeStagePoseSrc) btn.classList.add("active");
+      else btn.classList.remove("active");
+    });
+  },
+
+  cycleMascotPose() {
+    const poseButtons = Array.from(document.querySelectorAll(".iris-pose-btn"));
+    if (!poseButtons.length) return;
+    const currentIdx = poseButtons.findIndex(b => b.classList.contains("active"));
+    const nextBtn = poseButtons[(currentIdx + 1) % poseButtons.length];
+    if (nextBtn) nextBtn.click();
+  },
+
+  onMascotHover(isHovering) {
+    if (this.isMascotBusy) return;
+    const stageImg = document.getElementById("mascot-full-stage-img");
+    const mascotMain = document.getElementById("mascot-main-img");
+    const animPill = document.getElementById("iris-anim-state-pill");
+
+    if (isHovering) {
+      if (stageImg && this.activeStageHoverGif) {
+        stageImg.src = this.activeStageHoverGif;
+      }
+      if (mascotMain) {
+        mascotMain.src = '/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif';
+      }
+      if (animPill) {
+        animPill.innerText = "ANIMATING (HOVER)";
+      }
+    } else {
+      if (stageImg) {
+        stageImg.src = this.activeStagePoseSrc || '/assets/iris_mascot/01_poses/pose_neutral_standing.png';
+      }
+      if (mascotMain) {
+        mascotMain.src = this.activeContextualAvatarSrc || '/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png';
+      }
+      if (animPill) {
+        animPill.innerText = "HOVER GIF READY";
+      }
+    }
+  },
+
+  restoreMascotAvatar() {
+    if (this.isMascotBusy) return;
+    const mascotMain = document.getElementById("mascot-main-img");
+    if (mascotMain) {
+      mascotMain.src = this.activeContextualAvatarSrc || '/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png';
+    }
+  },
+
+  setIrisBusyState(isBusy, mode = "loading", customStatus = "") {
+    this.isMascotBusy = !!isBusy;
+    const stageImg = document.getElementById("mascot-full-stage-img");
+    const mascotMain = document.getElementById("mascot-main-img");
+    const statusTag = document.getElementById("mascot-status-tag");
+    const animPill = document.getElementById("iris-anim-state-pill");
+
+    if (isBusy) {
+      const repo = window.AIUMCore && window.AIUMCore.MascotRepository;
+      const gifPath = repo ? repo.resolveAnimatedGif(mode) : '/assets/iris_mascot/05_animations/anim_loading_scan.gif';
+      if (stageImg) stageImg.src = gifPath;
+      if (mascotMain) mascotMain.src = '/assets/iris_mascot/05_animations/anim_idle_wink_smile.gif';
+      if (statusTag && customStatus) statusTag.innerText = customStatus;
+      if (animPill) animPill.innerText = mode === "busy" ? "CALIBRATING (GIF)" : "SCANNING (GIF)";
+    } else {
+      if (stageImg) stageImg.src = this.activeStagePoseSrc || '/assets/iris_mascot/01_poses/pose_neutral_standing.png';
+      if (mascotMain) mascotMain.src = this.activeContextualAvatarSrc || '/assets/iris_mascot/04_avatars/avatar_nominal_healthy.png';
+      if (animPill) animPill.innerText = "HOVER GIF READY";
+    }
+  },
+
+  previewBusyAnimation() {
+    this.setIrisBusyState(true, "busy", "CALIBRATING NODES & TELEMETRY...");
+    if (this._busyPreviewTimer) clearTimeout(this._busyPreviewTimer);
+    this._busyPreviewTimer = setTimeout(() => {
+      this.setIrisBusyState(false);
+    }, 3600);
+  },
+
   updateContextualIrisAvatar(contextKey, statusLabel, briefText) {
     const repo = window.AIUMCore && window.AIUMCore.MascotRepository;
     const avatarObj = repo
       ? repo.resolveContextualAvatar(contextKey)
       : { path: `/assets/iris_mascot/04_avatars/avatar_${contextKey || 'nominal'}_healthy.png`, badge_text: statusLabel || "SYSTEM NOMINAL" };
 
+    if (avatarObj && avatarObj.path) {
+      this.activeContextualAvatarSrc = avatarObj.path;
+    }
+
     const mascotImg = document.getElementById("mascot-main-img");
-    if (mascotImg && avatarObj.path) {
+    if (mascotImg && avatarObj.path && !this.isMascotBusy) {
       mascotImg.src = avatarObj.path;
     }
     const statusTag = document.getElementById("mascot-status-tag");
-    if (statusTag) {
+    if (statusTag && !this.isMascotBusy) {
       statusTag.innerText = statusLabel || avatarObj.badge_text || "SYSTEM NOMINAL";
     }
     const quoteEl = document.getElementById("mascot-quote-text");
